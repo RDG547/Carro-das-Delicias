@@ -68,17 +68,11 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _produtos = [];
   List<Map<String, dynamic>> _categorias = [];
   bool _isLoading = true;
-  final _isLoadingMoreNotifier = ValueNotifier<bool>(false);
   bool _isAdmin = false;
   bool _isOfflineMode = false;
   bool _adminStatusChecked = false;
   bool _hasScrolledDown = false; // Flag para controlar primeira rolagem
   final _favoritesService = FavoritesService();
-
-  // Paginação
-  static const int _pageSize = 20;
-  int _currentPage = 0;
-  bool _hasMoreProducts = true;
 
   // Getter para categorias com favoritos dinâmico
   List<Map<String, dynamic>> get _categoriasComFavoritos {
@@ -148,7 +142,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _categorias = [];
         _produtos = [];
         _isLoading = false;
-        _hasMoreProducts = false;
         _isOfflineMode = true;
       });
 
@@ -380,85 +373,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> _loadMoreProducts() async {
-    // Verificações mais rigorosas para evitar múltiplas chamadas
-    if (_isLoadingMoreNotifier.value ||
-        !_hasMoreProducts ||
-        _isLoading ||
-        _isOfflineMode) {
-      return;
-    }
-
-    // Verificar se realmente está próximo do final
-    if (!_scrollController.hasClients ||
-        _scrollController.position.pixels <
-            _scrollController.position.maxScrollExtent * 0.7) {
-      return;
-    }
-
-    // Salvar posição atual do scroll antes de começar
-    final currentScrollPosition = _scrollController.position.pixels;
-
-    setState(() {
-      _isLoadingMoreNotifier.value = true;
-    });
-
-    try {
-      final supabase = Supabase.instance.client;
-      final offset = (_currentPage + 1) * _pageSize;
-
-      final moreProducts = await supabase
-          .from('produtos')
-          .select('''
-            *,
-            categorias!inner(
-              id,
-              nome,
-              icone
-            )
-          ''')
-          .eq('ativo', true)
-          .order('created_at', ascending: false)
-          .range(offset, offset + _pageSize - 1);
-
-      if (moreProducts.isNotEmpty) {
-        final processedProducts = moreProducts.map<Map<String, dynamic>>((
-          produto,
-        ) {
-          final categoria = produto['categorias'];
-          return {
-            ...produto,
-            'categoria_nome': categoria['nome'],
-            'categoria_icone': categoria['icone'],
-          };
-        }).toList();
-
-        setState(() {
-          _produtos.addAll(processedProducts);
-          _currentPage++;
-          _hasMoreProducts = moreProducts.length == _pageSize;
-          _cachedFilteredProducts = null; // Invalidar cache
-        });
-
-        _isLoadingMoreNotifier.value = false;
-
-        // Restaurar posição do scroll após o rebuild
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients && mounted) {
-            _scrollController.jumpTo(currentScrollPosition);
-          }
-        });
-      } else {
-        setState(() {
-          _hasMoreProducts = false;
-        });
-        _isLoadingMoreNotifier.value = false;
-      }
-    } catch (e) {
-      _isLoadingMoreNotifier.value = false;
-    }
-  }
-
   void _onSearchChanged() {
     // Cancelar timer anterior se existir
     _searchDebounce?.cancel();
@@ -481,8 +395,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       _isLoading = true;
-      _currentPage = 0;
-      _hasMoreProducts = true;
       _produtos.clear(); // Limpar produtos existentes
       _cachedFilteredProducts = null; // Invalidar cache
     });
@@ -535,7 +447,7 @@ class _HomeScreenState extends State<HomeScreen> {
             }),
       );
 
-      // 3. Carregar produtos com categoria (com fallback mais robusto)
+      // 3. Carregar todos os produtos com categoria (sem paginação)
       futures.add(
         supabase
             .from('produtos')
@@ -549,7 +461,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ''')
             .eq('ativo', true)
             .order('created_at', ascending: false)
-            .range(0, _pageSize - 1)
             .then((data) => data as List<dynamic>)
             .catchError((e) {
               _debugLog('⚠️ Erro ao carregar produtos: $e');
@@ -668,7 +579,6 @@ class _HomeScreenState extends State<HomeScreen> {
           _categorias = [];
           _produtos = [];
           _isLoading = false;
-          _hasMoreProducts = false;
           _isOfflineMode = true;
         });
 
@@ -699,7 +609,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Método de refresh que recarrega completamente os dados
   Future<void> _refreshData() async {
     // Só fazer refresh se não estiver carregando
-    if (_isLoading || _isLoadingMoreNotifier.value) {
+    if (_isLoading) {
       return;
     }
 
@@ -845,21 +755,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 // Marcar que o usuário já rolou a tela (sem setState para evitar rebuild)
                 if (scrollInfo.metrics.pixels > 100 && !_hasScrolledDown) {
                   _hasScrolledDown = true;
-                }
-
-                // Só carregar mais produtos se:
-                // 1. Não estiver carregando mais produtos
-                // 2. Ainda há mais produtos para carregar
-                // 3. Está próximo do final (85%)
-                // 4. É uma atualização de scroll (não apenas notificação de término)
-                if (scrollInfo is ScrollUpdateNotification &&
-                    !_isLoadingMoreNotifier.value &&
-                    _hasMoreProducts &&
-                    !_isLoading &&
-                    scrollInfo.metrics.pixels > 0 &&
-                    scrollInfo.metrics.pixels >=
-                        scrollInfo.metrics.maxScrollExtent * 0.85) {
-                  _loadMoreProducts();
                 }
                 return false; // Permitir que outras notificações continuem
               },
@@ -1186,27 +1081,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                         }, childCount: _filteredProducts.length),
                                       );
                               },
-                            );
-                          },
-                        ),
-
-                        // Indicador de carregamento para lazy loading
-                        ValueListenableBuilder<bool>(
-                          valueListenable: _isLoadingMoreNotifier,
-                          builder: (context, isLoadingMore, _) {
-                            if (!isLoadingMore) {
-                              return const SliverToBoxAdapter();
-                            }
-
-                            return const SliverToBoxAdapter(
-                              child: Padding(
-                                padding: EdgeInsets.all(16.0),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    color: Colors.black,
-                                  ),
-                                ),
-                              ),
                             );
                           },
                         ),

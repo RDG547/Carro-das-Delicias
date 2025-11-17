@@ -1,0 +1,52 @@
+workflows:
+  android-workflow:
+    name: Android Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      android_signing:
+        - carrodasdelicias_keystore
+      groups:
+        - google_play
+      vars:
+        PACKAGE_NAME: "com.rdtech.carrodasdelicias"
+      java: 21
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $FLUTTER_ROOT/.pub-cache
+        - $HOME/Library/Caches/CocoaPods
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Flutter analyze
+        script: |
+          flutter analyze
+        ignore_failure: true
+      - name: Flutter test
+        script: |
+          flutter test
+        ignore_failure: true
+      - name: Build AAB with Gradle
+        script: |
+          cd android
+          ./gradlew bundleRelease --no-daemon --stacktrace
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/*.apk
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - rdg547@example.com
+        notify:
+          success: true
+          failure: true
