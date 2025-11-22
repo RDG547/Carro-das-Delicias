@@ -32,10 +32,9 @@ workflows:
       - name: Flutter test
         script: |
           flutter test
-      - name: Build AAB with Gradle
+      - name: Build Android Release
         script: |
-          cd android
-          ./gradlew bundleRelease --no-daemon --stacktrace
+          flutter build appbundle --release
     artifacts:
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/*.apk
