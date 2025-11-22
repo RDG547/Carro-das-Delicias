@@ -39,11 +39,24 @@ android {
         manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = "pk.eyJ1IjoicmRnNTQ3IiwiYSI6ImNtaHNmY21zdDFpbXcyanB6N2w0Y2NyeWYifQ.RAwJc13MPekGYnD6js9g2A"
     }
 
+    signingConfigs {
+        create("release") {
+            if (System.getenv("CM_KEYSTORE_PATH") != null) {
+                storeFile = file(System.getenv("CM_KEYSTORE_PATH"))
+                storePassword = System.getenv("CM_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("CM_KEY_ALIAS")
+                keyPassword = System.getenv("CM_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (System.getenv("CM_KEYSTORE_PATH") != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
@@ -57,12 +70,18 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
 
-// Workaround: Copy APK to expected Flutter location
+// Workaround: Copy APK and AAB to expected Flutter location
 afterEvaluate {
     tasks.register<Copy>("copyApkToFlutterLocation") {
         from("${layout.buildDirectory.get()}/outputs/flutter-apk")
         into("${project.rootDir}/../build/app/outputs/flutter-apk")
         include("*.apk")
+    }
+
+    tasks.register<Copy>("copyAabToFlutterLocation") {
+        from("${layout.buildDirectory.get()}/outputs/bundle")
+        into("${project.rootDir}/../build/app/outputs/bundle")
+        include("**/*.aab")
     }
 
     tasks.named("assembleDebug") {
@@ -71,5 +90,13 @@ afterEvaluate {
 
     tasks.named("assembleRelease") {
         finalizedBy("copyApkToFlutterLocation")
+    }
+
+    tasks.named("bundleDebug") {
+        finalizedBy("copyAabToFlutterLocation")
+    }
+
+    tasks.named("bundleRelease") {
+        finalizedBy("copyAabToFlutterLocation")
     }
 }
