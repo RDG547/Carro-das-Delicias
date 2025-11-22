@@ -29,11 +29,9 @@ workflows:
       - name: Flutter analyze
         script: |
           flutter analyze
-        ignore_failure: true
       - name: Flutter test
         script: |
           flutter test
-        ignore_failure: true
       - name: Build AAB with Gradle
         script: |
           cd android
