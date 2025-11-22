@@ -1163,10 +1163,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         // Salvar total antes de limpar o carrinho
         final totalPedido = _cartService.total;
 
-        // Limpar carrinho
+        // Limpar carrinho após criar pedido
         await _cartService.clearCart();
 
-        // Mostrar diálogo de sucesso com o total correto
+        if (!mounted) return;
+
+        // Mostrar mensagem de sucesso
         _showSuccessDialog(response, totalPedido);
       }
     } catch (e) {

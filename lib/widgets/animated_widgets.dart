@@ -668,7 +668,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
           // Criar produto com tamanho selecionado
           final produtoComTamanho = Map<String, dynamic>.from(widget.produto);
           produtoComTamanho['preco'] = selectedSize['preco'];
-          produtoComTamanho['tamanho_selecionado'] = selectedSize;
+          produtoComTamanho['tamanho_selecionado'] = selectedSize['nome'];
 
           debugPrint(
             '🛒 Comprando produto com tamanho: ${selectedSize['nome']}',
@@ -766,7 +766,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
           // Criar produto com tamanho selecionado
           final produtoComTamanho = Map<String, dynamic>.from(widget.produto);
           produtoComTamanho['preco'] = selectedSize['preco'];
-          produtoComTamanho['tamanho_selecionado'] = selectedSize;
+          produtoComTamanho['tamanho_selecionado'] = selectedSize['nome'];
 
           // Capturar ScaffoldMessenger ANTES do await
           final messenger = ScaffoldMessenger.of(context);

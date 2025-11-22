@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/base_screen.dart';
 import '../providers/admin_status_provider.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/main_navigation_provider.dart';
 import '../services/cart_service.dart';
 import 'product_detail_screen.dart';
 
@@ -73,8 +74,16 @@ class _DescontosScreenState extends State<DescontosScreen> {
 
   void _goToHome() {
     debugPrint('🔙 Botão de voltar pressionado na tela de descontos');
-    // Pop até a primeira rota OU apenas um pop se já estiver próximo
-    Navigator.of(context).pop();
+    // Navega de volta para Home usando MainNavigationProvider
+    final provider = MainNavigationProvider.of(context);
+    if (provider?.navigateToPage != null) {
+      provider!.navigateToPage!(0); // Índice 0 = Início
+    } else {
+      // Fallback: se não houver provider, tenta pop
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    }
   }
 
   void _navigateToProductDetail(Map<String, dynamic> produto) {

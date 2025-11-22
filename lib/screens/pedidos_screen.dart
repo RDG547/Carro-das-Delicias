@@ -79,16 +79,30 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
         final itens = (itensResponse as List).map<Map<String, dynamic>>((item) {
           final produto = item['produtos'];
-          debugPrint('🔍 Real-time item completo: $item');
-          debugPrint('🔍 Real-time tamanho: ${item['tamanho_selecionado']}');
-          debugPrint('🔍 Real-time chaves: ${item.keys.toList()}');
+          final tamanhoRaw = item['tamanho_selecionado'];
+          String? tamanhoFormatado;
+
+          if (tamanhoRaw != null) {
+            try {
+              // Se for um Map, extrair o nome
+              if (tamanhoRaw is Map) {
+                tamanhoFormatado = tamanhoRaw['nome']?.toString();
+              } else {
+                // Se for String, usar direto
+                tamanhoFormatado = tamanhoRaw.toString();
+              }
+            } catch (e) {
+              debugPrint('Erro ao processar tamanho: $e');
+            }
+          }
+
           return {
             'nome': produto?['nome'] ?? 'Produto não encontrado',
             'quantidade': item['quantidade'],
             'preco': item['preco_unitario'],
             'subtotal': item['subtotal'],
             'observacoes': item['observacoes'],
-            'tamanho': item['tamanho_selecionado'],
+            'tamanho': tamanhoFormatado,
           };
         }).toList();
 
@@ -154,18 +168,30 @@ class _PedidosScreenState extends State<PedidosScreen> {
         final itens = (pedido['pedido_itens'] as List)
             .map<Map<String, dynamic>>((item) {
               final produto = item['produtos'];
-              debugPrint('🔍 Item completo do banco: $item');
-              debugPrint(
-                '🔍 Tamanho selecionado: ${item['tamanho_selecionado']}',
-              );
-              debugPrint('🔍 Chaves disponíveis: ${item.keys.toList()}');
+              final tamanhoRaw = item['tamanho_selecionado'];
+              String? tamanhoFormatado;
+
+              if (tamanhoRaw != null) {
+                try {
+                  // Se for um Map, extrair o nome
+                  if (tamanhoRaw is Map) {
+                    tamanhoFormatado = tamanhoRaw['nome']?.toString();
+                  } else {
+                    // Se for String, usar direto
+                    tamanhoFormatado = tamanhoRaw.toString();
+                  }
+                } catch (e) {
+                  debugPrint('Erro ao processar tamanho: $e');
+                }
+              }
+
               return {
                 'nome': produto?['nome'] ?? 'Produto não encontrado',
                 'quantidade': item['quantidade'],
                 'preco': item['preco_unitario'],
                 'subtotal': item['subtotal'],
                 'observacoes': item['observacoes'],
-                'tamanho': item['tamanho_selecionado'],
+                'tamanho': tamanhoFormatado,
               };
             })
             .toList();
@@ -304,8 +330,16 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   void _goToHome() {
     debugPrint('🔙 Botão de voltar pressionado na tela de pedidos');
-    // Pop até a primeira rota OU apenas um pop se já estiver próximo
-    Navigator.of(context).pop();
+    // Navega de volta para Home usando MainNavigationProvider
+    final provider = MainNavigationProvider.of(context);
+    if (provider?.navigateToPage != null) {
+      provider!.navigateToPage!(0); // Índice 0 = Início
+    } else {
+      // Fallback: se não houver provider, tenta pop
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    }
   }
 
   Future<void> _cancelarPedido(Map<String, dynamic> pedido) async {
@@ -688,6 +722,19 @@ class _PedidosScreenState extends State<PedidosScreen> {
                               ) {
                                 final item = pedido['itens'][itemIndex];
                                 final tamanho = item['tamanho'];
+                                // Extrai o nome do tamanho se for um objeto/map
+                                String? tamanhoTexto;
+                                if (tamanho != null) {
+                                  if (tamanho is Map) {
+                                    tamanhoTexto =
+                                        tamanho['nome']?.toString() ??
+                                        tamanho['name']?.toString();
+                                  } else if (tamanho is String &&
+                                      tamanho.isNotEmpty) {
+                                    tamanhoTexto = tamanho;
+                                  }
+                                }
+
                                 return Padding(
                                   padding: const EdgeInsets.only(bottom: 4),
                                   child: Row(
@@ -704,10 +751,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                                 text:
                                                     '${item['quantidade']}x ${item['nome']}',
                                               ),
-                                              if (tamanho != null &&
-                                                  tamanho.toString().isNotEmpty)
+                                              if (tamanhoTexto != null)
                                                 TextSpan(
-                                                  text: ' ($tamanho)',
+                                                  text: ' ($tamanhoTexto)',
                                                   style: TextStyle(
                                                     fontWeight: FontWeight.bold,
                                                     color: Colors.purple[700],
