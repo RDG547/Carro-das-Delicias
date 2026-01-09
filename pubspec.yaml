@@ -44,6 +44,7 @@ dependencies:
   geolocator: ^14.0.0
   mapbox_maps_flutter: ^2.3.0
   http: ^1.6.0
+  webview_flutter: ^4.10.0
 
 
   # Tempo real e estado
