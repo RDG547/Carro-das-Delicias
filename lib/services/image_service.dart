@@ -110,6 +110,29 @@ class ImageService {
     }
   }
 
+  /// Selecionar múltiplas imagens da galeria
+  static Future<List<File>> pickMultipleImagesFromGallery() async {
+    try {
+      debugPrint('📸 Abrindo galeria para seleção múltipla...');
+      final List<XFile> images = await _picker.pickMultiImage(
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 80,
+      );
+
+      if (images.isNotEmpty) {
+        debugPrint('📸 ${images.length} imagens selecionadas da galeria');
+        return images.map((xFile) => File(xFile.path)).toList();
+      }
+
+      debugPrint('📸 Nenhuma imagem foi selecionada da galeria');
+      return [];
+    } catch (e) {
+      debugPrint('❌ Erro ao selecionar imagens: $e');
+      return [];
+    }
+  }
+
   /// Tirar foto com a câmera
   static Future<File?> pickImageFromCamera() async {
     try {
@@ -215,6 +238,37 @@ class ImageService {
       fileName: fileName,
       onProgress: onProgress,
     );
+  }
+
+  /// Upload de múltiplas imagens de produto
+  static Future<List<String>> uploadMultipleProductImages({
+    required List<File> imageFiles,
+    required int productId,
+    Function(int current, int total)? onProgress,
+  }) async {
+    final List<String> uploadedUrls = [];
+
+    for (int i = 0; i < imageFiles.length; i++) {
+      final fileName =
+          'product_${productId}_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+
+      final imageUrl = await uploadImage(
+        imageFile: imageFiles[i],
+        bucketName: 'produtos',
+        fileName: fileName,
+      );
+
+      if (imageUrl != null) {
+        uploadedUrls.add(imageUrl);
+      }
+
+      onProgress?.call(i + 1, imageFiles.length);
+    }
+
+    debugPrint(
+      '✅ ${uploadedUrls.length} de ${imageFiles.length} imagens carregadas com sucesso',
+    );
+    return uploadedUrls;
   }
 
   /// Upload de imagem de perfil com deleção da anterior

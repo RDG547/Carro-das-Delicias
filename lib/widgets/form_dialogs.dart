@@ -440,40 +440,12 @@ class _AddProductDialogState extends State<AddProductDialog> {
       content: SizedBox(
         width: MediaQuery.of(context).size.width * 0.9,
         child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Nome do produto
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.green[200]!),
-                ),
-                child: TextField(
-                  controller: _nomeController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nome do Produto *',
-                    labelStyle: TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    prefixIcon: Icon(Icons.shopping_bag, color: Colors.green),
-                    hintText: 'Digite o nome do produto',
-                    hintStyle: TextStyle(color: Colors.grey),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.all(16),
-                    helperText: 'Obrigatório',
-                    helperStyle: TextStyle(color: Colors.green),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Campo de Preço (condicional baseado em desconto e tamanhos)
-              // Não mostrar se tem múltiplos tamanhos ativado
-              if (!_hasMultipleSizes && !_isComDesconto)
+          child: RepaintBoundary(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Nome do produto
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.green[50],
@@ -481,17 +453,15 @@ class _AddProductDialogState extends State<AddProductDialog> {
                     border: Border.all(color: Colors.green[200]!),
                   ),
                   child: TextField(
-                    controller: _precoController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [CurrencyInputFormatter()],
+                    controller: _nomeController,
                     decoration: const InputDecoration(
-                      labelText: 'Preço *',
+                      labelText: 'Nome do Produto *',
                       labelStyle: TextStyle(
                         color: Colors.green,
                         fontWeight: FontWeight.w600,
                       ),
-                      prefixIcon: Icon(Icons.attach_money, color: Colors.green),
-                      hintText: 'R\$ 0,00',
+                      prefixIcon: Icon(Icons.shopping_bag, color: Colors.green),
+                      hintText: 'Digite o nome do produto',
                       hintStyle: TextStyle(color: Colors.grey),
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.all(16),
@@ -500,267 +470,277 @@ class _AddProductDialogState extends State<AddProductDialog> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 16),
 
-              // Campos de Desconto (quando ativado e não tem múltiplos tamanhos)
-              if (!_hasMultipleSizes && _isComDesconto) ...[
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.orange[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.orange[200]!),
-                  ),
-                  child: TextField(
-                    controller: _precoAnteriorController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [CurrencyInputFormatter()],
-                    decoration: const InputDecoration(
-                      labelText: 'Preço Anterior *',
-                      labelStyle: TextStyle(
-                        color: Colors.orange,
-                        fontWeight: FontWeight.w600,
+                // Campo de Preço (condicional baseado em desconto e tamanhos)
+                // Não mostrar se tem múltiplos tamanhos ativado
+                if (!_hasMultipleSizes && !_isComDesconto)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green[200]!),
+                    ),
+                    child: TextField(
+                      controller: _precoController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [CurrencyInputFormatter()],
+                      decoration: const InputDecoration(
+                        labelText: 'Preço *',
+                        labelStyle: TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.attach_money,
+                          color: Colors.green,
+                        ),
+                        hintText: 'R\$ 0,00',
+                        hintStyle: TextStyle(color: Colors.grey),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(16),
+                        helperText: 'Obrigatório',
+                        helperStyle: TextStyle(color: Colors.green),
                       ),
-                      prefixIcon: Icon(Icons.money_off, color: Colors.orange),
-                      hintText: 'R\$ 0,00',
-                      hintStyle: TextStyle(color: Colors.grey),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.all(16),
-                      helperText: 'Preço original sem desconto',
-                      helperStyle: TextStyle(color: Colors.orange),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
+
+                // Campos de Desconto (quando ativado e não tem múltiplos tamanhos)
+                if (!_hasMultipleSizes && _isComDesconto) ...[
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.orange[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange[200]!),
+                    ),
+                    child: TextField(
+                      controller: _precoAnteriorController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [CurrencyInputFormatter()],
+                      decoration: const InputDecoration(
+                        labelText: 'Preço Anterior *',
+                        labelStyle: TextStyle(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        prefixIcon: Icon(Icons.money_off, color: Colors.orange),
+                        hintText: 'R\$ 0,00',
+                        hintStyle: TextStyle(color: Colors.grey),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(16),
+                        helperText: 'Preço original sem desconto',
+                        helperStyle: TextStyle(color: Colors.orange),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green[200]!),
+                    ),
+                    child: TextField(
+                      controller: _precoComDescontoController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [CurrencyInputFormatter()],
+                      decoration: const InputDecoration(
+                        labelText: 'Preço com Desconto *',
+                        labelStyle: TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.local_offer,
+                          color: Colors.green,
+                        ),
+                        hintText: 'R\$ 0,00',
+                        hintStyle: TextStyle(color: Colors.grey),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(16),
+                        helperText: 'Preço promocional',
+                        helperStyle: TextStyle(color: Colors.green),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+
+                // Categoria
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.green[50],
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.green[200]!),
                   ),
-                  child: TextField(
-                    controller: _precoComDescontoController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [CurrencyInputFormatter()],
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedCategoryId,
                     decoration: const InputDecoration(
-                      labelText: 'Preço com Desconto *',
+                      labelText: 'Categoria *',
                       labelStyle: TextStyle(
                         color: Colors.green,
                         fontWeight: FontWeight.w600,
                       ),
-                      prefixIcon: Icon(Icons.local_offer, color: Colors.green),
-                      hintText: 'R\$ 0,00',
-                      hintStyle: TextStyle(color: Colors.grey),
+                      prefixIcon: Icon(Icons.category, color: Colors.green),
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.all(16),
-                      helperText: 'Preço promocional',
+                      helperText: 'Obrigatório',
                       helperStyle: TextStyle(color: Colors.green),
                     ),
+                    items: widget.categorias.map((categoria) {
+                      return DropdownMenuItem<String>(
+                        value: categoria['id'].toString(),
+                        child: Row(
+                          children: [
+                            Text(
+                              categoria['icone'] ?? '📦',
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(categoria['nome']),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedCategoryId = value;
+                      });
+                    },
                   ),
                 ),
-              ],
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-              // Categoria
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.green[200]!),
-                ),
-                child: DropdownButtonFormField<String>(
-                  initialValue: _selectedCategoryId,
-                  decoration: const InputDecoration(
-                    labelText: 'Categoria *',
-                    labelStyle: TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    prefixIcon: Icon(Icons.category, color: Colors.green),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.all(16),
-                    helperText: 'Obrigatório',
-                    helperStyle: TextStyle(color: Colors.green),
-                  ),
-                  items: widget.categorias.map((categoria) {
-                    return DropdownMenuItem<String>(
-                      value: categoria['id'].toString(),
-                      child: Row(
-                        children: [
-                          Text(
-                            categoria['icone'] ?? '📦',
-                            style: const TextStyle(fontSize: 16),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(categoria['nome']),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
+                // Switch para campos opcionais
+                GestureDetector(
+                  onTap: () {
                     setState(() {
-                      _selectedCategoryId = value;
+                      _showOptionalFields = !_showOptionalFields;
                     });
                   },
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Switch para campos opcionais
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _showOptionalFields = !_showOptionalFields;
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue[100]!),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _showOptionalFields
-                            ? Icons.expand_less
-                            : Icons.expand_more,
-                        color: Colors.blue,
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Campos Opcionais',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.blue[100]!),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _showOptionalFields
+                              ? Icons.expand_less
+                              : Icons.expand_more,
                           color: Colors.blue,
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              if (_showOptionalFields) ...[
-                const SizedBox(height: 16),
-
-                // Descrição
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[300]!),
-                  ),
-                  child: TextField(
-                    controller: _descricaoController,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      labelText: 'Descrição',
-                      labelStyle: TextStyle(
-                        color: Colors.black87,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.description,
-                        color: Colors.black54,
-                      ),
-                      hintText: 'Descreva o produto...',
-                      hintStyle: TextStyle(color: Colors.grey),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.all(16),
-                      helperText: 'Opcional',
-                      helperStyle: TextStyle(color: Colors.black54),
+                        const SizedBox(width: 12),
+                        const Text(
+                          'Campos Opcionais',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.blue,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
 
-                // Upload de Imagem
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[300]!),
-                  ),
-                  child: Column(
-                    children: [
-                      // Preview da imagem
-                      if (_selectedImage != null || _uploadedImageUrl != null)
-                        Container(
-                          width: double.infinity,
-                          height: 200,
-                          margin: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey[300]!),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: _selectedImage != null
-                                ? Image.file(_selectedImage!, fit: BoxFit.cover)
-                                : _uploadedImageUrl != null
-                                ? Image.network(
-                                    _uploadedImageUrl!,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return const Center(
-                                        child: Icon(Icons.error, size: 50),
-                                      );
-                                    },
-                                  )
-                                : null,
-                          ),
+                if (_showOptionalFields) ...[
+                  const SizedBox(height: 16),
+
+                  // Descrição
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: TextField(
+                      controller: _descricaoController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Descrição',
+                        labelStyle: TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w500,
                         ),
+                        prefixIcon: Icon(
+                          Icons.description,
+                          color: Colors.black54,
+                        ),
+                        hintText: 'Descreva o produto...',
+                        hintStyle: TextStyle(color: Colors.grey),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(16),
+                        helperText: 'Opcional',
+                        helperStyle: TextStyle(color: Colors.black54),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
 
-                      // Botões de ação
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  flex: 2,
-                                  child: ElevatedButton.icon(
-                                    onPressed: _isUploadingImage
-                                        ? null
-                                        : _selectImage,
-                                    icon: _isUploadingImage
-                                        ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : const Icon(
-                                            Icons.photo_library,
-                                            size: 18,
-                                          ),
-                                    label: Text(
-                                      _selectedImage != null
-                                          ? 'Alterar'
-                                          : 'Selecionar',
-                                      style: const TextStyle(fontSize: 13),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blue,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 12,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                if (_selectedImage != null &&
-                                    _uploadedImageUrl == null) ...[
-                                  const SizedBox(width: 8),
+                  // Upload de Imagem
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: Column(
+                      children: [
+                        // Preview da imagem
+                        if (_selectedImage != null || _uploadedImageUrl != null)
+                          Container(
+                            width: double.infinity,
+                            height: 200,
+                            margin: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey[300]!),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: _selectedImage != null
+                                  ? Image.file(
+                                      _selectedImage!,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : _uploadedImageUrl != null
+                                  ? Image.network(
+                                      _uploadedImageUrl!,
+                                      fit: BoxFit.cover,
+                                      cacheWidth: 300,
+                                      cacheHeight: 300,
+                                      filterQuality: FilterQuality.medium,
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                            return const Center(
+                                              child: Icon(
+                                                Icons.error,
+                                                size: 50,
+                                              ),
+                                            );
+                                          },
+                                    )
+                                  : null,
+                            ),
+                          ),
+
+                        // Botões de ação
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
                                   Expanded(
                                     flex: 2,
                                     child: ElevatedButton.icon(
                                       onPressed: _isUploadingImage
                                           ? null
-                                          : _uploadImage,
+                                          : _selectImage,
                                       icon: _isUploadingImage
                                           ? const SizedBox(
                                               width: 16,
@@ -770,15 +750,17 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                               ),
                                             )
                                           : const Icon(
-                                              Icons.cloud_upload,
+                                              Icons.photo_library,
                                               size: 18,
                                             ),
-                                      label: const Text(
-                                        'Enviar',
-                                        style: TextStyle(fontSize: 13),
+                                      label: Text(
+                                        _selectedImage != null
+                                            ? 'Alterar'
+                                            : 'Selecionar',
+                                        style: const TextStyle(fontSize: 13),
                                       ),
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
+                                        backgroundColor: Colors.blue,
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 12,
@@ -787,474 +769,531 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                       ),
                                     ),
                                   ),
-                                ],
-                                if (_selectedImage != null ||
-                                    _uploadedImageUrl != null) ...[
-                                  const SizedBox(width: 4),
-                                  SizedBox(
-                                    width: 40,
-                                    child: IconButton(
-                                      onPressed: _removeImage,
-                                      icon: const Icon(
-                                        Icons.delete,
-                                        color: Colors.red,
-                                        size: 20,
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      tooltip: 'Remover',
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-
-                            // URL manual como alternativa (menos proeminente)
-                            if (_uploadedImageUrl == null) ...[
-                              const SizedBox(height: 12),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[100],
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.grey[300]!),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.info_outline,
-                                      color: Colors.grey[600],
-                                      size: 16,
-                                    ),
+                                  if (_selectedImage != null &&
+                                      _uploadedImageUrl == null) ...[
                                     const SizedBox(width: 8),
                                     Expanded(
-                                      child: Text(
-                                        'Ou use URL manual:',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey[600],
+                                      flex: 2,
+                                      child: ElevatedButton.icon(
+                                        onPressed: _isUploadingImage
+                                            ? null
+                                            : _uploadImage,
+                                        icon: _isUploadingImage
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : const Icon(
+                                                Icons.cloud_upload,
+                                                size: 18,
+                                              ),
+                                        label: const Text(
+                                          'Enviar',
+                                          style: TextStyle(fontSize: 13),
+                                        ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.green,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 12,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ],
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              TextField(
-                                controller: _imagemUrlController,
-                                decoration: const InputDecoration(
-                                  labelText: 'URL da imagem',
-                                  labelStyle: TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 12,
-                                  ),
-                                  prefixIcon: Icon(
-                                    Icons.link,
-                                    color: Colors.grey,
-                                    size: 18,
-                                  ),
-                                  hintText: 'https://exemplo.com/imagem.jpg',
-                                  hintStyle: TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 12,
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.all(
-                                      Radius.circular(8),
+                                  if (_selectedImage != null ||
+                                      _uploadedImageUrl != null) ...[
+                                    const SizedBox(width: 4),
+                                    SizedBox(
+                                      width: 40,
+                                      child: IconButton(
+                                        onPressed: _removeImage,
+                                        icon: const Icon(
+                                          Icons.delete,
+                                          color: Colors.red,
+                                          size: 20,
+                                        ),
+                                        padding: EdgeInsets.zero,
+                                        tooltip: 'Remover',
+                                      ),
                                     ),
-                                    borderSide: BorderSide(color: Colors.grey),
-                                  ),
-                                  contentPadding: EdgeInsets.symmetric(
+                                  ],
+                                ],
+                              ),
+
+                              // URL manual como alternativa (menos proeminente)
+                              if (_uploadedImageUrl == null) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
                                     horizontal: 12,
                                     vertical: 8,
                                   ),
-                                  isDense: true,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[100],
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: Colors.grey[300]!,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline,
+                                        color: Colors.grey[600],
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Ou use URL manual:',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                style: const TextStyle(fontSize: 12),
+                                const SizedBox(height: 8),
+                                TextField(
+                                  controller: _imagemUrlController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'URL da imagem',
+                                    labelStyle: TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 12,
+                                    ),
+                                    prefixIcon: Icon(
+                                      Icons.link,
+                                      color: Colors.grey,
+                                      size: 18,
+                                    ),
+                                    hintText: 'https://exemplo.com/imagem.jpg',
+                                    hintStyle: TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 12,
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.all(
+                                        Radius.circular(8),
+                                      ),
+                                      borderSide: BorderSide(
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    isDense: true,
+                                  ),
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Switches para características
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green[100]!),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              _isDisponivel ? Icons.check_circle : Icons.cancel,
+                              color: _isDisponivel ? Colors.green : Colors.red,
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Text(
+                                'Produto Disponível',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            Switch(
+                              value: _isDisponivel,
+                              activeThumbColor: Colors.green,
+                              onChanged: (value) {
+                                setState(() {
+                                  _isDisponivel = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                        const Divider(),
+                        Row(
+                          children: [
+                            Icon(
+                              _isMaisVendido ? Icons.star : Icons.star_border,
+                              color: _isMaisVendido
+                                  ? Colors.amber
+                                  : Colors.grey,
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Text(
+                                'Mais Vendido',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            Switch(
+                              value: _isMaisVendido,
+                              activeThumbColor: Colors.amber,
+                              onChanged: (value) {
+                                setState(() {
+                                  _isMaisVendido = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                        const Divider(),
+                        Row(
+                          children: [
+                            Icon(
+                              _isNovidade
+                                  ? Icons.fiber_new
+                                  : Icons.fiber_new_outlined,
+                              color: _isNovidade ? Colors.orange : Colors.grey,
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Text(
+                                'Novidade',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            Switch(
+                              value: _isNovidade,
+                              activeThumbColor: Colors.orange,
+                              onChanged: (value) {
+                                setState(() {
+                                  _isNovidade = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Switch para Produto com Desconto
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.orange[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange[100]!),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _isComDesconto
+                              ? Icons.discount
+                              : Icons.discount_outlined,
+                          color: _isComDesconto ? Colors.orange : Colors.grey,
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Produto com Desconto',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Ative para definir preço anterior e preço com desconto',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
                               ),
                             ],
-                          ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Switches para características
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.green[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.green[100]!),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            _isDisponivel ? Icons.check_circle : Icons.cancel,
-                            color: _isDisponivel ? Colors.green : Colors.red,
-                          ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'Produto Disponível',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          Switch(
-                            value: _isDisponivel,
-                            activeThumbColor: Colors.green,
-                            onChanged: (value) {
-                              setState(() {
-                                _isDisponivel = value;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                      const Divider(),
-                      Row(
-                        children: [
-                          Icon(
-                            _isMaisVendido ? Icons.star : Icons.star_border,
-                            color: _isMaisVendido ? Colors.amber : Colors.grey,
-                          ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'Mais Vendido',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          Switch(
-                            value: _isMaisVendido,
-                            activeThumbColor: Colors.amber,
-                            onChanged: (value) {
-                              setState(() {
-                                _isMaisVendido = value;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                      const Divider(),
-                      Row(
-                        children: [
-                          Icon(
-                            _isNovidade
-                                ? Icons.fiber_new
-                                : Icons.fiber_new_outlined,
-                            color: _isNovidade ? Colors.orange : Colors.grey,
-                          ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'Novidade',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          Switch(
-                            value: _isNovidade,
-                            activeThumbColor: Colors.orange,
-                            onChanged: (value) {
-                              setState(() {
-                                _isNovidade = value;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Switch para Produto com Desconto
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.orange[100]!),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _isComDesconto
-                            ? Icons.discount
-                            : Icons.discount_outlined,
-                        color: _isComDesconto ? Colors.orange : Colors.grey,
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Produto com Desconto',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Ative para definir preço anterior e preço com desconto',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
+                        Switch(
+                          value: _isComDesconto,
+                          activeThumbColor: Colors.orange,
+                          onChanged: (value) {
+                            setState(() {
+                              _isComDesconto = value;
+                            });
+                          },
                         ),
-                      ),
-                      Switch(
-                        value: _isComDesconto,
-                        activeThumbColor: Colors.orange,
-                        onChanged: (value) {
-                          setState(() {
-                            _isComDesconto = value;
-                          });
-                        },
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-
-                // Switch para Múltiplos Tamanhos
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.purple[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.purple[100]!),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _hasMultipleSizes
-                            ? Icons.format_size
-                            : Icons.format_size_outlined,
-                        color: _hasMultipleSizes ? Colors.purple : Colors.grey,
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Múltiplos Tamanhos',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Ative para adicionar diferentes tamanhos com preços variados',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: _hasMultipleSizes,
-                        activeThumbColor: Colors.purple,
-                        onChanged: (value) {
-                          setState(() {
-                            _hasMultipleSizes = value;
-                            if (value && _sizes.isEmpty) {
-                              // Adicionar um tamanho inicial
-                              _addSize();
-                            } else if (!value) {
-                              // Limpar tamanhos se desativar
-                              for (var size in _sizes) {
-                                size['nameController']?.dispose();
-                                size['precoController']?.dispose();
-                              }
-                              _sizes.clear();
-                            }
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Lista de tamanhos (se ativado)
-                if (_hasMultipleSizes) ...[
                   const SizedBox(height: 16),
+
+                  // Switch para Múltiplos Tamanhos
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.purple[50],
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.purple[200]!),
+                      border: Border.all(color: Colors.purple[100]!),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Expanded(
-                              child: Text(
-                                'Tamanhos e Preços',
+                        Icon(
+                          _hasMultipleSizes
+                              ? Icons.format_size
+                              : Icons.format_size_outlined,
+                          color: _hasMultipleSizes
+                              ? Colors.purple
+                              : Colors.grey,
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Múltiplos Tamanhos',
                                 style: TextStyle(
                                   fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.purple,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                            ),
-                            ElevatedButton.icon(
-                              onPressed: _addSize,
-                              icon: const Icon(Icons.add, size: 18),
-                              label: const Text('Adicionar'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.purple,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        if (_sizes.isEmpty)
-                          const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(16.0),
-                              child: Text(
-                                'Clique em "Adicionar" para criar tamanhos',
+                              SizedBox(height: 4),
+                              Text(
+                                'Ative para adicionar diferentes tamanhos com preços variados',
                                 style: TextStyle(
+                                  fontSize: 12,
                                   color: Colors.grey,
-                                  fontSize: 14,
                                 ),
                               ),
-                            ),
-                          )
-                        else
-                          ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _sizes.length,
-                            itemBuilder: (context, index) {
-                              final size = _sizes[index];
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            flex: 2,
-                                            child: TextField(
-                                              controller:
-                                                  size['nameController'],
-                                              decoration: InputDecoration(
-                                                labelText: 'Tamanho *',
-                                                hintText: 'Ex: P, M, G, 300ml',
-                                                border: OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                contentPadding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 8,
-                                                    ),
-                                                isDense: true,
-                                              ),
-                                              onChanged: (value) {
-                                                size['nome'] = value;
-                                              },
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            flex: 2,
-                                            child: TextField(
-                                              controller:
-                                                  size['precoController'],
-                                              keyboardType:
-                                                  TextInputType.number,
-                                              inputFormatters: [
-                                                CurrencyInputFormatter(),
-                                              ],
-                                              decoration: InputDecoration(
-                                                labelText: 'Preço *',
-                                                hintText: 'R\$ 0,00',
-                                                border: OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                contentPadding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 8,
-                                                    ),
-                                                isDense: true,
-                                              ),
-                                              onChanged: (value) {
-                                                final precoText = value.trim();
-                                                final precoNumerico = precoText
-                                                    .replaceAll('R\$ ', '')
-                                                    .replaceAll(',', '.');
-                                                size['preco'] =
-                                                    double.tryParse(
-                                                      precoNumerico,
-                                                    ) ??
-                                                    0.0;
-                                              },
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete,
-                                              color: Colors.red,
-                                            ),
-                                            onPressed: () => _removeSize(index),
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
+                            ],
                           ),
+                        ),
+                        Switch(
+                          value: _hasMultipleSizes,
+                          activeThumbColor: Colors.purple,
+                          onChanged: (value) {
+                            setState(() {
+                              _hasMultipleSizes = value;
+                              if (value && _sizes.isEmpty) {
+                                // Adicionar um tamanho inicial
+                                _addSize();
+                              } else if (!value) {
+                                // Limpar tamanhos se desativar
+                                for (var size in _sizes) {
+                                  size['nameController']?.dispose();
+                                  size['precoController']?.dispose();
+                                }
+                                _sizes.clear();
+                              }
+                            });
+                          },
+                        ),
                       ],
                     ),
                   ),
+
+                  // Lista de tamanhos (se ativado)
+                  if (_hasMultipleSizes) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.purple[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.purple[200]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Expanded(
+                                child: Text(
+                                  'Tamanhos e Preços',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.purple,
+                                  ),
+                                ),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: _addSize,
+                                icon: const Icon(Icons.add, size: 18),
+                                label: const Text('Adicionar'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.purple,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          if (_sizes.isEmpty)
+                            const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(16.0),
+                                child: Text(
+                                  'Clique em "Adicionar" para criar tamanhos',
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: _sizes.length,
+                              itemBuilder: (context, index) {
+                                final size = _sizes[index];
+                                return Card(
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              flex: 2,
+                                              child: TextField(
+                                                controller:
+                                                    size['nameController'],
+                                                decoration: InputDecoration(
+                                                  labelText: 'Tamanho *',
+                                                  hintText:
+                                                      'Ex: P, M, G, 300ml',
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
+                                                  ),
+                                                  contentPadding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8,
+                                                      ),
+                                                  isDense: true,
+                                                ),
+                                                onChanged: (value) {
+                                                  size['nome'] = value;
+                                                },
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              flex: 2,
+                                              child: TextField(
+                                                controller:
+                                                    size['precoController'],
+                                                keyboardType:
+                                                    TextInputType.number,
+                                                inputFormatters: [
+                                                  CurrencyInputFormatter(),
+                                                ],
+                                                decoration: InputDecoration(
+                                                  labelText: 'Preço *',
+                                                  hintText: 'R\$ 0,00',
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
+                                                  ),
+                                                  contentPadding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8,
+                                                      ),
+                                                  isDense: true,
+                                                ),
+                                                onChanged: (value) {
+                                                  final precoText = value
+                                                      .trim();
+                                                  final precoNumerico =
+                                                      precoText
+                                                          .replaceAll(
+                                                            'R\$ ',
+                                                            '',
+                                                          )
+                                                          .replaceAll(',', '.');
+                                                  size['preco'] =
+                                                      double.tryParse(
+                                                        precoNumerico,
+                                                      ) ??
+                                                      0.0;
+                                                },
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.delete,
+                                                color: Colors.red,
+                                              ),
+                                              onPressed: () =>
+                                                  _removeSize(index),
+                                              padding: EdgeInsets.zero,
+                                              constraints:
+                                                  const BoxConstraints(),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -1439,64 +1478,69 @@ class _AddCategoryDialogState extends State<AddCategoryDialog> {
       content: SizedBox(
         width: MediaQuery.of(context).size.width * 0.8,
         child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Nome da categoria
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.blue[200]!),
-                ),
-                child: TextField(
-                  controller: _nomeController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nome da Categoria *',
-                    labelStyle: TextStyle(
-                      color: Colors.blue,
-                      fontWeight: FontWeight.w600,
+          child: RepaintBoundary(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Nome da categoria
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: TextField(
+                    controller: _nomeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome da Categoria *',
+                      labelStyle: TextStyle(
+                        color: Colors.blue,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      prefixIcon: Icon(Icons.category, color: Colors.blue),
+                      hintText: 'Digite o nome da categoria',
+                      hintStyle: TextStyle(color: Colors.grey),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.all(16),
+                      helperText: 'Obrigatório',
+                      helperStyle: TextStyle(color: Colors.blue),
                     ),
-                    prefixIcon: Icon(Icons.category, color: Colors.blue),
-                    hintText: 'Digite o nome da categoria',
-                    hintStyle: TextStyle(color: Colors.grey),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.all(16),
-                    helperText: 'Obrigatório',
-                    helperStyle: TextStyle(color: Colors.blue),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-              // Ícone
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.blue[200]!),
-                ),
-                child: TextField(
-                  controller: _iconeController,
-                  decoration: const InputDecoration(
-                    labelText: 'Ícone *',
-                    labelStyle: TextStyle(
-                      color: Colors.blue,
-                      fontWeight: FontWeight.w600,
+                // Ícone
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: TextField(
+                    controller: _iconeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Ícone *',
+                      labelStyle: TextStyle(
+                        color: Colors.blue,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.emoji_emotions,
+                        color: Colors.blue,
+                      ),
+                      hintText: '🍰 (emoji da categoria)',
+                      hintStyle: TextStyle(color: Colors.grey),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.all(16),
+                      helperText: 'Obrigatório - Use um emoji',
+                      helperStyle: TextStyle(color: Colors.blue),
                     ),
-                    prefixIcon: Icon(Icons.emoji_emotions, color: Colors.blue),
-                    hintText: '🍰 (emoji da categoria)',
-                    hintStyle: TextStyle(color: Colors.grey),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.all(16),
-                    helperText: 'Obrigatório - Use um emoji',
-                    helperStyle: TextStyle(color: Colors.blue),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-            ],
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         ),
       ),

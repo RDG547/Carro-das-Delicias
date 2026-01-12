@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'services/notification_service.dart';
+import 'services/deep_link_service.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
@@ -19,6 +20,12 @@ class _AuthWrapperState extends State<AuthWrapper> {
   void initState() {
     super.initState();
     _checkAuth();
+
+    // Inicializar deep link service
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      DeepLinkService().init(context);
+      DeepLinkService().checkInitialLink();
+    });
 
     // Escuta mudanças no estado de autenticação
     Supabase.instance.client.auth.onAuthStateChange.listen((data) {

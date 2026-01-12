@@ -61,6 +61,7 @@ class _NovidadesScreenState extends State<NovidadesScreen> {
       backgroundColor: Colors.grey[50],
       padding: EdgeInsets.zero,
       child: ListView.builder(
+        addRepaintBoundaries: true,
         padding: const EdgeInsets.all(16),
         itemCount: _novidades.length,
         itemBuilder: (context, index) {

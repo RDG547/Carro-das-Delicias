@@ -59,12 +59,14 @@ class _ProfileScreenState extends State<ProfileScreen>
   int _totalPedidos = 0;
   int _totalFavoritos = 0;
 
+  late TabController _tabController;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
@@ -120,6 +122,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   @override
   void dispose() {
+    _tabController.dispose();
     _fadeController.dispose();
     _nameController.dispose();
     _phoneController.dispose();
@@ -461,102 +464,65 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildUserProfile(User? user) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Avatar e informações básicas
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Colors.black, Colors.grey],
-              ),
-              borderRadius: BorderRadius.circular(16),
+    return Column(
+      children: [
+        // Avatar e informações básicas
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Colors.black, Colors.grey],
             ),
-            child: Column(
-              children: [
-                // Avatar com upload de foto
-                Stack(
-                  children: [
-                    CircleAvatar(
-                      radius: 50,
-                      backgroundColor: Colors.white,
-                      backgroundImage: _selectedImage != null
-                          ? FileImage(_selectedImage!)
-                          : _uploadedImageUrl != null
-                          ? NetworkImage(_uploadedImageUrl!)
-                          : null,
-                      child: _selectedImage == null && _uploadedImageUrl == null
-                          ? Text(
-                              (_userProfile?['name']?.substring(0, 1) ??
-                                      user?.userMetadata?['name']?.substring(
-                                        0,
-                                        1,
-                                      ) ??
-                                      user?.email?.substring(0, 1) ??
-                                      'U')
-                                  .toUpperCase(),
-                              style: const TextStyle(
-                                fontSize: 36,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black,
-                              ),
-                            )
-                          : null,
-                    ),
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                        ),
-                        child: IconButton(
-                          onPressed: _isUploadingImage
-                              ? null
-                              : _selectProfileImage,
-                          icon: _isUploadingImage
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(
-                                  Icons.camera_alt,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                          constraints: const BoxConstraints(
-                            minWidth: 32,
-                            minHeight: 32,
-                          ),
-                          padding: EdgeInsets.zero,
-                        ),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          margin: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // Avatar com upload de foto
+              Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 50,
+                    backgroundColor: Colors.white,
+                    backgroundImage: _selectedImage != null
+                        ? FileImage(_selectedImage!)
+                        : _uploadedImageUrl != null
+                        ? NetworkImage(_uploadedImageUrl!)
+                        : null,
+                    child: _selectedImage == null && _uploadedImageUrl == null
+                        ? Text(
+                            (_userProfile?['name']?.substring(0, 1) ??
+                                    user?.userMetadata?['name']?.substring(
+                                      0,
+                                      1,
+                                    ) ??
+                                    user?.email?.substring(0, 1) ??
+                                    'U')
+                                .toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 36,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
+                            ),
+                          )
+                        : null,
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
                       ),
-                    ),
-                  ],
-                ),
-
-                // Botões de ação para upload de foto
-                if (_selectedImage != null) ...[
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      ElevatedButton.icon(
+                      child: IconButton(
                         onPressed: _isUploadingImage
                             ? null
-                            : _uploadProfileImage,
+                            : _selectProfileImage,
                         icon: _isUploadingImage
                             ? const SizedBox(
                                 width: 16,
@@ -566,252 +532,321 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   color: Colors.white,
                                 ),
                               )
-                            : const Icon(Icons.check, size: 18),
-                        label: Text(
-                          _isUploadingImage ? 'Enviando...' : 'Confirmar',
+                            : const Icon(
+                                Icons.camera_alt,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
                         ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                        ),
+                        padding: EdgeInsets.zero,
                       ),
-                      const SizedBox(width: 12),
-                      ElevatedButton.icon(
-                        onPressed: _isUploadingImage
-                            ? null
-                            : _removeProfileImage,
-                        icon: const Icon(Icons.close, size: 18),
-                        label: const Text('Cancelar'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
+              ),
 
+              // Botões de ação para upload de foto
+              if (_selectedImage != null) ...[
                 const SizedBox(height: 16),
-                Text(
-                  _userProfile?['name'] ??
-                      user?.userMetadata?['name'] ??
-                      'Usuário',
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                Text(
-                  user?.email ?? '',
-                  style: const TextStyle(fontSize: 16, color: Colors.white70),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Informações do perfil
-          Card(
-            elevation: 4,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Informações Pessoais',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: _isUploadingImage ? null : _uploadProfileImage,
+                      icon: _isUploadingImage
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.check, size: 18),
+                      label: Text(
+                        _isUploadingImage ? 'Enviando...' : 'Confirmar',
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
                         ),
                       ),
-                      IconButton(
-                        icon: Icon(_isEditing ? Icons.close : Icons.edit),
-                        onPressed: () {
-                          setState(() {
-                            _isEditing = !_isEditing;
-                            if (!_isEditing) {
-                              // Restaurar valores originais ao cancelar
-                              _nameController.text =
-                                  _userProfile?['name'] ?? '';
-                              _phoneController.text =
-                                  _userProfile?['phone'] ?? '';
-                              _addressController.text =
-                                  _userProfile?['address'] ?? '';
-                              _neighborhoodController.text =
-                                  _userProfile?['neighborhood'] ?? '';
-                              _cityController.text =
-                                  _userProfile?['city'] ?? '';
-                              // Formatar CEP ao restaurar valores
-                              final cepValue = _userProfile?['cep'] ?? '';
-                              _cepController.text = cepValue.isNotEmpty
-                                  ? _formatCEP(cepValue)
-                                  : '';
-                            }
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  AbsorbPointer(
-                    absorbing: !_isEditing,
-                    child: AnimatedTextField(
-                      controller: _nameController,
-                      labelText: 'Nome Completo',
-                      prefixIcon: Icons.person,
                     ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  AbsorbPointer(
-                    absorbing: !_isEditing,
-                    child: AnimatedTextField(
-                      controller: _phoneController,
-                      labelText: 'Telefone',
-                      prefixIcon: Icons.phone,
-                      keyboardType: TextInputType.phone,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Campos de endereço
-                  AbsorbPointer(
-                    absorbing: !_isEditing,
-                    child: AnimatedTextField(
-                      controller: _addressController,
-                      labelText: 'Endereço Completo',
-                      prefixIcon: Icons.home,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  AbsorbPointer(
-                    absorbing: !_isEditing,
-                    child: AnimatedTextField(
-                      controller: _neighborhoodController,
-                      labelText: 'Bairro',
-                      prefixIcon: Icons.location_city,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  AbsorbPointer(
-                    absorbing: !_isEditing,
-                    child: AnimatedTextField(
-                      controller: _cityController,
-                      labelText: 'Cidade',
-                      prefixIcon: Icons.location_city,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  AbsorbPointer(
-                    absorbing: !_isEditing,
-                    child: AnimatedTextField(
-                      controller: _cepController,
-                      labelText: 'CEP',
-                      prefixIcon: Icons.pin_drop,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        LengthLimitingTextInputFormatter(
-                          9,
-                        ), // 8 dígitos + 1 hífen
-                        _CEPInputFormatter(),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  AbsorbPointer(
-                    absorbing: true,
-                    child: AnimatedTextField(
-                      controller: TextEditingController(
-                        text: user?.email ?? '',
-                      ),
-                      labelText: 'Email',
-                      prefixIcon: Icons.email,
-                    ),
-                  ),
-
-                  if (_isEditing) ...[
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: AnimatedButton(
-                        text: 'Salvar Alterações',
-                        onPressed: _updateProfile,
-                        backgroundColor: Colors.green,
-                        textColor: Colors.white,
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: _isUploadingImage ? null : _removeProfileImage,
+                      icon: const Icon(Icons.close, size: 18),
+                      label: const Text('Cancelar'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
                       ),
                     ),
                   ],
-                ],
+                ),
+              ],
+
+              const SizedBox(height: 16),
+              Text(
+                _userProfile?['name'] ??
+                    user?.userMetadata?['name'] ??
+                    'Usuário',
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
-            ),
+              Text(
+                user?.email ?? '',
+                style: const TextStyle(fontSize: 16, color: Colors.white70),
+              ),
+            ],
           ),
+        ),
 
-          const SizedBox(height: 24),
-
-          // Estatísticas
-          Card(
-            elevation: 4,
-            shape: RoundedRectangleBorder(
+        // TabBar
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.grey[200],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: TabBar(
+            controller: _tabController,
+            indicator: BoxDecoration(
+              color: Colors.black,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Estatísticas',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.black,
+            indicatorSize: TabBarIndicatorSize.tab,
+            dividerColor: Colors.transparent,
+            tabs: const [
+              Tab(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Center(
+                    child: Text(
+                      'Informações Pessoais',
+                      textAlign: TextAlign.center,
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildStatCard(
-                          'Pedidos',
-                          _totalPedidos.toString(),
-                          Icons.shopping_cart,
-                          Colors.blue,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildStatCard(
-                          'Favoritos',
-                          _totalFavoritos.toString(),
-                          Icons.favorite,
-                          Colors.red,
-                        ),
-                      ),
-                    ],
+                ),
+              ),
+              Tab(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Center(
+                    child: Text('Estatísticas', textAlign: TextAlign.center),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // TabBarView
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [_buildPersonalInfoTab(user), _buildStatisticsTab()],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatisticsTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Suas Estatísticas',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildStatCard(
+                      'Pedidos',
+                      _totalPedidos.toString(),
+                      Icons.shopping_cart,
+                      Colors.blue,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildStatCard(
+                      'Favoritos',
+                      _totalFavoritos.toString(),
+                      Icons.favorite,
+                      Colors.red,
+                    ),
                   ),
                 ],
               ),
-            ),
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPersonalInfoTab(User? user) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Informações Pessoais',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: Icon(_isEditing ? Icons.close : Icons.edit),
+                    onPressed: () {
+                      setState(() {
+                        _isEditing = !_isEditing;
+                        if (!_isEditing) {
+                          // Restaurar valores originais ao cancelar
+                          _nameController.text = _userProfile?['name'] ?? '';
+                          _phoneController.text = _userProfile?['phone'] ?? '';
+                          _addressController.text =
+                              _userProfile?['address'] ?? '';
+                          _neighborhoodController.text =
+                              _userProfile?['neighborhood'] ?? '';
+                          _cityController.text = _userProfile?['city'] ?? '';
+                          // Formatar CEP ao restaurar valores
+                          final cepValue = _userProfile?['cep'] ?? '';
+                          _cepController.text = cepValue.isNotEmpty
+                              ? _formatCEP(cepValue)
+                              : '';
+                        }
+                      });
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              AbsorbPointer(
+                absorbing: !_isEditing,
+                child: AnimatedTextField(
+                  controller: _nameController,
+                  labelText: 'Nome Completo',
+                  prefixIcon: Icons.person,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              AbsorbPointer(
+                absorbing: !_isEditing,
+                child: AnimatedTextField(
+                  controller: _phoneController,
+                  labelText: 'Telefone',
+                  prefixIcon: Icons.phone,
+                  keyboardType: TextInputType.phone,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Campos de endereço
+              AbsorbPointer(
+                absorbing: !_isEditing,
+                child: AnimatedTextField(
+                  controller: _addressController,
+                  labelText: 'Endereço Completo',
+                  prefixIcon: Icons.home,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              AbsorbPointer(
+                absorbing: !_isEditing,
+                child: AnimatedTextField(
+                  controller: _neighborhoodController,
+                  labelText: 'Bairro',
+                  prefixIcon: Icons.location_city,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              AbsorbPointer(
+                absorbing: !_isEditing,
+                child: AnimatedTextField(
+                  controller: _cityController,
+                  labelText: 'Cidade',
+                  prefixIcon: Icons.location_city,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              AbsorbPointer(
+                absorbing: !_isEditing,
+                child: AnimatedTextField(
+                  controller: _cepController,
+                  labelText: 'CEP',
+                  prefixIcon: Icons.pin_drop,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    LengthLimitingTextInputFormatter(9), // 8 dígitos + 1 hífen
+                    _CEPInputFormatter(),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              AbsorbPointer(
+                absorbing: true,
+                child: AnimatedTextField(
+                  controller: TextEditingController(text: user?.email ?? ''),
+                  labelText: 'Email',
+                  prefixIcon: Icons.email,
+                ),
+              ),
+
+              if (_isEditing) ...[
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: AnimatedButton(
+                    text: 'Salvar Alterações',
+                    onPressed: _updateProfile,
+                    backgroundColor: Colors.green,
+                    textColor: Colors.white,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

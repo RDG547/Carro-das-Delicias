@@ -60,5 +60,26 @@
 	<string>Precisamos da sua localização para mostrar a Kombi das Delícias no mapa</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Precisamos da sua localização para rastrear a Kombi das Delícias</string>
+
+	<!-- Deep Linking - Custom URL Scheme -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.carrodasdelicias.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>carrodasdelicias</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Universal Links - HTTPS URLs -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:carrodasdelicias.app</string>
+	</array>
 </dict>
 </plist>

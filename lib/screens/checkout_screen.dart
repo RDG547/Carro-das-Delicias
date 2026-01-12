@@ -5,6 +5,8 @@ import 'dart:convert';
 import '../services/cart_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
+import 'abacatepay_payment_screen.dart';
+import 'stripe_payment_screen.dart';
 
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({super.key});
@@ -26,17 +28,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final _cepController = TextEditingController();
   final _observacoesController = TextEditingController();
 
-  String _metodoPagamento = 'dinheiro';
+  String _metodoPagamento = 'pix'; // Padrão é PIX
   double _troco = 0.0;
   final _trocoController = TextEditingController();
   bool _isLoading = false;
   bool _isLoadingUserData = true;
+  int _pedidosConcluidos = 0; // Contador de pedidos concluídos (reputação)
 
   @override
   void initState() {
     super.initState();
     _cartService.addListener(_onCartChanged);
     _loadUserData(); // Carregar dados do usuário automaticamente
+    _loadReputacao(); // Carregar reputação do usuário
   }
 
   @override
@@ -106,6 +110,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           _isLoadingUserData = false;
         });
       }
+    }
+  }
+
+  Future<void> _loadReputacao() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user != null) {
+        // Contar pedidos concluídos (status = 'entregue')
+        final response = await Supabase.instance.client
+            .from('pedidos')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('status', 'entregue');
+
+        if (mounted) {
+          setState(() {
+            _pedidosConcluidos = (response as List).length;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar reputação: $e');
     }
   }
 
@@ -191,27 +217,27 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return Form(
       key: _formKey,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        addRepaintBoundaries: true,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
         children: [
           // Resumo do pedido
-          _buildOrderSummary(),
+          RepaintBoundary(child: _buildOrderSummary()),
           const SizedBox(height: 24),
 
           // Dados do cliente
-          _buildCustomerDataSection(),
+          RepaintBoundary(child: _buildCustomerDataSection()),
           const SizedBox(height: 24),
 
           // Endereço de entrega
-          _buildDeliveryAddressSection(),
+          RepaintBoundary(child: _buildDeliveryAddressSection()),
           const SizedBox(height: 24),
 
           // Método de pagamento
-          _buildPaymentMethodSection(),
+          RepaintBoundary(child: _buildPaymentMethodSection()),
           const SizedBox(height: 24),
 
           // Observações
-          _buildObservationsSection(),
-          const SizedBox(height: 100), // Espaço para o bottom bar
+          RepaintBoundary(child: _buildObservationsSection()),
         ],
       ),
     );
@@ -493,6 +519,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Widget _buildPaymentMethodSection() {
+    final bool podeUsarDinheiro = _pedidosConcluidos >= 5;
+
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -517,237 +545,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             ),
             const SizedBox(height: 16),
 
-            InkWell(
-              onTap: () {
-                setState(() {
-                  _metodoPagamento = 'dinheiro';
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: _metodoPagamento == 'dinheiro'
-                        ? Theme.of(context).primaryColor
-                        : Colors.grey.shade300,
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                  color: _metodoPagamento == 'dinheiro'
-                      ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
-                      : null,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 20,
-                      height: 20,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _metodoPagamento == 'dinheiro'
-                              ? Theme.of(context).primaryColor
-                              : Colors.grey,
-                          width: 2,
-                        ),
-                        color: _metodoPagamento == 'dinheiro'
-                            ? Theme.of(context).primaryColor
-                            : Colors.transparent,
-                      ),
-                      child: _metodoPagamento == 'dinheiro'
-                          ? Icon(Icons.circle, size: 12, color: Colors.white)
-                          : null,
-                    ),
-                    const SizedBox(width: 16),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Dinheiro',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Text(
-                            'Pagamento na entrega',
-                            style: TextStyle(fontSize: 14, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            if (_metodoPagamento == 'dinheiro') ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TextFormField(
-                  controller: _trocoController,
-                  decoration: InputDecoration(
-                    labelText: 'Troco para quanto?',
-                    border: const OutlineInputBorder(),
-                    hintText: 'Ex: R\$ 50,00',
-                    helperText:
-                        'Total: ${CurrencyFormatter.format(_cartService.total)}',
-                  ),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    _CurrencyInputFormatter(),
-                  ],
-                  onChanged: (value) {
-                    final numericValue = double.tryParse(
-                      value
-                          .replaceAll('R\$ ', '')
-                          .replaceAll(',', '.')
-                          .replaceAll('.', ''),
-                    );
-                    if (numericValue != null) {
-                      _troco = numericValue / 100;
-                    }
-                  },
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: () {
-                setState(() {
-                  _metodoPagamento = 'debito';
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: _metodoPagamento == 'debito'
-                        ? Theme.of(context).primaryColor
-                        : Colors.grey.shade300,
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                  color: _metodoPagamento == 'debito'
-                      ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
-                      : null,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 20,
-                      height: 20,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _metodoPagamento == 'debito'
-                              ? Theme.of(context).primaryColor
-                              : Colors.grey,
-                          width: 2,
-                        ),
-                        color: _metodoPagamento == 'debito'
-                            ? Theme.of(context).primaryColor
-                            : Colors.transparent,
-                      ),
-                      child: _metodoPagamento == 'debito'
-                          ? Icon(Icons.circle, size: 12, color: Colors.white)
-                          : null,
-                    ),
-                    const SizedBox(width: 16),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Cartão de Débito',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Text(
-                            'Maquininha na entrega',
-                            style: TextStyle(fontSize: 14, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: () {
-                setState(() {
-                  _metodoPagamento = 'credito';
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: _metodoPagamento == 'credito'
-                        ? Theme.of(context).primaryColor
-                        : Colors.grey.shade300,
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                  color: _metodoPagamento == 'credito'
-                      ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
-                      : null,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 20,
-                      height: 20,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _metodoPagamento == 'credito'
-                              ? Theme.of(context).primaryColor
-                              : Colors.grey,
-                          width: 2,
-                        ),
-                        color: _metodoPagamento == 'credito'
-                            ? Theme.of(context).primaryColor
-                            : Colors.transparent,
-                      ),
-                      child: _metodoPagamento == 'credito'
-                          ? Icon(Icons.circle, size: 12, color: Colors.white)
-                          : null,
-                    ),
-                    const SizedBox(width: 16),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Cartão de Crédito',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Text(
-                            'Maquininha na entrega',
-                            style: TextStyle(fontSize: 14, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 12),
+            // PIX - Sempre disponível
             InkWell(
               onTap: () {
                 setState(() {
@@ -786,7 +584,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             : Colors.transparent,
                       ),
                       child: _metodoPagamento == 'pix'
-                          ? Icon(Icons.circle, size: 12, color: Colors.white)
+                          ? const Icon(
+                              Icons.circle,
+                              size: 12,
+                              color: Colors.white,
+                            )
                           : null,
                     ),
                     const SizedBox(width: 16),
@@ -802,7 +604,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             ),
                           ),
                           Text(
-                            'Chave PIX será enviada',
+                            'Chave PIX gerada no app',
                             style: TextStyle(fontSize: 14, color: Colors.grey),
                           ),
                         ],
@@ -812,6 +614,219 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
               ),
             ),
+
+            const SizedBox(height: 12),
+
+            // Cartão de Crédito - Sempre disponível
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _metodoPagamento = 'credito';
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: _metodoPagamento == 'credito'
+                        ? Theme.of(context).primaryColor
+                        : Colors.grey.shade300,
+                    width: 2,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  color: _metodoPagamento == 'credito'
+                      ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _metodoPagamento == 'credito'
+                              ? Theme.of(context).primaryColor
+                              : Colors.grey,
+                          width: 2,
+                        ),
+                        color: _metodoPagamento == 'credito'
+                            ? Theme.of(context).primaryColor
+                            : Colors.transparent,
+                      ),
+                      child: _metodoPagamento == 'credito'
+                          ? const Icon(
+                              Icons.circle,
+                              size: 12,
+                              color: Colors.white,
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 16),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Cartão de Crédito',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          Text(
+                            'Pagamento no app',
+                            style: TextStyle(fontSize: 14, color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Dinheiro - Requer 5 pedidos concluídos
+            Opacity(
+              opacity: podeUsarDinheiro ? 1.0 : 0.5,
+              child: InkWell(
+                onTap: podeUsarDinheiro
+                    ? () {
+                        setState(() {
+                          _metodoPagamento = 'dinheiro';
+                        });
+                      }
+                    : () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '🔒 Você precisa de 5 pedidos concluídos para pagar em dinheiro. Progresso: $_pedidosConcluidos/5',
+                            ),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                      },
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: _metodoPagamento == 'dinheiro' && podeUsarDinheiro
+                          ? Theme.of(context).primaryColor
+                          : Colors.grey.shade300,
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    color: _metodoPagamento == 'dinheiro' && podeUsarDinheiro
+                        ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
+                        : null,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color:
+                                _metodoPagamento == 'dinheiro' &&
+                                    podeUsarDinheiro
+                                ? Theme.of(context).primaryColor
+                                : Colors.grey,
+                            width: 2,
+                          ),
+                          color:
+                              _metodoPagamento == 'dinheiro' && podeUsarDinheiro
+                              ? Theme.of(context).primaryColor
+                              : Colors.transparent,
+                        ),
+                        child:
+                            _metodoPagamento == 'dinheiro' && podeUsarDinheiro
+                            ? const Icon(
+                                Icons.circle,
+                                size: 12,
+                                color: Colors.white,
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Text(
+                                  'Dinheiro',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                if (!podeUsarDinheiro) ...[
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    '🔒',
+                                    style: TextStyle(fontSize: 14),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            Text(
+                              podeUsarDinheiro
+                                  ? 'Pagamento na entrega'
+                                  : 'Requer $_pedidosConcluidos/5 pedidos concluídos',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: podeUsarDinheiro
+                                    ? Colors.grey
+                                    : Colors.orange,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            if (_metodoPagamento == 'dinheiro' && podeUsarDinheiro) ...[
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextFormField(
+                  controller: _trocoController,
+                  decoration: InputDecoration(
+                    labelText: 'Troco para quanto?',
+                    border: const OutlineInputBorder(),
+                    hintText: 'Ex: R\$ 50,00',
+                    helperText:
+                        'Total: ${CurrencyFormatter.format(_cartService.total)}',
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    _CurrencyInputFormatter(),
+                  ],
+                  onChanged: (value) {
+                    final numericValue = double.tryParse(
+                      value
+                          .replaceAll('R\$ ', '')
+                          .replaceAll(',', '.')
+                          .replaceAll('.', ''),
+                    );
+                    if (numericValue != null) {
+                      _troco = numericValue / 100;
+                    }
+                  },
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1081,6 +1096,60 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         throw Exception('Usuário não autenticado');
       }
 
+      // Para PIX e crédito, processar pagamento ANTES de criar pedido
+      if (_metodoPagamento == 'pix') {
+        // Navegar para tela de pagamento PIX
+        final result = await Navigator.push<Map<String, dynamic>>(
+          context,
+          MaterialPageRoute(
+            builder: (context) => AbacatePayPaymentScreen(
+              pedidoId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+              amount: _cartService.total,
+              description: 'Pedido - Carro das Delícias',
+            ),
+          ),
+        );
+
+        // Se usuário cancelou ou pagamento falhou, retornar
+        if (result == null || result['success'] != true) {
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+
+        // Pagamento confirmado, continuar com criação do pedido
+        debugPrint('✅ Pagamento PIX confirmado!');
+      } else if (_metodoPagamento == 'credito') {
+        // Navegar para tela de pagamento Stripe
+        final result = await Navigator.push<Map<String, dynamic>>(
+          context,
+          MaterialPageRoute(
+            builder: (context) => StripePaymentScreen(
+              pedidoId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+              amount: _cartService.total,
+              description: 'Pedido - Carro das Delícias',
+              customerEmail: user.email ?? '',
+            ),
+          ),
+        );
+
+        // Se usuário cancelou ou pagamento falhou, retornar
+        if (result == null || result['success'] != true) {
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+
+        // Pagamento confirmado, continuar com criação do pedido
+        debugPrint('✅ Pagamento com cartão confirmado!');
+      }
+
       // Dados do pedido
       final pedidoData = {
         'user_id': user.id, // ID do usuário autenticado
@@ -1097,7 +1166,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             ? _troco
             : null,
         'total': _cartService.total,
-        'status': 'pendente',
+        'status': (_metodoPagamento == 'pix' || _metodoPagamento == 'credito')
+            ? 'pago'
+            : 'pendente',
         'observacoes': _observacoesController.text.trim().isEmpty
             ? null
             : _observacoesController.text.trim(),

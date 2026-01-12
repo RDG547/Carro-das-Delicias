@@ -290,11 +290,13 @@ class _CartScreenState extends State<CartScreen> {
         // Lista de itens
         Expanded(
           child: ListView.builder(
+            addRepaintBoundaries: true,
             padding: const EdgeInsets.only(
               left: 16,
               right: 16,
               top: 16,
-              bottom: 180, // Espaço para o botão + navbar (120 + 60)
+              bottom:
+                  140, // Espaço para o botão de finalizar (aprox 120px) + margem
             ),
             itemCount: _cartService.items.length,
             itemBuilder: (context, index) {
@@ -343,6 +345,9 @@ class _CartScreenState extends State<CartScreen> {
                           child: Image.network(
                             item.imagemUrl!,
                             fit: BoxFit.cover,
+                            cacheWidth: 160,
+                            cacheHeight: 160,
+                            filterQuality: FilterQuality.medium,
                             errorBuilder: (context, error, stackTrace) =>
                                 _buildProductPlaceholder(),
                           ),

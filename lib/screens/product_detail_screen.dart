@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/cart_service.dart';
 import '../utils/constants.dart';
 import '../widgets/main_navigation_provider.dart';
@@ -17,6 +17,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   final _observacoesController = TextEditingController();
   int _quantidade = 1;
   final _cartService = CartService();
+  final PageController _pageController = PageController();
+  int _currentImageIndex = 0;
 
   // Tamanho selecionado (para produtos com múltiplos tamanhos)
   Map<String, dynamic>? _selectedSize;
@@ -34,6 +36,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   @override
   void dispose() {
     _observacoesController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -166,25 +169,118 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   Widget _buildProductImage() {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.grey[100]!, Colors.white],
+    // Obter lista de imagens
+    final List<String> imagens = [];
+
+    // Adicionar imagens do array 'imagens'
+    if (widget.produto['imagens'] != null &&
+        widget.produto['imagens'] is List) {
+      for (var img in widget.produto['imagens']) {
+        if (img != null && img.toString().isNotEmpty) {
+          imagens.add(img.toString());
+        }
+      }
+    }
+
+    // Se não houver imagens no array, usar imagem_url
+    if (imagens.isEmpty &&
+        widget.produto['imagem_url'] != null &&
+        widget.produto['imagem_url'].toString().isNotEmpty) {
+      imagens.add(widget.produto['imagem_url'].toString());
+    }
+
+    // Se não houver imagens, mostrar placeholder
+    if (imagens.isEmpty) {
+      return _buildPlaceholderImage();
+    }
+
+    // Se houver apenas uma imagem, mostrar diretamente
+    if (imagens.length == 1) {
+      return Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.grey[100]!, Colors.white],
+          ),
         ),
-      ),
-      child:
-          widget.produto['imagem_url'] != null &&
-              widget.produto['imagem_url'].toString().isNotEmpty
-          ? Image.network(
-              widget.produto['imagem_url'],
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  _buildPlaceholderImage(),
-            )
-          : _buildPlaceholderImage(),
+        child: Image.network(
+          imagens[0],
+          fit: BoxFit.cover,
+          cacheWidth: 800,
+          cacheHeight: 800,
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (context, error, stackTrace) =>
+              _buildPlaceholderImage(),
+        ),
+      );
+    }
+
+    // Se houver múltiplas imagens, usar PageView
+    return Stack(
+      children: [
+        PageView.builder(
+          controller: _pageController,
+          onPageChanged: (index) {
+            setState(() {
+              _currentImageIndex = index;
+            });
+          },
+          itemCount: imagens.length,
+          itemBuilder: (context, index) {
+            return Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.grey[100]!, Colors.white],
+                ),
+              ),
+              child: Image.network(
+                imagens[index],
+                fit: BoxFit.cover,
+                cacheWidth: 800,
+                cacheHeight: 800,
+                filterQuality: FilterQuality.medium,
+                errorBuilder: (context, error, stackTrace) =>
+                    _buildPlaceholderImage(),
+              ),
+            );
+          },
+        ),
+
+        // Indicador de página
+        Positioned(
+          bottom: 16,
+          left: 0,
+          right: 0,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(
+              imagens.length,
+              (index) => Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _currentImageIndex == index
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -758,109 +854,46 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
   }
 
-  void _shareProduct() {
+  void _shareProduct() async {
     final produto = widget.produto;
     final nome = produto['nome'] ?? 'Produto delicioso';
     final preco = produto['preco'] != null
         ? CurrencyFormatter.format(produto['preco'].toDouble())
         : 'Consulte o preço';
 
+    // Gerar link do produto para deep linking
+    final produtoId = produto['id'] ?? '';
+    final deepLink = 'https://carrodasdelicias.app/produto/$produtoId';
+
     final texto =
         '''
-🍰 *Carro das Delícias* 🍰
+🍰 Carro das Delícias 🍰
 
 Confira este delicioso produto:
 
-*$nome*
+$nome
 💰 $preco
+
+👉 Veja mais detalhes e faça seu pedido:
+$deepLink
 
 Entre em contato conosco para fazer seu pedido!
     '''
             .trim();
 
-    // Usando Share API nativa do Flutter
-    // Para implementação completa, seria necessário adicionar o plugin share_plus
-    // Por enquanto, vamos simular o compartilhamento copiando para clipboard
-
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.share, color: Colors.blue[700]),
-                const SizedBox(width: 12),
-                Text(
-                  'Compartilhar Produto',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue[700],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: Text(texto, style: const TextStyle(fontSize: 14)),
-            ),
-            const SizedBox(height: 16),
-
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      // Copiar para clipboard
-                      Clipboard.setData(ClipboardData(text: texto));
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Texto copiado para área de transferência!',
-                          ),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.copy),
-                    label: const Text('Copiar Texto'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                    label: const Text('Fechar'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.grey[700],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+    try {
+      // Compartilhar usando o sistema nativo (WhatsApp, Facebook, etc.)
+      await Share.share(texto, subject: 'Produto: $nome');
+    } catch (e) {
+      // Em caso de erro, mostrar mensagem
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao compartilhar: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }

@@ -107,6 +107,19 @@ class _DescontosScreenState extends State<DescontosScreen> {
     );
   }
 
+  Widget _buildEmojiPlaceholder(Map<String, dynamic>? categoria) {
+    final String emoji = categoria?['icone'] ?? '🍰';
+    return Container(
+      width: 120,
+      height: 120,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Center(child: Text(emoji, style: const TextStyle(fontSize: 60))),
+    );
+  }
+
   Future<void> _buyNow(Map<String, dynamic> produto) async {
     // Adiciona ao carrinho com flag isBuyNow = true
     await _cartService.addItem(produto, isBuyNow: true);
@@ -166,7 +179,8 @@ class _DescontosScreenState extends State<DescontosScreen> {
           : RefreshIndicator(
               onRefresh: _loadProdutosComDesconto,
               child: ListView.builder(
-                padding: const EdgeInsets.all(16),
+                addRepaintBoundaries: true,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                 itemCount: _produtosComDesconto.length,
                 itemBuilder: (context, index) {
                   final produto = _produtosComDesconto[index];
@@ -245,57 +259,120 @@ class _DescontosScreenState extends State<DescontosScreen> {
                               const SizedBox(height: 12),
 
                               // Imagem do produto
-                              if (produto['imagem_url'] != null &&
-                                  produto['imagem_url'].toString().isNotEmpty)
-                                Center(
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(
-                                      produto['imagem_url'],
-                                      width: 120,
-                                      height: 120,
-                                      fit: BoxFit.cover,
-                                      errorBuilder:
-                                          (context, error, stackTrace) {
-                                            return Container(
-                                              width: 120,
-                                              height: 120,
-                                              decoration: BoxDecoration(
-                                                color: Colors.grey[200],
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                              ),
-                                              child: const Icon(
-                                                Icons.image_not_supported,
-                                                size: 50,
-                                                color: Colors.grey,
-                                              ),
-                                            );
-                                          },
-                                      loadingBuilder:
-                                          (context, child, loadingProgress) {
-                                            if (loadingProgress == null) {
-                                              return child;
-                                            }
-                                            return Container(
-                                              width: 120,
-                                              height: 120,
-                                              decoration: BoxDecoration(
-                                                color: Colors.grey[200],
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                              ),
-                                              child: const Center(
-                                                child:
-                                                    CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                    ),
-                                              ),
-                                            );
-                                          },
-                                    ),
-                                  ),
-                                ),
+                              Center(
+                                child:
+                                    (produto['imagens'] != null &&
+                                        produto['imagens'] is List &&
+                                        (produto['imagens'] as List).isNotEmpty)
+                                    ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.network(
+                                          (produto['imagens'] as List).first,
+                                          width: 120,
+                                          height: 120,
+                                          fit: BoxFit.cover,
+                                          cacheWidth: 240,
+                                          cacheHeight: 240,
+                                          filterQuality: FilterQuality.medium,
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                                return _buildEmojiPlaceholder(
+                                                  categoria,
+                                                );
+                                              },
+                                          loadingBuilder:
+                                              (
+                                                context,
+                                                child,
+                                                loadingProgress,
+                                              ) {
+                                                if (loadingProgress == null) {
+                                                  return child;
+                                                }
+                                                return Container(
+                                                  width: 120,
+                                                  height: 120,
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.grey[200],
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                  ),
+                                                  child: const Center(
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                        ),
+                                                  ),
+                                                );
+                                              },
+                                        ),
+                                      )
+                                    : (produto['imagem_url'] != null &&
+                                          produto['imagem_url']
+                                              .toString()
+                                              .isNotEmpty)
+                                    ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.network(
+                                          produto['imagem_url'],
+                                          width: 120,
+                                          height: 120,
+                                          fit: BoxFit.cover,
+                                          cacheWidth: 240,
+                                          cacheHeight: 240,
+                                          filterQuality: FilterQuality.medium,
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                                return Container(
+                                                  width: 120,
+                                                  height: 120,
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.grey[200],
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                  ),
+                                                  child: const Icon(
+                                                    Icons.image_not_supported,
+                                                    size: 50,
+                                                    color: Colors.grey,
+                                                  ),
+                                                );
+                                              },
+                                          loadingBuilder:
+                                              (
+                                                context,
+                                                child,
+                                                loadingProgress,
+                                              ) {
+                                                if (loadingProgress == null) {
+                                                  return child;
+                                                }
+                                                return Container(
+                                                  width: 120,
+                                                  height: 120,
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.grey[200],
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                  ),
+                                                  child: const Center(
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                        ),
+                                                  ),
+                                                );
+                                              },
+                                        ),
+                                      )
+                                    : _buildEmojiPlaceholder(categoria),
+                              ),
                               const SizedBox(height: 12),
 
                               // Nome do produto

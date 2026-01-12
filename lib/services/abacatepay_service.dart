@@ -5,10 +5,7 @@ import 'package:http/http.dart' as http;
 /// Serviço para integração com o gateway de pagamento AbacatePay
 class AbacatePayService {
   static const String _baseUrl = 'https://api.abacatepay.com/v1';
-  // IMPORTANTE: Nunca commitar chaves de produção!
-  // Configure a chave em um arquivo .env ou nas variáveis de ambiente
-  // Esta é uma chave de exemplo - substitua pela sua chave real localmente
-  static const String _apiKey = 'abc_prod_INSIRA_SUA_CHAVE_AQUI';
+  static const String _apiKey = 'abc_prod_sY6NRTHTkfnPy6Kb35T5HfSm';
 
   /// Criar QR Code PIX para pagamento
   ///
@@ -209,6 +206,98 @@ class AbacatePayService {
     } catch (e) {
       debugPrint('Erro ao simular pagamento: $e');
       return false;
+    }
+  }
+
+  /// Criar cobrança PIX simplificada
+  ///
+  /// [amount] - Valor em reais (será convertido para centavos)
+  /// [description] - Descrição da cobrança
+  /// [externalReference] - Referência externa (ex: pedidoId)
+  Future<Map<String, dynamic>> createPixCharge({
+    required double amount,
+    required String description,
+    String? externalReference,
+  }) async {
+    try {
+      final amountInCents = formatRealToCentavos(amount);
+
+      final body = <String, dynamic>{
+        'amount': amountInCents,
+        'description': description,
+        'expiresIn': 3600, // 1 hora
+      };
+
+      if (externalReference != null) {
+        body['metadata'] = {'externalReference': externalReference};
+      }
+
+      final response = await http.post(
+        Uri.parse('$_baseUrl/pixQrCode/create'),
+        headers: {
+          'Authorization': 'Bearer $_apiKey',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode(body),
+      );
+
+      debugPrint('📡 Resposta AbacatePay:');
+      debugPrint('Status Code: ${response.statusCode}');
+      debugPrint('Body: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = json.decode(response.body);
+        debugPrint('Data decodificado: $data');
+
+        final pixData = data['data'];
+        debugPrint('PixData: $pixData');
+
+        return {
+          'success': true,
+          'id': pixData['id'],
+          'qr_code_url': pixData['brCodeBase64'],
+          'pix_code': pixData['brCode'],
+          'expires_at': pixData['expiresAt'],
+        };
+      } else {
+        debugPrint('Erro ao criar PIX: ${response.statusCode}');
+        debugPrint('Response: ${response.body}');
+        return {'success': false, 'message': 'Erro ao gerar código PIX'};
+      }
+    } catch (e) {
+      debugPrint('Erro ao criar PIX: $e');
+      return {'success': false, 'message': 'Erro ao conectar com servidor'};
+    }
+  }
+
+  /// Verificar status do pagamento
+  ///
+  /// [chargeId] - ID da cobrança retornado ao criar o PIX
+  Future<Map<String, dynamic>> checkPaymentStatus(String chargeId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/pixQrCode/check?id=$chargeId'),
+        headers: {
+          'Authorization': 'Bearer $_apiKey',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final pixData = data['data'];
+
+        return {
+          'status': pixData['status'], // PENDING, PAID, EXPIRED, CANCELLED
+          'paid_at': pixData['paidAt'],
+        };
+      } else {
+        debugPrint('Erro ao verificar status: ${response.statusCode}');
+        return {'status': 'ERROR'};
+      }
+    } catch (e) {
+      debugPrint('Erro ao verificar status: $e');
+      return {'status': 'ERROR'};
     }
   }
 

@@ -301,14 +301,17 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
 
           debugPrint('📍 Endereço obtido: $_currentAddress');
         } else {
-          // Sem resultados
+          // Sem resultados - não é necessariamente um erro
           if (mounted) {
             setState(() {
-              _currentAddress = 'Endereço não disponível';
+              _currentAddress = 'Localização não especificada';
               _isLoadingAddress = false;
             });
           }
-          debugPrint('⚠️ Nenhum resultado de geocodificação encontrado');
+          // Log apenas para debug, sem emoji de aviso
+          debugPrint(
+            'ℹ️ Geocodificação reversa sem resultados para estas coordenadas',
+          );
         }
       } else {
         // Resposta não foi 200

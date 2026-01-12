@@ -965,6 +965,9 @@ class _AdminScreenState extends State<AdminScreen>
                                   width: 56,
                                   height: 56,
                                   fit: BoxFit.cover,
+                                  cacheWidth: 112,
+                                  cacheHeight: 112,
+                                  filterQuality: FilterQuality.medium,
                                   errorBuilder: (context, error, stackTrace) =>
                                       CircleAvatar(
                                         backgroundColor: Colors.grey[200],

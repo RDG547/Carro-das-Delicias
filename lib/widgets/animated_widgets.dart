@@ -937,6 +937,9 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                   child: Image.network(
                                     widget.produto['imagem_url'],
                                     fit: BoxFit.cover,
+                                    cacheWidth: 240,
+                                    cacheHeight: 240,
+                                    filterQuality: FilterQuality.medium,
                                     errorBuilder:
                                         (context, error, stackTrace) => Center(
                                           child: Text(

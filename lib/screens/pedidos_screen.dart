@@ -97,6 +97,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
           }
 
           return {
+            'produto_id': item['produto_id'], // IMPORTANTE: incluir produto_id
             'nome': produto?['nome'] ?? 'Produto não encontrado',
             'quantidade': item['quantidade'],
             'preco': item['preco_unitario'],
@@ -146,6 +147,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
       }
 
       // Carregar pedidos do usuário atual do banco de dados
+      // Não mostrar pedidos com status 'pendente' ou 'aguardando_pagamento'
       final response = await Supabase.instance.client
           .from('pedidos')
           .select('''
@@ -161,6 +163,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
             )
           ''')
           .eq('user_id', user.id)
+          .not('status', 'in', '(pendente,aguardando_pagamento)')
           .order('created_at', ascending: false);
 
       // Processar os dados dos pedidos
@@ -186,6 +189,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
               }
 
               return {
+                'produto_id':
+                    item['produto_id'], // IMPORTANTE: incluir produto_id
                 'nome': produto?['nome'] ?? 'Produto não encontrado',
                 'quantidade': item['quantidade'],
                 'preco': item['preco_unitario'],
@@ -449,7 +454,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
           // Buscar produto completo - primeiro verificar se existe
           final produtoResponse = await Supabase.instance.client
               .from('produtos')
-              .select('*, categorias!categoria_id(nome, icone)')
+              .select('*, categorias!inner(nome, icone)')
               .eq('id', produtoId)
               .maybeSingle();
 
@@ -501,48 +506,44 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
       if (mounted) {
         if (itensAdicionados > 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.check_circle, color: Colors.white),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '$itensAdicionados ${itensAdicionados == 1 ? 'item adicionado' : 'itens adicionados'} ao carrinho!',
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
-              action: SnackBarAction(
-                label: 'Ver Carrinho',
-                textColor: Colors.white,
-                onPressed: () {
-                  // Navega para o carrinho usando o PageView do MainScreen
-                  final provider = MainNavigationProvider.of(context);
-                  if (provider?.navigateToPageDirect != null) {
-                    provider!.navigateToPageDirect!(2); // Índice 2 = Carrinho
-                  }
-                },
-              ),
-            ),
-          );
+          // Navegar direto para a tela de checkout
+          final provider = MainNavigationProvider.of(context);
+          if (provider?.navigateToPageDirect != null) {
+            // Primeiro vai para o carrinho
+            provider!.navigateToPageDirect!(2); // Índice 2 = Carrinho
 
-          // Avisar sobre produtos indisponíveis se houver
-          if (produtosIndisponiveis.isNotEmpty) {
-            Future.delayed(const Duration(seconds: 3), () {
+            // Depois navega para checkout
+            Future.delayed(const Duration(milliseconds: 300), () {
               if (mounted) {
+                Navigator.pushNamed(context, '/checkout');
+
+                // Mostrar mensagem de sucesso
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      'Produtos não disponíveis: ${produtosIndisponiveis.join(', ')}',
+                      '$itensAdicionados ${itensAdicionados == 1 ? 'item adicionado' : 'itens adicionados'} ao carrinho!',
                     ),
-                    backgroundColor: Colors.orange,
+                    backgroundColor: Colors.green,
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 2),
                   ),
                 );
+
+                // Avisar sobre produtos indisponíveis se houver
+                if (produtosIndisponiveis.isNotEmpty) {
+                  Future.delayed(const Duration(seconds: 2), () {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Produtos não disponíveis: ${produtosIndisponiveis.join(', ')}',
+                          ),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    }
+                  });
+                }
               }
             });
           }
@@ -615,7 +616,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
           : RefreshIndicator(
               onRefresh: _loadPedidos,
               child: ListView.builder(
-                padding: const EdgeInsets.all(16),
+                addRepaintBoundaries: true,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                 itemCount: _pedidos.length,
                 itemBuilder: (context, index) {
                   final pedido = _pedidos[index];

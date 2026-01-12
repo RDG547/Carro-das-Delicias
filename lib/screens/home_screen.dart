@@ -8,7 +8,6 @@ import '../widgets/animated_widgets.dart';
 import '../widgets/form_dialogs.dart';
 import '../widgets/product_carousel.dart';
 import '../widgets/app_menu.dart';
-import '../utils/constants.dart';
 import '../utils/custom_fab_location.dart';
 import '../services/favorites_service.dart';
 import 'product_detail_screen.dart';
@@ -244,121 +243,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onCategoryChanged() {
     _cachedFilteredProducts = null; // Invalidar cache para forçar rebuild
-  }
-
-  Future<void> _showReportsDialog() async {
-    try {
-      // Estatísticas básicas
-      final totalProdutos = _produtos.length;
-      final totalCategorias = _categorias.length;
-
-      // Produtos por categoria
-      Map<String, int> produtosPorCategoria = {};
-      for (var produto in _produtos) {
-        String categoria = produto['categoria_nome'] ?? 'Sem categoria';
-        produtosPorCategoria[categoria] =
-            (produtosPorCategoria[categoria] ?? 0) + 1;
-      }
-
-      // Média de preços
-      double mediaPrecos = 0;
-      if (_produtos.isNotEmpty) {
-        double somaPrecos = _produtos.fold(
-          0,
-          (sum, produto) => sum + (produto['preco'] ?? 0),
-        );
-        mediaPrecos = somaPrecos / _produtos.length;
-      }
-
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('📊 Relatórios'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Estatísticas gerais
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Estatísticas Gerais',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text('Total de Produtos: $totalProdutos'),
-                        Text('Total de Categorias: $totalCategorias'),
-                        Text(
-                          'Preço Médio: ${CurrencyFormatter.format(mediaPrecos)}',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Produtos por categoria
-                const Text(
-                  'Produtos por Categoria',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                ...produtosPorCategoria.entries.map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(entry.key),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            '${entry.value}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fechar'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao carregar relatórios: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
   }
 
   @override
@@ -705,13 +589,6 @@ class _HomeScreenState extends State<HomeScreen> {
       showBackButton: false,
       padding: EdgeInsets.zero,
       actions: [
-        // Botão de Relatórios (só para admins)
-        if (!widget.isGuestMode && _isAdmin)
-          IconButton(
-            onPressed: _showReportsDialog,
-            icon: const Icon(Icons.bar_chart),
-            tooltip: 'Relatórios',
-          ),
         AppMenu(
           isGuestMode: widget.isGuestMode,
           isAdmin: _isAdmin,
@@ -812,6 +689,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               valueListenable: _selectedCategoryNotifier,
                               builder: (context, selectedCategory, child) {
                                 return ListView.builder(
+                                  addRepaintBoundaries: true,
                                   key: const PageStorageKey<String>(
                                     'categoriesListView',
                                   ),
@@ -924,6 +802,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: SizedBox(
                               height: 200,
                               child: ListView.builder(
+                                addRepaintBoundaries: true,
                                 scrollDirection: Axis.horizontal,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 16,
@@ -931,14 +810,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                 itemCount: _novidades.length,
                                 itemBuilder: (context, index) {
                                   final produto = _novidades[index];
-                                  return Container(
-                                    width: 160,
-                                    margin: const EdgeInsets.only(right: 12),
-                                    child: AnimatedProductCard(
-                                      produto: produto,
-                                      onTap: widget.isGuestMode
-                                          ? () => _onProductTap(produto)
-                                          : null, // Usar comportamento padrão se não for guest mode
+                                  return RepaintBoundary(
+                                    child: Container(
+                                      width: 160,
+                                      margin: const EdgeInsets.only(right: 12),
+                                      child: AnimatedProductCard(
+                                        produto: produto,
+                                        onTap: widget.isGuestMode
+                                            ? () => _onProductTap(produto)
+                                            : null, // Usar comportamento padrão se não for guest mode
+                                      ),
                                     ),
                                   );
                                 },
@@ -1066,16 +947,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ) {
                                           final produto =
                                               _filteredProducts[index];
-                                          return Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 6,
-                                            ),
-                                            child: AnimatedProductCard(
-                                              produto: produto,
-                                              onTap: widget.isGuestMode
-                                                  ? () => _onProductTap(produto)
-                                                  : null, // Usar comportamento padrão se não for guest mode
+                                          return RepaintBoundary(
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 16,
+                                                    vertical: 6,
+                                                  ),
+                                              child: AnimatedProductCard(
+                                                produto: produto,
+                                                onTap: widget.isGuestMode
+                                                    ? () =>
+                                                          _onProductTap(produto)
+                                                    : null, // Usar comportamento padrão se não for guest mode
+                                              ),
                                             ),
                                           );
                                         }, childCount: _filteredProducts.length),

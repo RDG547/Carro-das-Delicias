@@ -45,6 +45,8 @@ dependencies:
   mapbox_maps_flutter: ^2.3.0
   http: ^1.6.0
   webview_flutter: ^4.10.0
+  share_plus: ^10.1.4
+  app_links: ^6.4.1
 
 
   # Tempo real e estado
@@ -52,6 +54,8 @@ dependencies:
 
   # Utilitários
   uuid: ^4.5.2
+  qr_flutter: ^4.1.0
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:
