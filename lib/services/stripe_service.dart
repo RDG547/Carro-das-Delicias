@@ -5,9 +5,7 @@ import 'dart:convert';
 
 /// Serviço para integração com o Stripe para pagamentos com cartão
 class StripeService {
-  // Chaves de produção do Stripe carregadas do .env
-  // ignore: unused_field
-  static String get _publishableKey => dotenv.env['STRIPE_PUBLISHABLE_KEY'] ?? '';
+  // Chave secreta do Stripe carregada do .env
   static String get _secretKey => dotenv.env['STRIPE_SECRET_KEY'] ?? '';
   static const String _baseUrl = 'https://api.stripe.com/v1';
 
