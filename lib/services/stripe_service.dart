@@ -6,10 +6,14 @@ import 'dart:convert';
 class StripeService {
   // Chaves de produção do Stripe - DEVEM SER CONFIGURADAS VIA VARIÁVEIS DE AMBIENTE
   // ignore: unused_field
-  static const String _publishableKey =
-      String.fromEnvironment('STRIPE_PUBLISHABLE_KEY', defaultValue: '');
-  static const String _secretKey =
-      String.fromEnvironment('STRIPE_SECRET_KEY', defaultValue: '');
+  static const String _publishableKey = String.fromEnvironment(
+    'STRIPE_PUBLISHABLE_KEY',
+    defaultValue: '',
+  );
+  static const String _secretKey = String.fromEnvironment(
+    'STRIPE_SECRET_KEY',
+    defaultValue: '',
+  );
   static const String _baseUrl = 'https://api.stripe.com/v1';
 
   // URLs de retorno (substituir por URLs reais em produção)

@@ -5,7 +5,10 @@ import 'package:http/http.dart' as http;
 /// Serviço para integração com o gateway de pagamento AbacatePay
 class AbacatePayService {
   static const String _baseUrl = 'https://api.abacatepay.com/v1';
-  static const String _apiKey = 'abc_prod_sY6NRTHTkfnPy6Kb35T5HfSm';
+  static const String _apiKey = String.fromEnvironment(
+    'ABACATEPAY_API_KEY',
+    defaultValue: '',
+  );
 
   /// Criar QR Code PIX para pagamento
   ///
