@@ -1,14 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Serviço para integração com o gateway de pagamento AbacatePay
 class AbacatePayService {
   static const String _baseUrl = 'https://api.abacatepay.com/v1';
-  static const String _apiKey = String.fromEnvironment(
-    'ABACATEPAY_API_KEY',
-    defaultValue: '',
-  );
+  static String get _apiKey => dotenv.env['ABACATEPAY_API_KEY'] ?? '';
 
   /// Criar QR Code PIX para pagamento
   ///

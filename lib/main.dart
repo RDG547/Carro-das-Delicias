@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'config/supabase_config.dart';
 import 'services/notification_service.dart';
 import 'auth_wrapper.dart';
@@ -8,6 +9,9 @@ import 'screens/checkout_screen.dart';
 Future<void> main() async {
   // Garante que os bindings do Flutter foram inicializados
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Carrega variáveis de ambiente
+  await dotenv.load(fileName: ".env");
 
   // Inicializa o Supabase com configuração segura
   await Supabase.initialize(
