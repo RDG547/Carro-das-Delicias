@@ -280,6 +280,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
     switch (status.toLowerCase()) {
       case 'pendente':
         return Colors.orange;
+      case 'pago':
+        return Colors.teal;
       case 'confirmado':
         return Colors.blue;
       case 'entregue':
@@ -299,6 +301,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
     switch (status.toLowerCase()) {
       case 'pendente':
         return Icons.pending_actions;
+      case 'pago':
+        return Icons.payment;
       case 'confirmado':
         return Icons.check_circle_outline;
       case 'entregue':
@@ -318,6 +322,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
     switch (status.toLowerCase()) {
       case 'pendente':
         return 'Pendente';
+      case 'pago':
+        return 'Pago';
       case 'confirmado':
         return 'Confirmado';
       case 'entregue':
@@ -435,6 +441,10 @@ class _PedidosScreenState extends State<PedidosScreen> {
         }
         return;
       }
+
+      // Limpar carrinho antes de adicionar itens do pedido
+      await cartService.clearCart();
+      debugPrint('🗑️ Carrinho limpo antes de refazer pedido');
 
       int itensAdicionados = 0;
       List<String> produtosIndisponiveis = [];
@@ -853,9 +863,10 @@ class _PedidosScreenState extends State<PedidosScreen> {
                               ],
                             ),
 
-                            // Botão de cancelar (apenas para pendentes/confirmados)
+                            // Botão de cancelar (apenas para pendentes/confirmados/pago)
                             if (pedido['status'] == 'pendente' ||
-                                pedido['status'] == 'confirmado') ...[
+                                pedido['status'] == 'confirmado' ||
+                                pedido['status'] == 'pago') ...[
                               const SizedBox(height: 8),
                               SizedBox(
                                 width: double.infinity,
@@ -1022,6 +1033,8 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     switch (status.toLowerCase()) {
       case 'pendente':
         return Colors.orange;
+      case 'pago':
+        return Colors.teal;
       case 'confirmado':
         return Colors.blue;
       case 'em preparo':
@@ -1041,6 +1054,8 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     switch (status.toLowerCase()) {
       case 'pendente':
         return Icons.pending_actions;
+      case 'pago':
+        return Icons.payment;
       case 'confirmado':
         return Icons.check_circle_outline;
       case 'em preparo':
@@ -1060,6 +1075,8 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     switch (status.toLowerCase()) {
       case 'pendente':
         return 'Pendente';
+      case 'pago':
+        return 'Pago';
       case 'confirmado':
         return 'Confirmado';
       case 'em preparo':
@@ -1079,8 +1096,9 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     IconData icon,
     String label,
     String value,
-    Color color,
-  ) {
+    Color color, {
+    String? imageUrl,
+  }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1090,7 +1108,15 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
             color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, color: color, size: 20),
+          child: imageUrl != null
+              ? Image.network(
+                  imageUrl,
+                  width: 20,
+                  height: 20,
+                  errorBuilder: (context, error, stackTrace) =>
+                      Icon(icon, color: color, size: 20),
+                )
+              : Icon(icon, color: color, size: 20),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -1126,12 +1152,28 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
         return 'Dinheiro';
       case 'pix':
         return 'PIX';
+      case 'credito':
       case 'cartao_credito':
         return 'Cartão de Crédito';
       case 'cartao_debito':
         return 'Cartão de Débito';
       default:
         return metodo;
+    }
+  }
+
+  String? _getMetodoPagamentoIconUrl(String metodo) {
+    switch (metodo.toLowerCase()) {
+      case 'pix':
+        return 'https://img.icons8.com/color/48/pix.png';
+      case 'credito':
+      case 'cartao_credito':
+      case 'cartao_debito':
+        return 'https://img.icons8.com/color/48/bank-card-back-side.png';
+      case 'dinheiro':
+        return 'https://img.icons8.com/material/24/wallet--v1.png';
+      default:
+        return null;
     }
   }
 
@@ -1200,7 +1242,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
               _buildDetailRow(
                 Icons.location_on,
                 'Endereço',
-                '${widget.pedido['endereco_completo'] ?? ''}\n${widget.pedido['bairro'] ?? ''}, ${widget.pedido['cidade'] ?? ''}${widget.pedido['cep'] != null ? '\nCEP: ${widget.pedido['cep']}' : ''}',
+                '${widget.pedido['endereco_completo'] ?? 'Não informado'}${widget.pedido['bairro'] != null ? '\nBairro: ${widget.pedido['bairro']}' : ''}${widget.pedido['cidade'] != null ? '\n${widget.pedido['cidade']}' : ''}${widget.pedido['cep'] != null ? ' - CEP: ${widget.pedido['cep']}' : ''}',
                 Colors.orange,
               ),
               const SizedBox(height: 12),
@@ -1213,6 +1255,9 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                   widget.pedido['metodo_pagamento'] ?? 'dinheiro',
                 ),
                 Colors.teal,
+                imageUrl: _getMetodoPagamentoIconUrl(
+                  widget.pedido['metodo_pagamento'] ?? 'dinheiro',
+                ),
               ),
 
               // Troco (se pagamento em dinheiro)

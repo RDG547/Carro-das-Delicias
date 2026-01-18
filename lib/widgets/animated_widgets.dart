@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../utils/constants.dart';
 import '../services/cart_service.dart';
 import '../services/favorites_service.dart';
 import '../screens/product_detail_screen.dart';
 import '../screens/checkout_screen.dart';
 import 'size_selector_dialog.dart';
+import 'main_navigation_provider.dart';
+import '../providers/admin_status_provider.dart';
+import 'edit_product_dialog.dart';
 
 /// Botão animado com efeito de escala ao pressionar
 class AnimatedButton extends StatefulWidget {
@@ -749,6 +753,16 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
+          action: SnackBarAction(
+            label: 'Ver Carrinho',
+            textColor: Colors.white,
+            onPressed: () {
+              final provider = MainNavigationProvider.of(context);
+              if (provider?.navigateToPageDirect != null) {
+                provider!.navigateToPageDirect!(4);
+              }
+            },
+          ),
         ),
       );
     }
@@ -791,6 +805,16 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
               backgroundColor: Colors.green,
               behavior: SnackBarBehavior.floating,
               duration: const Duration(seconds: 2),
+              action: SnackBarAction(
+                label: 'Ver Carrinho',
+                textColor: Colors.white,
+                onPressed: () {
+                  final provider = MainNavigationProvider.of(context);
+                  if (provider?.navigateToPageDirect != null) {
+                    provider!.navigateToPageDirect!(4);
+                  }
+                },
+              ),
             ),
           );
         },
@@ -815,6 +839,163 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erro ao abrir detalhes do produto: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showAdminOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Text(
+                widget.produto['nome'],
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.edit, color: Colors.blue),
+                title: const Text('Editar Produto'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showEditProductDialog();
+                },
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Excluir Produto'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showDeleteConfirmation();
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showEditProductDialog() async {
+    try {
+      // Buscar categorias do Supabase
+      final response = await Supabase.instance.client
+          .from('categorias')
+          .select()
+          .order('ordem', ascending: true);
+
+      final categorias = List<Map<String, dynamic>>.from(response);
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (context) => EditProductDialog(
+          produto: widget.produto,
+          categorias: categorias,
+          onProductUpdated: () {
+            // Recarregar a página atual
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Produto atualizado com sucesso!'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          },
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao carregar categorias: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showDeleteConfirmation() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar Exclusão'),
+        content: Text(
+          'Tem certeza que deseja excluir o produto "${widget.produto['nome']}"?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _deleteProduct();
+    }
+  }
+
+  Future<void> _deleteProduct() async {
+    try {
+      await Supabase.instance.client
+          .from('produtos')
+          .delete()
+          .eq('id', widget.produto['id']);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Produto excluído com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Voltar para a tela anterior ou atualizar a lista
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao excluir produto: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -871,6 +1052,15 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                   _goToProductDetail();
                 }
               },
+              onLongPress: () {
+                debugPrint('👆 Long press no card do produto');
+                _controller.reverse();
+                // Verifica se é admin
+                final adminProvider = AdminStatusProvider.of(context);
+                if (adminProvider != null && adminProvider.isAdmin) {
+                  _showAdminOptions();
+                }
+              },
               child: Column(
                 children: [
                   // Tag de Promoção/Desconto no topo (se houver)
@@ -920,8 +1110,8 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                       children: [
                         // Imagem ou Ícone da categoria
                         Container(
-                          width: 50,
-                          height: 50,
+                          width: 80,
+                          height: 80,
                           decoration: BoxDecoration(
                             color: Colors.orange[100],
                             borderRadius: BorderRadius.circular(12),

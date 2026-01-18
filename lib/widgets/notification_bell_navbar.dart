@@ -401,159 +401,186 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
                         ? _getTimeAgo(createdAt)
                         : '';
 
-                    return Dismissible(
-                      key: ValueKey(notification['id']),
-                      direction: DismissDirection.endToStart,
-                      confirmDismiss: (direction) async {
-                        return await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Excluir notificação'),
-                            content: const Text(
-                              'Deseja realmente excluir esta notificação?',
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text('Cancelar'),
+                    return ClipRect(
+                      child: Dismissible(
+                        key: ValueKey(notification['id']),
+                        direction: DismissDirection.endToStart,
+                        confirmDismiss: (direction) async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Excluir notificação'),
+                              content: const Text(
+                                'Deseja realmente excluir esta notificação?',
                               ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: Colors.red,
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Cancelar'),
                                 ),
-                                child: const Text('Excluir'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                      onDismissed: (direction) async {
-                        debugPrint(
-                          '🗑️ Deletando notificação ${notification['id']}...',
-                        );
-                        await NotificationService.deleteNotification(
-                          notification['id'],
-                        );
-                        debugPrint('♻️ Recarregando lista de notificações...');
-                        await _loadNotifications();
-                        debugPrint('✅ Notificação deletada com sucesso!');
-                      },
-                      background: Container(
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 20),
-                        color: Colors.red,
-                        child: const Icon(
-                          Icons.delete,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                      child: InkWell(
-                        onTap: () async {
-                          if (!isRead) {
-                            await NotificationService.markAsRead(
-                              notification['id'],
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.red,
+                                  ),
+                                  child: const Text('Excluir'),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          // Se confirmou, remover da lista local ANTES de retornar true
+                          if (confirm == true) {
+                            final notificationId = notification['id'];
+                            debugPrint(
+                              '🗑️ Usuário confirmou exclusão da notificação $notificationId',
                             );
-                            _loadNotifications();
+
+                            if (mounted) {
+                              setState(() {
+                                _notifications.removeWhere(
+                                  (n) => n['id'] == notificationId,
+                                );
+                                // Atualizar contador de não lidas se necessário
+                                if (!(notification['is_read'] ?? false)) {
+                                  _unreadCount = (_unreadCount - 1)
+                                      .clamp(0, double.infinity)
+                                      .toInt();
+                                }
+                              });
+                            }
+
+                            // Deletar do banco de dados
+                            await NotificationService.deleteNotification(
+                              notificationId,
+                            );
+                            debugPrint('✅ Notificação deletada com sucesso!');
                           }
-                          _removeOverlay();
+
+                          return confirm;
                         },
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
+                        onDismissed: (direction) {
+                          // Já foi tratado no confirmDismiss
+                          debugPrint('📤 onDismissed chamado (já processado)');
+                        },
+                        background: Container(
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          color: Colors.red,
+                          child: const Icon(
+                            Icons.delete,
+                            color: Colors.white,
+                            size: 28,
                           ),
-                          decoration: BoxDecoration(
-                            color: isRead
-                                ? null
-                                : Colors.blue.withValues(alpha: 0.05),
-                            border: Border(
-                              bottom: BorderSide(color: Colors.grey.shade200),
+                        ),
+                        child: InkWell(
+                          onTap: () async {
+                            if (!isRead) {
+                              await NotificationService.markAsRead(
+                                notification['id'],
+                              );
+                              _loadNotifications();
+                            }
+                            _removeOverlay();
+                          },
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
                             ),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: _getTypeColor(
-                                    notification['type'],
-                                  ).withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Icon(
-                                  _getTypeIcon(notification['type']),
-                                  color: _getTypeColor(notification['type']),
-                                  size: 18,
-                                ),
+                            decoration: BoxDecoration(
+                              color: isRead
+                                  ? null
+                                  : Colors.blue.withValues(alpha: 0.05),
+                              border: Border(
+                                bottom: BorderSide(color: Colors.grey.shade200),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            notification['title'] ?? '',
-                                            style: TextStyle(
-                                              fontWeight: isRead
-                                                  ? FontWeight.normal
-                                                  : FontWeight.bold,
-                                              fontSize: 13,
-                                              color: Colors.black,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: _getTypeColor(
+                                      notification['type'],
+                                    ).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Icon(
+                                    _getTypeIcon(notification['type']),
+                                    color: _getTypeColor(notification['type']),
+                                    size: 18,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              notification['title'] ?? '',
+                                              style: TextStyle(
+                                                fontWeight: isRead
+                                                    ? FontWeight.normal
+                                                    : FontWeight.bold,
+                                                fontSize: 13,
+                                                color: Colors.black,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
                                           ),
-                                        ),
-                                        if (!isRead)
-                                          Container(
-                                            width: 7,
-                                            height: 7,
-                                            margin: const EdgeInsets.only(
-                                              left: 4,
+                                          if (!isRead)
+                                            Container(
+                                              width: 7,
+                                              height: 7,
+                                              margin: const EdgeInsets.only(
+                                                left: 4,
+                                              ),
+                                              decoration: const BoxDecoration(
+                                                color: Colors.blue,
+                                                shape: BoxShape.circle,
+                                              ),
                                             ),
-                                            decoration: const BoxDecoration(
-                                              color: Colors.blue,
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      notification['message'] ?? '',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey[700],
+                                        ],
                                       ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (timeAgo.isNotEmpty) ...[
                                       const SizedBox(height: 3),
                                       Text(
-                                        timeAgo,
+                                        notification['message'] ?? '',
                                         style: TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.grey[500],
+                                          fontSize: 11,
+                                          color: Colors.grey[700],
                                         ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
+                                      if (timeAgo.isNotEmpty) ...[
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          timeAgo,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey[500],
+                                          ),
+                                        ),
+                                      ],
                                     ],
-                                  ],
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    );
+                      ), // Dismissible
+                    ); // ClipRect
                   },
                 ),
         ),

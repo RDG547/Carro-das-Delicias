@@ -378,6 +378,7 @@ class _AdminScreenState extends State<AdminScreen>
     return BaseScreen(
       title: 'Painel Admin',
       actions: [AppMenu(isGuestMode: false, isAdmin: true)],
+      padding: EdgeInsets.zero, // Remove o padding padrão
       onBackPressed: () {
         debugPrint('🔙 Botão voltar pressionado - Voltando para Home');
         final provider = MainNavigationProvider.of(context);
@@ -2660,6 +2661,8 @@ class _AdminScreenState extends State<AdminScreen>
     switch (status) {
       case 'pendente':
         return Colors.orange;
+      case 'pago':
+        return Colors.teal;
       case 'confirmado':
         return Colors.blue;
       case 'em preparo':
@@ -2679,6 +2682,8 @@ class _AdminScreenState extends State<AdminScreen>
     switch (status) {
       case 'pendente':
         return Icons.pending_actions;
+      case 'pago':
+        return Icons.payment;
       case 'confirmado':
         return Icons.check_circle_outline;
       case 'em preparo':
@@ -2698,6 +2703,8 @@ class _AdminScreenState extends State<AdminScreen>
     switch (status) {
       case 'pendente':
         return 'Pendente';
+      case 'pago':
+        return 'Pago';
       case 'confirmado':
         return 'Confirmado';
       case 'entregue':
@@ -2757,6 +2764,21 @@ class _AdminScreenState extends State<AdminScreen>
   List<Map<String, dynamic>> _getAvailableStatuses(String currentStatus) {
     switch (currentStatus) {
       case 'pendente':
+        return [
+          {
+            'status': 'confirmado',
+            'label': 'Confirmar',
+            'icon': Icons.check_circle_outline,
+            'color': Colors.blue,
+          },
+          {
+            'status': 'cancelado',
+            'label': 'Cancelar',
+            'icon': Icons.cancel,
+            'color': Colors.red,
+          },
+        ];
+      case 'pago':
         return [
           {
             'status': 'confirmado',

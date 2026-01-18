@@ -592,20 +592,23 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           : null,
                     ),
                     const SizedBox(width: 16),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    Expanded(
+                      child: Row(
                         children: [
-                          Text(
+                          Image.network(
+                            'https://img.icons8.com/color/48/pix.png',
+                            width: 24,
+                            height: 24,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Icon(Icons.payment, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text(
                             'PIX',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w500,
                             ),
-                          ),
-                          Text(
-                            'Chave PIX gerada no app',
-                            style: TextStyle(fontSize: 14, color: Colors.grey),
                           ),
                         ],
                       ),
@@ -664,20 +667,23 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           : null,
                     ),
                     const SizedBox(width: 16),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    Expanded(
+                      child: Row(
                         children: [
-                          Text(
+                          Image.network(
+                            'https://img.icons8.com/color/48/bank-card-back-side.png',
+                            width: 24,
+                            height: 24,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Icon(Icons.credit_card, size: 24),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text(
                             'Cartão de Crédito',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w500,
                             ),
-                          ),
-                          Text(
-                            'Pagamento no app',
-                            style: TextStyle(fontSize: 14, color: Colors.grey),
                           ),
                         ],
                       ),
@@ -759,6 +765,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           children: [
                             Row(
                               children: [
+                                Image.network(
+                                  'https://img.icons8.com/material/24/wallet--v1.png',
+                                  width: 24,
+                                  height: 24,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const Icon(Icons.payments, size: 24),
+                                ),
+                                const SizedBox(width: 12),
                                 const Text(
                                   'Dinheiro',
                                   style: TextStyle(

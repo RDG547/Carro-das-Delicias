@@ -275,7 +275,7 @@ class _MainScreenState extends State<MainScreen> {
                             : _currentIndex, // Garante índice válido
                         onTap: _onTabTapped,
                         type: BottomNavigationBarType.fixed,
-                        backgroundColor: Colors.transparent,
+                        backgroundColor: Colors.white,
                         selectedItemColor: _currentIndex < 0
                             ? Colors.grey[600]
                             : Colors.black,

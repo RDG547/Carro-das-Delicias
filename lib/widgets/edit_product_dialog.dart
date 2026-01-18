@@ -27,6 +27,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
   late TextEditingController _imagemController;
 
   String? _selectedCategoryId;
+  bool _isDisponivel = true;
   bool _isMaisVendido = false;
   bool _isNovidade = false;
   bool _isPromocao = false;
@@ -58,6 +59,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
     );
 
     _selectedCategoryId = widget.produto['categoria_id']?.toString();
+    _isDisponivel = widget.produto['ativo'] ?? true;
     _isMaisVendido = widget.produto['mais_vendido'] ?? false;
     _isNovidade = widget.produto['novidade'] ?? false;
     _isPromocao = widget.produto['promocao'] ?? false;
@@ -351,6 +353,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
         'imagens': _productImages.isNotEmpty
             ? _productImages
             : null, // Todas as imagens
+        'ativo': _isDisponivel,
         'mais_vendido': _isMaisVendido,
         'novidade': _isNovidade,
         'promocao': _isPromocao && valorDesconto != null && valorDesconto > 0,
@@ -548,18 +551,22 @@ class _EditProductDialogState extends State<EditProductDialog> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [CurrencyInputFormatter()],
                       enableInteractiveSelection: false,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Preço *',
-                        labelStyle: TextStyle(
+                        labelStyle: const TextStyle(
                           color: Colors.blue,
                           fontWeight: FontWeight.w600,
                         ),
-                        prefixIcon: Icon(
+                        prefixIcon: const Icon(
                           Icons.attach_money,
                           color: Colors.blue,
                         ),
+                        hintText: 'R\$ 0,00',
+                        hintStyle: TextStyle(
+                          color: Colors.grey.withValues(alpha: 0.5),
+                        ),
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(16),
+                        contentPadding: const EdgeInsets.all(16),
                       ),
                     ),
                   ),
@@ -748,12 +755,38 @@ class _EditProductDialogState extends State<EditProductDialog> {
                                       onTap: () async {
                                         final scaffoldMessenger =
                                             ScaffoldMessenger.of(context);
+
+                                        // Deletar do storage
                                         await ImageService.deleteProductImage(
                                           imageUrl,
                                         );
+
+                                        // Remover da lista local
                                         setState(() {
                                           _productImages.removeAt(index);
                                         });
+
+                                        // Atualizar imediatamente no banco de dados
+                                        try {
+                                          await Supabase.instance.client
+                                              .from('produtos')
+                                              .update({
+                                                'imagens':
+                                                    _productImages.isNotEmpty
+                                                    ? _productImages
+                                                    : null,
+                                                'imagem_url':
+                                                    _productImages.isNotEmpty
+                                                    ? _productImages.first
+                                                    : null,
+                                              })
+                                              .eq('id', widget.produto['id']);
+                                        } catch (e) {
+                                          debugPrint(
+                                            'Erro ao atualizar imagens no banco: $e',
+                                          );
+                                        }
+
                                         if (mounted) {
                                           scaffoldMessenger.showSnackBar(
                                             const SnackBar(
@@ -951,6 +984,16 @@ class _EditProductDialogState extends State<EditProductDialog> {
                             ),
                           ),
                         ],
+                      ),
+                      CheckboxListTile(
+                        title: const Text('Produto Disponível'),
+                        value: _isDisponivel,
+                        activeColor: Colors.green,
+                        onChanged: (value) {
+                          setState(() {
+                            _isDisponivel = value ?? true;
+                          });
+                        },
                       ),
                       CheckboxListTile(
                         title: const Text('Mais Vendido'),

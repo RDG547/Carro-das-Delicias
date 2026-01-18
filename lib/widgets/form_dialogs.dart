@@ -63,19 +63,18 @@ class _AddProductDialogState extends State<AddProductDialog> {
   final _precoController = TextEditingController(text: 'R\$ 0,00');
   final _precoAnteriorController = TextEditingController(text: 'R\$ 0,00');
   final _precoComDescontoController = TextEditingController(text: 'R\$ 0,00');
+  final _valorDescontoController = TextEditingController(text: 'R\$ 0,00');
   final _imagemUrlController = TextEditingController();
   String? _selectedCategoryId;
   bool _isDisponivel = true;
   bool _isMaisVendido = false;
   bool _isNovidade = false;
   bool _isComDesconto = false;
-  bool _showOptionalFields = false;
   bool _hasMultipleSizes = false; // Nova opção para produtos com tamanhos
 
   // Campos para upload de imagem
   File? _selectedImage;
   String? _uploadedImageUrl;
-  bool _isUploadingImage = false;
 
   // Lista de tamanhos e preços
   final List<Map<String, dynamic>> _sizes = [];
@@ -87,6 +86,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
     _precoController.dispose();
     _precoAnteriorController.dispose();
     _precoComDescontoController.dispose();
+    _valorDescontoController.dispose();
     _imagemUrlController.dispose();
     super.dispose();
   }
@@ -141,68 +141,6 @@ class _AddProductDialogState extends State<AddProductDialog> {
     } else {
       debugPrint('🖼️ Nenhuma imagem foi selecionada ou retornou null');
     }
-  }
-
-  Future<void> _uploadImage() async {
-    if (_selectedImage == null) return;
-
-    setState(() {
-      _isUploadingImage = true;
-    });
-
-    try {
-      // Fazer upload da imagem
-      final imageUrl = await ImageService.uploadProductImage(
-        imageFile: _selectedImage!,
-        productId: 0, // Será atualizado após criar o produto
-      );
-
-      if (imageUrl != null) {
-        setState(() {
-          _uploadedImageUrl = imageUrl;
-          _imagemUrlController.text = imageUrl;
-        });
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Imagem enviada com sucesso!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Erro ao enviar imagem'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao enviar imagem: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      setState(() {
-        _isUploadingImage = false;
-      });
-    }
-  }
-
-  void _removeImage() {
-    setState(() {
-      _selectedImage = null;
-      _uploadedImageUrl = null;
-      _imagemUrlController.clear();
-    });
   }
 
   Future<void> _addProduct() async {
@@ -369,7 +307,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
         }).toList();
       }
 
-      await Supabase.instance.client.from('produtos').insert({
+      final produtoData = {
         'nome': nomeProduto,
         'descricao': _descricaoController.text.trim().isEmpty
             ? null
@@ -384,7 +322,19 @@ class _AddProductDialogState extends State<AddProductDialog> {
         'promocao':
             precoAnterior != null, // Automaticamente true se tem desconto
         'tamanhos': tamanhos, // Array JSON de tamanhos e preços
-      });
+      };
+
+      try {
+        // Tentar chamar função RPC que bypassa RLS
+        await Supabase.instance.client.rpc(
+          'insert_produto_admin',
+          params: {'dados': produtoData},
+        );
+      } catch (rpcError) {
+        debugPrint('RPC insert falhou: $rpcError');
+        // Tentar insert normal
+        await Supabase.instance.client.from('produtos').insert(produtoData);
+      }
 
       if (mounted) {
         navigator.pop();
@@ -465,8 +415,28 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       hintStyle: TextStyle(color: Colors.grey),
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.all(16),
-                      helperText: 'Obrigatório',
-                      helperStyle: TextStyle(color: Colors.green),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Descrição
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: TextField(
+                    controller: _descricaoController,
+                    maxLines: 3,
+                    enableInteractiveSelection: false,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Descrição',
+                      prefixIcon: Icon(Icons.description),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.all(16),
                     ),
                   ),
                 ),
@@ -485,22 +455,20 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       controller: _precoController,
                       keyboardType: TextInputType.number,
                       inputFormatters: [CurrencyInputFormatter()],
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Preço *',
-                        labelStyle: TextStyle(
+                        labelStyle: const TextStyle(
                           color: Colors.green,
                           fontWeight: FontWeight.w600,
                         ),
-                        prefixIcon: Icon(
+                        prefixIcon: const Icon(
                           Icons.attach_money,
                           color: Colors.green,
                         ),
                         hintText: 'R\$ 0,00',
-                        hintStyle: TextStyle(color: Colors.grey),
+                        hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.5)),
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(16),
-                        helperText: 'Obrigatório',
-                        helperStyle: TextStyle(color: Colors.green),
+                        contentPadding: const EdgeInsets.all(16),
                       ),
                     ),
                   ),
@@ -517,19 +485,17 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       controller: _precoAnteriorController,
                       keyboardType: TextInputType.number,
                       inputFormatters: [CurrencyInputFormatter()],
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Preço Anterior *',
-                        labelStyle: TextStyle(
+                        labelStyle: const TextStyle(
                           color: Colors.orange,
                           fontWeight: FontWeight.w600,
                         ),
-                        prefixIcon: Icon(Icons.money_off, color: Colors.orange),
+                        prefixIcon: const Icon(Icons.money_off, color: Colors.orange),
                         hintText: 'R\$ 0,00',
-                        hintStyle: TextStyle(color: Colors.grey),
+                        hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.5)),
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(16),
-                        helperText: 'Preço original sem desconto',
-                        helperStyle: TextStyle(color: Colors.orange),
+                        contentPadding: const EdgeInsets.all(16),
                       ),
                     ),
                   ),
@@ -544,22 +510,20 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       controller: _precoComDescontoController,
                       keyboardType: TextInputType.number,
                       inputFormatters: [CurrencyInputFormatter()],
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Preço com Desconto *',
-                        labelStyle: TextStyle(
+                        labelStyle: const TextStyle(
                           color: Colors.green,
                           fontWeight: FontWeight.w600,
                         ),
-                        prefixIcon: Icon(
+                        prefixIcon: const Icon(
                           Icons.local_offer,
                           color: Colors.green,
                         ),
                         hintText: 'R\$ 0,00',
-                        hintStyle: TextStyle(color: Colors.grey),
+                        hintStyle: TextStyle(color: Colors.grey.withValues(alpha: 0.5)),
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(16),
-                        helperText: 'Preço promocional',
-                        helperStyle: TextStyle(color: Colors.green),
+                        contentPadding: const EdgeInsets.all(16),
                       ),
                     ),
                   ),
@@ -584,8 +548,6 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       prefixIcon: Icon(Icons.category, color: Colors.green),
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.all(16),
-                      helperText: 'Obrigatório',
-                      helperStyle: TextStyle(color: Colors.green),
                     ),
                     items: widget.categorias.map((categoria) {
                       return DropdownMenuItem<String>(
@@ -611,76 +573,6 @@ class _AddProductDialogState extends State<AddProductDialog> {
                 ),
                 const SizedBox(height: 16),
 
-                // Switch para campos opcionais
-                GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _showOptionalFields = !_showOptionalFields;
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.blue[100]!),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _showOptionalFields
-                              ? Icons.expand_less
-                              : Icons.expand_more,
-                          color: Colors.blue,
-                        ),
-                        const SizedBox(width: 12),
-                        const Text(
-                          'Campos Opcionais',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.blue,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                if (_showOptionalFields) ...[
-                  const SizedBox(height: 16),
-
-                  // Descrição
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
-                    child: TextField(
-                      controller: _descricaoController,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Descrição',
-                        labelStyle: TextStyle(
-                          color: Colors.black87,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        prefixIcon: Icon(
-                          Icons.description,
-                          color: Colors.black54,
-                        ),
-                        hintText: 'Descreva o produto...',
-                        hintStyle: TextStyle(color: Colors.grey),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(16),
-                        helperText: 'Opcional',
-                        helperStyle: TextStyle(color: Colors.black54),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
                   // Upload de Imagem
                   Container(
                     decoration: BoxDecoration(
@@ -688,20 +580,36 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.grey[300]!),
                     ),
+                    padding: const EdgeInsets.all(16),
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        const Text(
+                          'Imagens do Produto',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'A primeira imagem será a principal.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 16),
+
                         // Preview da imagem
                         if (_selectedImage != null || _uploadedImageUrl != null)
                           Container(
                             width: double.infinity,
-                            height: 200,
-                            margin: const EdgeInsets.all(16),
+                            height: 120,
+                            margin: const EdgeInsets.only(bottom: 16),
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey[300]!),
+                              border: Border.all(color: Colors.blue, width: 2),
                             ),
                             child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(7),
                               child: _selectedImage != null
                                   ? Image.file(
                                       _selectedImage!,
@@ -711,202 +619,149 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                   ? Image.network(
                                       _uploadedImageUrl!,
                                       fit: BoxFit.cover,
-                                      cacheWidth: 300,
-                                      cacheHeight: 300,
+                                      cacheWidth: 240,
+                                      cacheHeight: 240,
                                       filterQuality: FilterQuality.medium,
-                                      errorBuilder:
-                                          (context, error, stackTrace) {
-                                            return const Center(
-                                              child: Icon(
-                                                Icons.error,
-                                                size: 50,
-                                              ),
-                                            );
-                                          },
+                                      errorBuilder: (context, error, stackTrace) {
+                                        return Container(
+                                          color: Colors.grey[200],
+                                          child: const Center(
+                                            child: Icon(
+                                              Icons.error,
+                                              color: Colors.red,
+                                            ),
+                                          ),
+                                        );
+                                      },
                                     )
                                   : null,
                             ),
                           ),
 
                         // Botões de ação
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
+                        Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    flex: 2,
-                                    child: ElevatedButton.icon(
-                                      onPressed: _isUploadingImage
-                                          ? null
-                                          : _selectImage,
-                                      icon: _isUploadingImage
-                                          ? const SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : const Icon(
-                                              Icons.photo_library,
-                                              size: 18,
-                                            ),
-                                      label: Text(
-                                        _selectedImage != null
-                                            ? 'Alterar'
-                                            : 'Selecionar',
-                                        style: const TextStyle(fontSize: 13),
-                                      ),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.blue,
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 12,
+                              ElevatedButton.icon(
+                                onPressed: _selectImage,
+                                icon: const Icon(Icons.add_photo_alternate),
+                                label: Text(
+                                  _selectedImage != null || _uploadedImageUrl != null
+                                      ? 'Adicionar Mais'
+                                      : 'Adicionar Imagens',
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  final image = await ImageService.pickImageFromCamera();
+                                  if (image != null) {
+                                    setState(() {
+                                      _selectedImage = image;
+                                      _uploadedImageUrl = null;
+                                    });
+                                  }
+                                },
+                                icon: const Icon(Icons.camera_alt),
+                                label: const Text('Tirar Foto'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[100],
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: Colors.grey[300]!,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.info_outline,
+                                      color: Colors.grey[600],
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Expanded(
+                                      child: Text(
+                                        'Ou cole uma URL:',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey,
                                         ),
                                       ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _imagemUrlController,
+                                decoration: const InputDecoration(
+                                  labelText: 'URL da imagem',
+                                  labelStyle: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 12,
+                                  ),
+                                  prefixIcon: Icon(
+                                    Icons.link,
+                                    color: Colors.grey,
+                                    size: 18,
+                                  ),
+                                  hintText: 'https://exemplo.com/imagem.jpg',
+                                  hintStyle: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 12,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.all(
+                                      Radius.circular(8),
                                     ),
                                   ),
-                                  if (_selectedImage != null &&
-                                      _uploadedImageUrl == null) ...[
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      flex: 2,
-                                      child: ElevatedButton.icon(
-                                        onPressed: _isUploadingImage
-                                            ? null
-                                            : _uploadImage,
-                                        icon: _isUploadingImage
-                                            ? const SizedBox(
-                                                width: 16,
-                                                height: 16,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                    ),
-                                              )
-                                            : const Icon(
-                                                Icons.cloud_upload,
-                                                size: 18,
-                                              ),
-                                        label: const Text(
-                                          'Enviar',
-                                          style: TextStyle(fontSize: 13),
-                                        ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.green,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 12,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                  if (_selectedImage != null ||
-                                      _uploadedImageUrl != null) ...[
-                                    const SizedBox(width: 4),
-                                    SizedBox(
-                                      width: 40,
-                                      child: IconButton(
-                                        onPressed: _removeImage,
-                                        icon: const Icon(
-                                          Icons.delete,
-                                          color: Colors.red,
-                                          size: 20,
-                                        ),
-                                        padding: EdgeInsets.zero,
-                                        tooltip: 'Remover',
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-
-                              // URL manual como alternativa (menos proeminente)
-                              if (_uploadedImageUrl == null) ...[
-                                const SizedBox(height: 12),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
+                                  contentPadding: EdgeInsets.symmetric(
                                     horizontal: 12,
                                     vertical: 8,
                                   ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey[100],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: Colors.grey[300]!,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.info_outline,
-                                        color: Colors.grey[600],
-                                        size: 16,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'Ou use URL manual:',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.grey[600],
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                  isDense: true,
                                 ),
-                                const SizedBox(height: 8),
-                                TextField(
-                                  controller: _imagemUrlController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'URL da imagem',
-                                    labelStyle: TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12,
-                                    ),
-                                    prefixIcon: Icon(
-                                      Icons.link,
-                                      color: Colors.grey,
-                                      size: 18,
-                                    ),
-                                    hintText: 'https://exemplo.com/imagem.jpg',
-                                    hintStyle: TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12,
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.all(
-                                        Radius.circular(8),
-                                      ),
-                                      borderSide: BorderSide(
-                                        color: Colors.grey,
-                                      ),
-                                    ),
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    isDense: true,
-                                  ),
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                              ],
+                                style: const TextStyle(fontSize: 12),
+                                onChanged: (url) {
+                                  if (url.isNotEmpty) {
+                                    setState(() {
+                                      _uploadedImageUrl = url;
+                                    });
+                                  }
+                                },
+                              ),
                             ],
                           ),
-                        ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-                  // Switches para características
-                  Container(
+                // Características (Switches)
+                Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.green[50],
@@ -1058,6 +913,58 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       ],
                     ),
                   ),
+
+                  // Campo de Desconto (visível quando marcado como promoção)
+                  if (_isComDesconto) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.green[200]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TextField(
+                            controller: _valorDescontoController,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [CurrencyInputFormatter()],
+                            enableInteractiveSelection: false,
+                            decoration: InputDecoration(
+                              labelText: 'Valor do Desconto (em R\$)',
+                              labelStyle: const TextStyle(
+                                color: Colors.green,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              hintText: _hasMultipleSizes
+                                  ? 'Ex: R\$ 5,00'
+                                  : 'Valor a ser deduzido do preço',
+                              hintStyle: const TextStyle(fontSize: 12),
+                              prefixIcon: const Icon(
+                                Icons.local_offer,
+                                color: Colors.green,
+                              ),
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.all(16),
+                            ),
+                          ),
+                          if (_hasMultipleSizes)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                              child: Text(
+                                '💡 Este valor será deduzido automaticamente de TODOS os preços',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.green[700],
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
 
                   // Switch para Múltiplos Tamanhos
@@ -1291,7 +1198,6 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       ),
                     ),
                   ],
-                ],
               ],
             ),
           ),

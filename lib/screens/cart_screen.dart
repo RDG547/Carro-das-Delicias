@@ -191,13 +191,9 @@ class _CartScreenState extends State<CartScreen> {
           : Stack(
               children: [
                 _buildCartContent(),
-                // Botão de finalizar fixo acima da navbar (responsivo)
+                // Botão de finalizar fixo - fica atrás da navbar
                 Positioned(
-                  bottom:
-                      80 +
-                      MediaQuery.of(context)
-                          .padding
-                          .bottom, // Altura da navbar (80px) + padding do dispositivo
+                  bottom: 0,
                   left: 0,
                   right: 0,
                   child: _buildCheckoutButton(),
@@ -296,7 +292,7 @@ class _CartScreenState extends State<CartScreen> {
               right: 16,
               top: 16,
               bottom:
-                  140, // Espaço para o botão de finalizar (aprox 120px) + margem
+                  220, // Espaço para o botão de finalizar (120px) + navbar (80px) + margem (20px)
             ),
             itemCount: _cartService.items.length,
             itemBuilder: (context, index) {
@@ -456,33 +452,52 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Widget _buildQuantityControls(CartItem item) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildQuantityButton(
-            icon: Icons.remove,
-            onPressed: () =>
-                _cartService.updateQuantity(item.id, item.quantidade - 1),
+    return Column(
+      children: [
+        const Text(
+          'Quantidade',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: Colors.grey,
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Text(
-              item.quantidade.toString(),
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(20),
           ),
-          _buildQuantityButton(
-            icon: Icons.add,
-            onPressed: () =>
-                _cartService.updateQuantity(item.id, item.quantidade + 1),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildQuantityButton(
+                icon: Icons.remove,
+                onPressed: () =>
+                    _cartService.updateQuantity(item.id, item.quantidade - 1),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
+                child: Text(
+                  item.quantidade.toString(),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              _buildQuantityButton(
+                icon: Icons.add,
+                onPressed: () =>
+                    _cartService.updateQuantity(item.id, item.quantidade + 1),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -537,7 +552,7 @@ class _CartScreenState extends State<CartScreen> {
           TextField(
             controller: controller,
             decoration: const InputDecoration(
-              hintText: 'Ex: Sem cebola, ponto da carne...',
+              hintText: 'Escreva uma observação... (opcional)',
               hintStyle: TextStyle(fontSize: 12),
               border: InputBorder.none,
               contentPadding: EdgeInsets.zero,
@@ -558,7 +573,7 @@ class _CartScreenState extends State<CartScreen> {
 
   Widget _buildCheckoutButton() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [

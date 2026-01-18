@@ -120,14 +120,27 @@ class CartService extends ChangeNotifier {
   }) async {
     final productId = produto['id'].toString();
 
+    // Converter tamanho_selecionado para string se necessário
+    String? tamanhoSelecionadoString;
+    if (produto['tamanho_selecionado'] != null) {
+      if (produto['tamanho_selecionado'] is Map) {
+        tamanhoSelecionadoString = json.encode(produto['tamanho_selecionado']);
+      } else {
+        tamanhoSelecionadoString = produto['tamanho_selecionado'].toString();
+      }
+    }
+
     // Se for "Comprar Agora", remover itens anteriores marcados como buyNow
     if (isBuyNow) {
       _items.removeWhere((item) => item.isBuyNow);
     }
 
-    // Verificar se o produto já existe no carrinho (e não é buyNow)
+    // Verificar se o produto já existe no carrinho (considerando tamanho e não sendo buyNow)
     final existingIndex = _items.indexWhere(
-      (item) => item.id == productId && !item.isBuyNow,
+      (item) =>
+          item.id == productId &&
+          item.tamanhoSelecionado == tamanhoSelecionadoString &&
+          !item.isBuyNow,
     );
 
     if (existingIndex >= 0 && !isBuyNow) {
@@ -139,18 +152,6 @@ class CartService extends ChangeNotifier {
       }
     } else {
       // Se não existe ou é buyNow, adicionar nova entrada
-      // Converter tamanho_selecionado para JSON string se for um Map
-      String? tamanhoSelecionadoString;
-      if (produto['tamanho_selecionado'] != null) {
-        if (produto['tamanho_selecionado'] is Map) {
-          tamanhoSelecionadoString = json.encode(
-            produto['tamanho_selecionado'],
-          );
-        } else {
-          tamanhoSelecionadoString = produto['tamanho_selecionado'].toString();
-        }
-      }
-
       final cartItem = CartItem(
         id: productId,
         nome: produto['nome'] ?? 'Produto sem nome',
