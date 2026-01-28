@@ -105,7 +105,7 @@ class _HomeScreenState extends State<HomeScreen> {
     const withAccents =
         'àáâãäåòóôõöøèéêëçìíîïùúûüÿñÀÁÂÃÄÅÒÓÔÕÖØÈÉÊËÇÌÍÎÏÙÚÛÜŸÑ';
     const withoutAccents =
-        'aaaaaaooooooeeeeciiiuuuuynAAAAAOOOOOOEEEECIIIUUUUYN';
+        'aaaaaaooooooeeeeciiiiuuuuynAAAAAAOOOOOOEEEECIIIIUUUUYN';
 
     String result = text;
     for (int i = 0; i < withAccents.length; i++) {
@@ -689,7 +689,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: _getProdutosEmDestaque().length,
                     itemBuilder: (context, index) {
-                      final produto = _getProdutosEmDestaque()[index];
+                      final produtos = _getProdutosEmDestaque();
+                      if (index >= produtos.length) {
+                        return const SizedBox.shrink();
+                      }
+                      final produto = produtos[index];
                       return Padding(
                         padding: EdgeInsets.only(
                           right: index == _getProdutosEmDestaque().length - 1
@@ -745,6 +749,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: _maisVendidos.length,
                     itemBuilder: (context, index) {
+                      if (index >= _maisVendidos.length) {
+                        return const SizedBox.shrink();
+                      }
                       final produto = _maisVendidos[index];
                       return Padding(
                         padding: EdgeInsets.only(
@@ -799,6 +806,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: _novidades.length,
                     itemBuilder: (context, index) {
+                      if (index >= _novidades.length) {
+                        return const SizedBox.shrink();
+                      }
                       final produto = _novidades[index];
                       return Padding(
                         padding: EdgeInsets.only(
@@ -937,6 +947,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                   itemCount: _categoriasComFavoritos.length,
                                   itemBuilder: (context, index) {
+                                    if (index >=
+                                        _categoriasComFavoritos.length) {
+                                      return const SizedBox.shrink();
+                                    }
                                     final categoria =
                                         _categoriasComFavoritos[index];
                                     final isSelected =
@@ -1136,6 +1150,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                           context,
                                           index,
                                         ) {
+                                          // Proteção contra índice fora do range durante rebuilds
+                                          if (index >=
+                                              _filteredProducts.length) {
+                                            return const SizedBox.shrink();
+                                          }
+
                                           final produto =
                                               _filteredProducts[index];
                                           return RepaintBoundary(
