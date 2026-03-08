@@ -12,7 +12,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Carrega variáveis de ambiente
-  await dotenv.load(fileName: ".env");
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (_) {
+    // .env pode não existir em CI/CD builds
+  }
 
   // Inicializa o Supabase com configuração segura
   await Supabase.initialize(

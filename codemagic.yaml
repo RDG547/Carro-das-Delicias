@@ -23,6 +23,9 @@ workflows:
       - name: Set up local.properties
         script: |
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Create .env file
+        script: |
+          echo "" > "$CM_BUILD_DIR/.env"
       - name: Get Flutter packages
         script: |
           flutter packages pub get
@@ -69,6 +72,9 @@ workflows:
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
+      - name: Create .env file
+        script: |
+          echo "" > "$CM_BUILD_DIR/.env"
       - name: Get Flutter packages
         script: |
           flutter packages pub get
