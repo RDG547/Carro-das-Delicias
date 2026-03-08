@@ -8,6 +8,8 @@ import '../screens/product_detail_screen.dart';
 import '../screens/checkout_screen.dart';
 import 'size_selector_dialog.dart';
 import 'main_navigation_provider.dart';
+import 'category_icon_widget.dart';
+import 'favorite_heart_animation.dart';
 import '../providers/admin_status_provider.dart';
 import 'edit_product_dialog.dart';
 
@@ -279,13 +281,17 @@ class _AnimatedTextFieldState extends State<AnimatedTextField>
 class AnimatedProductCard extends StatefulWidget {
   final Map<String, dynamic> produto;
   final VoidCallback? onTap;
+  final VoidCallback? onProductDeleted;
   final bool showAddToCart;
+  final bool? isAdmin; // Parâmetro opcional para forçar status de admin
 
   const AnimatedProductCard({
     super.key,
     required this.produto,
     this.onTap,
+    this.onProductDeleted,
     this.showAddToCart = true,
+    this.isAdmin,
   });
 
   @override
@@ -822,17 +828,21 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
     );
   }
 
-  void _goToProductDetail() {
+  void _goToProductDetail() async {
     try {
       debugPrint(
         '🔗 Navegando para detalhes do produto: ${widget.produto['nome']}',
       );
-      Navigator.push(
+      final result = await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ProductDetailScreen(produto: widget.produto),
         ),
       );
+      if (result == 'go_to_cart' && mounted) {
+        final provider = MainNavigationProvider.of(context);
+        provider?.navigateToPageDirect?.call(4);
+      }
     } catch (e) {
       debugPrint('❌ Erro ao navegar para detalhes: $e');
       if (mounted) {
@@ -886,7 +896,12 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
               ),
               const Divider(),
               ListTile(
-                leading: const Icon(Icons.delete, color: Colors.red),
+                leading: Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 24,
+                  height: 24,
+                  color: Colors.black,
+                ),
                 title: const Text('Excluir Produto'),
                 onTap: () {
                   Navigator.pop(context);
@@ -954,7 +969,18 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar'),
+              ],
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -962,7 +988,19 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Excluir'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 18,
+                  height: 18,
+                  color: Colors.black,
+                ),
+                const SizedBox(width: 4),
+                const Text('Excluir'),
+              ],
+            ),
           ),
         ],
       ),
@@ -970,6 +1008,43 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
 
     if (confirmed == true) {
       await _deleteProduct();
+    }
+  }
+
+  // Verifica se o erro é de conexão de rede
+  bool _isConnectionError(dynamic error) {
+    if (error == null) return false;
+    final errorString = error.toString().toLowerCase();
+    return errorString.contains('socketexception') ||
+        errorString.contains('no route to host') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection timed out') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('network is unreachable') ||
+        errorString.contains('errno = 113') ||
+        errorString.contains('errno = 111') ||
+        errorString.contains('clientexception');
+  }
+
+  void _showConnectionErrorSnackbar() {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.wifi_off, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Sem conexão com o servidor. Verifique sua internet.',
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -988,17 +1063,21 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
           ),
         );
 
-        // Voltar para a tela anterior ou atualizar a lista
-        Navigator.pop(context);
+        // Notificar o pai para recarregar a lista de produtos
+        widget.onProductDeleted?.call();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao excluir produto: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (_isConnectionError(e)) {
+          _showConnectionErrorSnackbar();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao excluir produto: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -1055,9 +1134,16 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
               onLongPress: () {
                 debugPrint('👆 Long press no card do produto');
                 _controller.reverse();
-                // Verifica se é admin
-                final adminProvider = AdminStatusProvider.of(context);
-                if (adminProvider != null && adminProvider.isAdmin) {
+                // Verifica se é admin (do parâmetro ou do provider)
+                bool adminStatus = false;
+                if (widget.isAdmin != null) {
+                  adminStatus = widget.isAdmin!;
+                } else {
+                  final adminProvider = AdminStatusProvider.of(context);
+                  adminStatus = adminProvider != null && adminProvider.isAdmin;
+                }
+                debugPrint('👤 IsAdmin para long press: $adminStatus');
+                if (adminStatus) {
                   _showAdminOptions();
                 }
               },
@@ -1132,20 +1218,20 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                     filterQuality: FilterQuality.medium,
                                     errorBuilder:
                                         (context, error, stackTrace) => Center(
-                                          child: Text(
-                                            widget.produto['categoria_icone'] ??
-                                                '🍰',
-                                            style: const TextStyle(
-                                              fontSize: 24,
-                                            ),
+                                          child: CategoryIconWidget(
+                                            icone: widget
+                                                .produto['categoria_icone'],
+                                            size: 40,
                                           ),
                                         ),
                                   ),
                                 )
                               : Center(
-                                  child: Text(
-                                    widget.produto['categoria_icone'] ?? '🍰',
-                                    style: const TextStyle(fontSize: 24),
+                                  child: CategoryIconWidget(
+                                    icone:
+                                        widget.produto['categoria_icone'] ??
+                                        '🍰',
+                                    size: 40,
                                   ),
                                 ),
                         ),
@@ -1202,11 +1288,20 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                   context,
                                 );
                                 final productName = widget.produto['nome'];
+                                final overlay = Overlay.of(context);
 
                                 await _favoritesService.toggleFavorite(
                                   productId,
                                 );
                                 setState(() {}); // Atualizar UI
+
+                                // Mostrar animação de coração
+                                if (mounted) {
+                                  FavoriteHeartAnimation.showWithOverlay(
+                                    overlay,
+                                    isFavoriting: !wasFavorite,
+                                  );
+                                }
 
                                 // Mostrar feedback visual
                                 if (mounted) {

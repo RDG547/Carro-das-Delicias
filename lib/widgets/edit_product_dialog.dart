@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/image_service.dart';
 import 'form_dialogs.dart'; // Para usar CurrencyInputFormatter
+import 'category_icon_widget.dart';
 
 class EditProductDialog extends StatefulWidget {
   final Map<String, dynamic> produto;
@@ -90,10 +91,16 @@ class _EditProductDialogState extends State<EditProductDialog> {
           : '',
     );
 
-    // Inicializar preço
-    _precoController = TextEditingController(
-      text: widget.produto['preco']?.toString() ?? '',
-    );
+    // Inicializar preço formatado como R$ X,XX
+    final precoRaw = widget.produto['preco'];
+    if (precoRaw != null) {
+      final precoDouble = double.tryParse(precoRaw.toString()) ?? 0.0;
+      _precoController = TextEditingController(
+        text: 'R\$ ${precoDouble.toStringAsFixed(2).replaceAll('.', ',')}',
+      );
+    } else {
+      _precoController = TextEditingController(text: 'R\$ 0,00');
+    }
 
     // Verificar se tem múltiplos tamanhos
     final tamanhos = widget.produto['tamanhos'];
@@ -558,7 +565,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                           fontWeight: FontWeight.w600,
                         ),
                         prefixIcon: const Icon(
-                          Icons.attach_money,
+                          Icons.payments_outlined,
                           color: Colors.blue,
                         ),
                         hintText: 'R\$ 0,00',
@@ -594,8 +601,22 @@ class _EditProductDialogState extends State<EditProductDialog> {
                     items: widget.categorias.map((categoria) {
                       return DropdownMenuItem<String>(
                         value: categoria['id'].toString(),
-                        child: Text(
-                          '${categoria['icone']} ${categoria['nome']}',
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: Center(
+                                child: CategoryIconWidget(
+                                  icone: categoria['icone'] ?? '📦',
+                                  categoryName: categoria['nome'],
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(categoria['nome']),
+                          ],
                         ),
                       );
                     }).toList(),
@@ -653,10 +674,8 @@ class _EditProductDialogState extends State<EditProductDialog> {
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: _productImages.length,
                           onReorder: (oldIndex, newIndex) {
+                            if (oldIndex < newIndex) newIndex--;
                             setState(() {
-                              if (newIndex > oldIndex) {
-                                newIndex -= 1;
-                              }
                               final item = _productImages.removeAt(oldIndex);
                               _productImages.insert(newIndex, item);
                             });
@@ -1220,9 +1239,11 @@ class _EditProductDialogState extends State<EditProductDialog> {
                                 const SizedBox(width: 8),
                                 IconButton(
                                   onPressed: () => _removeSize(index),
-                                  icon: const Icon(
-                                    Icons.delete,
-                                    color: Colors.red,
+                                  icon: Image.asset(
+                                    'assets/icons/menu/delete_button.png',
+                                    width: 20,
+                                    height: 20,
+                                    color: Colors.black,
                                   ),
                                 ),
                               ],
@@ -1234,7 +1255,11 @@ class _EditProductDialogState extends State<EditProductDialog> {
                           width: double.infinity,
                           child: OutlinedButton.icon(
                             onPressed: _addSize,
-                            icon: const Icon(Icons.add),
+                            icon: Image.asset(
+                              'assets/icons/menu/add_button.png',
+                              width: 18,
+                              height: 18,
+                            ),
                             label: const Text('Adicionar Tamanho'),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.purple,
@@ -1262,9 +1287,20 @@ class _EditProductDialogState extends State<EditProductDialog> {
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  child: const Text(
-                    'Cancelar',
-                    style: TextStyle(color: Colors.grey),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/icons/menu/cancel_button.png',
+                        width: 18,
+                        height: 18,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'Cancelar',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ],
                   ),
                 ),
               ),

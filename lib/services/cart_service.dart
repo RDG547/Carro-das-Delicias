@@ -156,7 +156,12 @@ class CartService extends ChangeNotifier {
         id: productId,
         nome: produto['nome'] ?? 'Produto sem nome',
         preco: (produto['preco'] ?? 0.0).toDouble(),
-        imagemUrl: produto['imagem_url'],
+        imagemUrl:
+            produto['imagem_url'] ??
+            (produto['imagens'] is List &&
+                    (produto['imagens'] as List).isNotEmpty
+                ? (produto['imagens'] as List)[0]
+                : null),
         categoriaId: produto['categoria_id']?.toString(),
         categoriaNome: produto['categoria_nome'],
         quantidade: quantidade,

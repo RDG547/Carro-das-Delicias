@@ -1,4 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+
+/// Constrói o widget do ícone de categoria (suporta SVG asset, PNG asset, URL de imagem e emoji)
+Widget _buildCategoryIconWidget(String? icone, {double size = 24}) {
+  if (icone == null) return const SizedBox.shrink();
+  if (icone.startsWith('asset:')) {
+    final assetPath = icone.replaceFirst('asset:', '');
+    if (assetPath.endsWith('.svg')) {
+      return SvgPicture.asset(
+        assetPath,
+        width: size,
+        height: size,
+      );
+    } else {
+      return Image.asset(
+        assetPath,
+        width: size,
+        height: size,
+      );
+    }
+  } else if (icone.startsWith('http')) {
+    return Image.network(
+      icone,
+      width: size,
+      height: size,
+      errorBuilder: (context, error, stackTrace) =>
+          const Icon(Icons.broken_image, size: 16),
+    );
+  } else {
+    return Text(icone, style: TextStyle(fontSize: size * 0.67));
+  }
+}
 
 class ProductCarousel extends StatefulWidget {
   final List<Map<String, dynamic>> items;
@@ -141,11 +173,12 @@ class _ProductCarouselState extends State<ProductCarousel> {
                                                     error,
                                                     stackTrace,
                                                   ) => Center(
-                                                    child: Text(
-                                                      item['categoria_icone'] ??
-                                                          '🍰',
-                                                      style: const TextStyle(
-                                                        fontSize: 24,
+                                                    child: SizedBox(
+                                                      width: 50,
+                                                      height: 50,
+                                                      child: _buildCategoryIconWidget(
+                                                        item['categoria_icone'],
+                                                        size: 48,
                                                       ),
                                                     ),
                                                   ),
@@ -173,10 +206,12 @@ class _ProductCarouselState extends State<ProductCarousel> {
                                             ),
                                           )
                                         : Center(
-                                            child: Text(
-                                              item['categoria_icone'] ?? '🍰',
-                                              style: const TextStyle(
-                                                fontSize: 24,
+                                            child: SizedBox(
+                                              width: 50,
+                                              height: 50,
+                                              child: _buildCategoryIconWidget(
+                                                item['categoria_icone'] ?? '🍰',
+                                                size: 48,
                                               ),
                                             ),
                                           ),

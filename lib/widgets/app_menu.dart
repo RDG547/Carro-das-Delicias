@@ -83,7 +83,7 @@ class _AppMenuState extends State<AppMenu> {
               '⚠️ AppMenu - Data vazio, mantendo status atual: ${kombiOnlineStatus.value}',
             );
           } else {
-            final isOnline = data.first['is_online'] == true;
+            final isOnline = data.any((d) => d['is_online'] == true);
             debugPrint(
               '📡 AppMenu - Status atualizado: ${isOnline ? "ONLINE" : "OFFLINE"}',
             );
@@ -92,6 +92,21 @@ class _AppMenuState extends State<AppMenu> {
           }
         });
     debugPrint('✅ AppMenu - Stream subscription criado');
+  }
+
+  // Verifica se o erro é de conexão de rede
+  bool _isConnectionError(dynamic error) {
+    if (error == null) return false;
+    final errorString = error.toString().toLowerCase();
+    return errorString.contains('socketexception') ||
+        errorString.contains('no route to host') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection timed out') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('network is unreachable') ||
+        errorString.contains('errno = 113') ||
+        errorString.contains('errno = 111') ||
+        errorString.contains('clientexception');
   }
 
   Future<void> _checkKombiStatus() async {
@@ -116,7 +131,13 @@ class _AppMenuState extends State<AppMenu> {
         debugPrint('⚠️ AppMenu - Response null');
       }
     } catch (e) {
-      debugPrint('❌ AppMenu - Erro ao verificar status da Kombi: $e');
+      if (_isConnectionError(e)) {
+        debugPrint('⚠️ AppMenu - Sem conexão para verificar status da Kombi');
+        // Não mostrar erro, apenas manter status atual (offline)
+        kombiOnlineStatus.value = false;
+      } else {
+        debugPrint('❌ AppMenu - Erro ao verificar status da Kombi: $e');
+      }
     }
   }
 
@@ -142,7 +163,11 @@ class _AppMenuState extends State<AppMenu> {
         }
       }
     } catch (e) {
-      debugPrint('Erro ao carregar avatar: $e');
+      if (_isConnectionError(e)) {
+        debugPrint('⚠️ AppMenu - Sem conexão para carregar avatar');
+      } else {
+        debugPrint('Erro ao carregar avatar: $e');
+      }
       if (mounted) {
         setState(() => _isLoadingAvatar = false);
       }
@@ -474,8 +499,8 @@ class _AppMenuState extends State<AppMenu> {
                   ),
                   child: Icon(
                     widget.isGuestMode
-                        ? Icons.visibility_outlined
-                        : Icons.person_outline,
+                        ? Icons.visibility_rounded
+                        : Icons.person_rounded,
                     color: Colors.blue[700],
                   ),
                 ),
@@ -515,7 +540,7 @@ class _AppMenuState extends State<AppMenu> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Icon(
-                      Icons.admin_panel_settings_outlined,
+                      Icons.admin_panel_settings_sharp,
                       color: Colors.purple[700],
                     ),
                   ),
@@ -562,7 +587,7 @@ class _AppMenuState extends State<AppMenu> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(
-                        Icons.location_on,
+                        Icons.location_on_rounded,
                         color: isKombiOnlineLocal
                             ? Colors.green[700]
                             : Colors.grey[700],
@@ -645,7 +670,7 @@ class _AppMenuState extends State<AppMenu> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(
-                    widget.isGuestMode ? Icons.login : Icons.logout,
+                    widget.isGuestMode ? Icons.login_sharp : Icons.logout_sharp,
                     color: widget.isGuestMode
                         ? Colors.green[700]
                         : Colors.red[700],

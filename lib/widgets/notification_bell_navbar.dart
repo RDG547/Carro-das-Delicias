@@ -22,6 +22,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
   OverlayEntry? _overlayEntry;
   bool _isMenuOpen = false;
   RealtimeChannel? _updateChannel;
+  ScaffoldMessengerState? _scaffoldMessenger;
 
   @override
   void initState() {
@@ -191,6 +192,8 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
       return;
     }
 
+    _scaffoldMessenger = ScaffoldMessenger.of(context);
+
     final RenderBox renderBox = context.findRenderObject() as RenderBox;
     final offset = renderBox.localToGlobal(Offset.zero);
     final screenWidth = MediaQuery.of(context).size.width;
@@ -213,42 +216,50 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
     final menuBottom = screenHeight - offset.dy + 20; // Aumentado de 8 para 20
 
     _overlayEntry = OverlayEntry(
-      builder: (context) => GestureDetector(
-        onTap: _removeOverlay,
-        behavior: HitTestBehavior.translucent,
-        child: Stack(
-          children: [
-            Positioned(
-              left: menuLeft,
-              bottom: menuBottom,
-              width: menuWidth,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0.0, end: 1.0),
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeOutCubic,
-                builder: (context, value, child) {
-                  return Transform.scale(
-                    scale: value,
-                    alignment: Alignment.bottomCenter,
-                    child: Opacity(opacity: value, child: child),
-                  );
-                },
-                child: Material(
-                  elevation: 8,
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    constraints: BoxConstraints(maxHeight: dynamicHeight),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: _buildMenuContent(),
+      builder: (context) => Stack(
+        children: [
+          // Background tap to close - leave bottom 80px for snackbar
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 80,
+            child: GestureDetector(
+              onTap: _removeOverlay,
+              behavior: HitTestBehavior.translucent,
+              child: const SizedBox.expand(),
+            ),
+          ),
+          Positioned(
+            left: menuLeft,
+            bottom: menuBottom,
+            width: menuWidth,
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.0, end: 1.0),
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) {
+                return Transform.scale(
+                  scale: value,
+                  alignment: Alignment.bottomCenter,
+                  child: Opacity(opacity: value, child: child),
+                );
+              },
+              child: Material(
+                elevation: 8,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  constraints: BoxConstraints(maxHeight: dynamicHeight),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: _buildMenuContent(),
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
 
@@ -312,21 +323,57 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
                         final confirm = await showDialog<bool>(
                           context: context,
                           builder: (context) => AlertDialog(
-                            title: const Text('Limpar notificações'),
+                            title: const Text(
+                              'Limpar notificações',
+                              textAlign: TextAlign.center,
+                            ),
                             content: const Text(
                               'Deseja realmente excluir todas as notificações?',
+                              textAlign: TextAlign.center,
                             ),
+                            actionsAlignment: MainAxisAlignment.center,
                             actions: [
                               TextButton(
                                 onPressed: () => Navigator.pop(context, false),
-                                child: const Text('Cancelar'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: Colors.red,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Image.asset(
+                                      'assets/icons/menu/cancel_button.png',
+                                      width: 18,
+                                      height: 18,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Text('Cancelar'),
+                                  ],
                                 ),
-                                child: const Text('Excluir'),
+                              ),
+                              ElevatedButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Image.asset(
+                                      'assets/icons/menu/delete_button.png',
+                                      width: 18,
+                                      height: 18,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Text('Excluir'),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
@@ -342,7 +389,12 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
                           debugPrint('✅ Notificações limpas com sucesso!');
                         }
                       },
-                      icon: const Icon(Icons.delete_outline, size: 14),
+                      icon: Image.asset(
+                        'assets/icons/menu/delete_button.png',
+                        width: 14,
+                        height: 14,
+                        color: Colors.red,
+                      ),
                       label: const Text(
                         'Limpar tudo',
                         style: TextStyle(fontSize: 11),
@@ -405,73 +457,123 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
                       child: Dismissible(
                         key: ValueKey(notification['id']),
                         direction: DismissDirection.endToStart,
-                        confirmDismiss: (direction) async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('Excluir notificação'),
-                              content: const Text(
-                                'Deseja realmente excluir esta notificação?',
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, false),
-                                  child: const Text('Cancelar'),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: Colors.red,
-                                  ),
-                                  child: const Text('Excluir'),
-                                ),
-                              ],
-                            ),
+                        onDismissed: (direction) {
+                          final notificationId = notification['id'];
+                          final notificationIndex = index;
+                          final removedNotification = Map<String, dynamic>.from(
+                            notification,
+                          );
+                          final wasUnread = !(notification['is_read'] ?? false);
+
+                          debugPrint(
+                            '🗑️ Notificação $notificationId removida por swipe',
                           );
 
-                          // Se confirmou, remover da lista local ANTES de retornar true
-                          if (confirm == true) {
-                            final notificationId = notification['id'];
-                            debugPrint(
-                              '🗑️ Usuário confirmou exclusão da notificação $notificationId',
-                            );
+                          setState(() {
+                            _notifications.removeAt(notificationIndex);
+                            if (wasUnread) {
+                              _unreadCount = (_unreadCount - 1)
+                                  .clamp(0, double.infinity)
+                                  .toInt();
+                            }
+                          });
+                          _overlayEntry?.markNeedsBuild();
 
-                            if (mounted) {
-                              setState(() {
-                                _notifications.removeWhere(
-                                  (n) => n['id'] == notificationId,
-                                );
-                                // Atualizar contador de não lidas se necessário
-                                if (!(notification['is_read'] ?? false)) {
-                                  _unreadCount = (_unreadCount - 1)
-                                      .clamp(0, double.infinity)
-                                      .toInt();
+                          bool undone = false;
+                          final messenger = _scaffoldMessenger;
+                          if (messenger == null) return;
+
+                          messenger.clearSnackBars();
+                          messenger
+                              .showSnackBar(
+                                SnackBar(
+                                  duration: const Duration(seconds: 5),
+                                  content: TweenAnimationBuilder<double>(
+                                    tween: Tween(begin: 5.0, end: 0.0),
+                                    duration: const Duration(seconds: 5),
+                                    builder: (context, value, child) {
+                                      return Row(
+                                        children: [
+                                          SizedBox(
+                                            width: 22,
+                                            height: 22,
+                                            child: Stack(
+                                              alignment: Alignment.center,
+                                              children: [
+                                                CircularProgressIndicator(
+                                                  value: value / 5,
+                                                  strokeWidth: 2.5,
+                                                  valueColor:
+                                                      const AlwaysStoppedAnimation<
+                                                        Color
+                                                      >(Colors.white),
+                                                  backgroundColor:
+                                                      Colors.white24,
+                                                ),
+                                                Text(
+                                                  '${value.ceil()}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          const Text('Notificação excluída'),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                  action: SnackBarAction(
+                                    label: 'Desfazer',
+                                    textColor: Colors.yellow,
+                                    onPressed: () {
+                                      undone = true;
+                                      if (mounted) {
+                                        setState(() {
+                                          final insertAt = notificationIndex
+                                              .clamp(0, _notifications.length);
+                                          _notifications.insert(
+                                            insertAt,
+                                            removedNotification,
+                                          );
+                                          if (wasUnread) {
+                                            _unreadCount++;
+                                          }
+                                        });
+                                        _overlayEntry?.markNeedsBuild();
+                                      }
+                                      debugPrint(
+                                        '↩️ Notificação $notificationId restaurada',
+                                      );
+                                    },
+                                  ),
+                                ),
+                              )
+                              .closed
+                              .then((reason) async {
+                                if (!undone) {
+                                  await NotificationService.deleteNotification(
+                                    notificationId,
+                                  );
+                                  debugPrint(
+                                    '✅ Notificação $notificationId deletada permanentemente',
+                                  );
                                 }
                               });
-                            }
-
-                            // Deletar do banco de dados
-                            await NotificationService.deleteNotification(
-                              notificationId,
-                            );
-                            debugPrint('✅ Notificação deletada com sucesso!');
-                          }
-
-                          return confirm;
-                        },
-                        onDismissed: (direction) {
-                          // Já foi tratado no confirmDismiss
-                          debugPrint('📤 onDismissed chamado (já processado)');
                         },
                         background: Container(
                           alignment: Alignment.centerRight,
                           padding: const EdgeInsets.only(right: 20),
                           color: Colors.red,
-                          child: const Icon(
-                            Icons.delete,
+                          child: Image.asset(
+                            'assets/icons/menu/delete_button.png',
+                            width: 28,
+                            height: 28,
                             color: Colors.white,
-                            size: 28,
                           ),
                         ),
                         child: InkWell(

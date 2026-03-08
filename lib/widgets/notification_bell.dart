@@ -202,18 +202,57 @@ class _NotificationBellState extends State<NotificationBell> {
                         final confirm = await showDialog<bool>(
                           context: context,
                           builder: (context) => AlertDialog(
-                            title: const Text('Limpar notificações'),
+                            title: const Text(
+                              'Limpar notificações',
+                              textAlign: TextAlign.center,
+                            ),
                             content: const Text(
                               'Deseja realmente excluir todas as notificações?',
+                              textAlign: TextAlign.center,
                             ),
+                            actionsAlignment: MainAxisAlignment.center,
                             actions: [
                               TextButton(
                                 onPressed: () => Navigator.pop(context, false),
-                                child: const Text('Cancelar'),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Image.asset(
+                                      'assets/icons/menu/cancel_button.png',
+                                      width: 18,
+                                      height: 18,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Text('Cancelar'),
+                                  ],
+                                ),
                               ),
-                              TextButton(
+                              ElevatedButton(
                                 onPressed: () => Navigator.pop(context, true),
-                                child: const Text('Excluir'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Image.asset(
+                                      'assets/icons/menu/delete_button.png',
+                                      width: 18,
+                                      height: 18,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Text('Excluir'),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
@@ -225,7 +264,12 @@ class _NotificationBellState extends State<NotificationBell> {
                           _loadNotifications();
                         }
                       },
-                      icon: const Icon(Icons.delete_outline, size: 16),
+                      icon: Image.asset(
+                        'assets/icons/menu/delete_button.png',
+                        width: 16,
+                        height: 16,
+                        color: Colors.red,
+                      ),
                       label: const Text(
                         'Limpar tudo',
                         style: TextStyle(fontSize: 12),

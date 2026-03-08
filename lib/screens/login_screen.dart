@@ -166,12 +166,19 @@ class _LoginScreenState extends State<LoginScreen> {
       title: 'Login',
       showAppBar: true,
       showBackButton: false,
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+      padding: const EdgeInsets.fromLTRB(24.0, 8.0, 24.0, 24.0),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 40), // Reduzido de 60 para 40
+            Center(
+              child: Image.asset(
+                'assets/icons/Icon.png',
+                height: 100,
+                fit: BoxFit.contain,
+              ),
+            ),
+            const SizedBox(height: 24),
             // Logo/Título
             Text(
               'Carro das\nDelícias',

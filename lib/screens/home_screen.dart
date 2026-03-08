@@ -2,16 +2,22 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/base_screen.dart';
 import '../widgets/animated_widgets.dart';
 import '../widgets/form_dialogs.dart';
 import '../widgets/edit_product_dialog.dart';
+import '../widgets/category_icon_widget.dart';
+import '../widgets/favorite_heart_animation.dart';
 import '../widgets/app_menu.dart';
 import '../utils/custom_fab_location.dart';
 import '../utils/constants.dart';
 import '../services/favorites_service.dart';
 import '../services/cart_service.dart';
+import '../services/fuzzy_search_service.dart';
+import '../widgets/main_navigation_provider.dart';
 import 'product_detail_screen.dart';
 
 // CurrencyInputFormatter para formatação de preços
@@ -76,6 +82,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _favoritesService = FavoritesService();
   final _cartService = CartService();
   RealtimeChannel? _productsChannel;
+  late final AudioPlayer _audioPlayer;
+
+  // Referência centralizada ao mapa de overrides de ícones
+  static const Map<String, String> _categoryIconOverrides =
+      CategoryIconWidget.categoryIconOverrides;
 
   // Getter para categorias com favoritos dinâmico
   List<Map<String, dynamic>> get _categoriasComFavoritos {
@@ -100,18 +111,47 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Remove acentos e caracteres especiais para busca normalizada
-  String _removeAccents(String text) {
-    const withAccents =
-        'àáâãäåòóôõöøèéêëçìíîïùúûüÿñÀÁÂÃÄÅÒÓÔÕÖØÈÉÊËÇÌÍÎÏÙÚÛÜŸÑ';
-    const withoutAccents =
-        'aaaaaaooooooeeeeciiiiuuuuynAAAAAAOOOOOOEEEECIIIIUUUUYN';
+  // Verifica se o erro é de conexão de rede
+  bool _isConnectionError(dynamic error) {
+    if (error == null) return false;
+    final errorString = error.toString().toLowerCase();
+    return errorString.contains('socketexception') ||
+        errorString.contains('no route to host') ||
+        errorString.contains('connection refused') ||
+        errorString.contains('connection timed out') ||
+        errorString.contains('failed host lookup') ||
+        errorString.contains('network is unreachable') ||
+        errorString.contains('errno = 113') ||
+        errorString.contains('errno = 111') ||
+        errorString.contains('clientexception');
+  }
 
-    String result = text;
-    for (int i = 0; i < withAccents.length; i++) {
-      result = result.replaceAll(withAccents[i], withoutAccents[i]);
+  // Mostra snackbar de erro de conexão
+  void _showConnectionErrorSnackbar() {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              Icon(Icons.wifi_off, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Sem conexão com o servidor. Verifique sua internet.',
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.orange,
+          action: SnackBarAction(
+            label: 'Tentar novamente',
+            textColor: Colors.white,
+            onPressed: _refreshData,
+          ),
+          duration: const Duration(seconds: 5),
+        ),
+      );
     }
-    return result;
   }
 
   // Verificar se consegue conectar com o Supabase
@@ -176,6 +216,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _audioPlayer = AudioPlayer();
+    // Configurar volume máximo
+    _audioPlayer.setVolume(1.0);
     _searchController.addListener(_onSearchChanged);
 
     // Invalidar cache quando categoria muda
@@ -291,6 +334,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _audioPlayer.dispose();
     _searchDebounce?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
@@ -306,8 +350,8 @@ class _HomeScreenState extends State<HomeScreen> {
     // Cancelar timer anterior se existir
     _searchDebounce?.cancel();
 
-    // Criar novo timer com delay de 300ms
-    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+    // Criar novo timer com delay de 150ms para resposta mais rápida
+    _searchDebounce = Timer(const Duration(milliseconds: 150), () {
       if (mounted) {
         // Atualizar apenas o valor da busca sem setState - mantém o foco!
         _searchQueryNotifier.value = _searchController.text;
@@ -432,14 +476,46 @@ class _HomeScreenState extends State<HomeScreen> {
             List<Map<String, dynamic>>.from(categoriasResponse);
         // As categorias já vêm ordenadas do banco pela query .order('ordem', ascending: true)
 
+        // Aplicar overrides de ícones customizados (apenas se o banco não tem ícone definido)
+        for (int i = 0; i < sortedCategorias.length; i++) {
+          final nome = sortedCategorias[i]['nome'];
+          final iconeAtual = sortedCategorias[i]['icone'];
+          final iconeVazio =
+              iconeAtual == null || iconeAtual.toString().isEmpty;
+          if (iconeVazio && _categoryIconOverrides.containsKey(nome)) {
+            sortedCategorias[i] = {
+              ...sortedCategorias[i],
+              'icone': _categoryIconOverrides[nome],
+            };
+          } else if (iconeAtual != null &&
+              iconeAtual.toString().startsWith('asset:') == false &&
+              _categoryIconOverrides.containsKey(nome)) {
+            // Se o banco tem um emoji, NÃO sobrescrever - o emoji do admin prevalece
+          } else if (iconeVazio) {
+            // Categoria sem override e sem ícone - usar default
+            sortedCategorias[i] = {
+              ...sortedCategorias[i],
+              'icone': 'asset:assets/icons/todos_category.svg',
+            };
+          }
+        }
+
         _categorias = [
-          {'id': 0, 'nome': 'Todos', 'icone': '🍰'},
+          {
+            'id': 0,
+            'nome': 'Todos',
+            'icone': 'asset:assets/icons/todos_category.svg',
+          },
           ...sortedCategorias,
         ];
       } else {
         // Se não há categorias no banco, usar apenas "Todos"
         _categorias = [
-          {'id': 0, 'nome': 'Todos', 'icone': '🍰'},
+          {
+            'id': 0,
+            'nome': 'Todos',
+            'icone': 'asset:assets/icons/todos_category.svg',
+          },
         ];
         _debugLog('📂 Nenhuma categoria encontrada no banco');
       }
@@ -449,10 +525,18 @@ class _HomeScreenState extends State<HomeScreen> {
         _produtos = produtosResponse.map<Map<String, dynamic>>((produto) {
           final categoria = produto['categorias'];
           if (categoria != null) {
+            final categoriaNome = categoria['nome'] as String?;
+            String? categoriaIcone = categoria['icone'];
+            // Aplicar override de ícone apenas se o banco não tem ícone definido
+            if ((categoriaIcone == null || categoriaIcone.isEmpty) &&
+                categoriaNome != null &&
+                _categoryIconOverrides.containsKey(categoriaNome)) {
+              categoriaIcone = _categoryIconOverrides[categoriaNome];
+            }
             return {
               ...produto,
-              'categoria_nome': categoria['nome'],
-              'categoria_icone': categoria['icone'],
+              'categoria_nome': categoriaNome,
+              'categoria_icone': categoriaIcone,
             };
           } else {
             // Fallback se não há categoria associada
@@ -502,7 +586,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _debugLog('❌ Erro ao carregar dados: $error');
       _debugLog('🔍 Tipo do erro: ${error.runtimeType}');
 
-      // Não mostrar dados fictícios - apenas informar o erro
+      // Verificar se é erro de conexão
+      final isConnError = _isConnectionError(error);
+
       if (mounted) {
         setState(() {
           _categorias = [];
@@ -511,26 +597,32 @@ class _HomeScreenState extends State<HomeScreen> {
           _isOfflineMode = true;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.error_outline, color: Colors.white),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text('Erro ao carregar dados. Verifique sua conexão.'),
-                ),
-              ],
+        if (isConnError) {
+          _showConnectionErrorSnackbar();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Erro: ${error.toString().substring(0, error.toString().length > 100 ? 100 : error.toString().length)}',
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.red,
+              action: SnackBarAction(
+                label: 'Tentar novamente',
+                textColor: Colors.white,
+                onPressed: _loadData,
+              ),
+              duration: const Duration(seconds: 8),
             ),
-            backgroundColor: Colors.red,
-            action: SnackBarAction(
-              label: 'Tentar novamente',
-              textColor: Colors.white,
-              onPressed: _loadData,
-            ),
-            duration: const Duration(seconds: 8),
-          ),
-        );
+          );
+        }
       }
     }
   }
@@ -559,37 +651,25 @@ class _HomeScreenState extends State<HomeScreen> {
         '🔍 Filtrando produtos: busca="$_searchQuery", categoria="$_selectedCategory"',
       );
 
-      _cachedFilteredProducts = _produtos.where((produto) {
-        // Filtro por categoria
-        bool categoryMatch;
-        if (_selectedCategory == 'Todos') {
-          categoryMatch = true;
-        } else if (_selectedCategory == 'Favoritos') {
-          // Filtro especial para favoritos
+      // Primeiro, filtrar por categoria
+      var categoryFiltered = _produtos.where((produto) {
+        if (_selectedCategory == 'Todos') return true;
+        if (_selectedCategory == 'Favoritos') {
           final productId = produto['id'].toString();
-          categoryMatch = _favoritesService.isFavorite(productId);
-        } else {
-          categoryMatch = produto['categoria_nome'] == _selectedCategory;
+          return _favoritesService.isFavorite(productId);
         }
-
-        // Filtro por busca (normalizado sem acentos)
-        bool searchMatch = _searchQuery.isEmpty;
-        if (!searchMatch) {
-          final normalizedSearch = _removeAccents(_searchQuery.toLowerCase());
-          final normalizedNome = _removeAccents(
-            produto['nome'].toString().toLowerCase(),
-          );
-          final normalizedDescricao = _removeAccents(
-            (produto['descricao'] ?? '').toString().toLowerCase(),
-          );
-
-          searchMatch =
-              normalizedNome.contains(normalizedSearch) ||
-              normalizedDescricao.contains(normalizedSearch);
-        }
-
-        return categoryMatch && searchMatch;
+        return produto['categoria_nome'] == _selectedCategory;
       }).toList();
+
+      // Depois, aplicar busca fuzzy inteligente
+      if (_searchQuery.isNotEmpty) {
+        _cachedFilteredProducts = FuzzySearchService.searchProducts(
+          categoryFiltered,
+          _searchQuery,
+        );
+      } else {
+        _cachedFilteredProducts = categoryFiltered;
+      }
 
       // Atualizar cache
       _lastSearchQuery = _searchQuery;
@@ -647,6 +727,29 @@ class _HomeScreenState extends State<HomeScreen> {
       orElse: () => {'icone': '🍰'},
     );
     return category['icone'] ?? '🍰';
+  }
+
+  /// Constrói o widget do ícone de categoria (suporta SVG asset, PNG asset, URL de imagem e emoji)
+  Widget _buildCategoryIconWidget(String? icone, {double size = 24}) {
+    if (icone == null) return const SizedBox.shrink();
+    if (icone.startsWith('asset:')) {
+      final assetPath = icone.replaceFirst('asset:', '');
+      if (assetPath.endsWith('.svg')) {
+        return SvgPicture.asset(assetPath, width: size, height: size);
+      } else {
+        return Image.asset(assetPath, width: size, height: size);
+      }
+    } else if (icone.startsWith('http')) {
+      return Image.network(
+        icone,
+        width: size,
+        height: size,
+        errorBuilder: (context, error, stackTrace) =>
+            const Icon(Icons.broken_image, size: 16),
+      );
+    } else {
+      return Text(icone, style: TextStyle(fontSize: size * 0.67));
+    }
   }
 
   // Constrói as seções especiais (Destaque, Mais Vendidos, Novidades)
@@ -848,7 +951,12 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: _showAddOptionsDialog,
               backgroundColor: Colors.black,
               foregroundColor: Colors.white,
-              child: const Icon(Icons.add),
+              child: Image.asset(
+                'assets/icons/menu/add_button.png',
+                width: 24,
+                height: 24,
+                color: Colors.white,
+              ),
             )
           : null,
       floatingActionButtonLocation: const CustomFabLocation(),
@@ -956,44 +1064,90 @@ class _HomeScreenState extends State<HomeScreen> {
                                     final isSelected =
                                         selectedCategory == categoria['nome'];
 
-                                    return Padding(
-                                      padding: const EdgeInsets.only(right: 12),
-                                      child: FilterChip(
-                                        label: Row(
+                                    // Pular categoria 'Todos' e 'Favoritos' para long press admin
+                                    final isSystemCategory =
+                                        categoria['nome'] == 'Todos' ||
+                                        categoria['nome'] == 'Favoritos';
+
+                                    final filterChip = FilterChip(
+                                      label: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxWidth:
+                                              120, // Limitar largura máxima
+                                        ),
+                                        child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             if (categoria['icone'] != null)
                                               Padding(
                                                 padding: const EdgeInsets.only(
-                                                  right: 6,
+                                                  right: 4,
                                                 ),
-                                                child: Text(
-                                                  categoria['icone'],
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
+                                                child: SizedBox(
+                                                  width: 20,
+                                                  height: 20,
+                                                  child: Center(
+                                                    child:
+                                                        _buildCategoryIconWidget(
+                                                          categoria['icone'],
+                                                          size: 18,
+                                                        ),
                                                   ),
                                                 ),
                                               ),
-                                            Text(categoria['nome']),
+                                            Flexible(
+                                              child: Text(
+                                                categoria['nome'],
+                                                overflow: TextOverflow.ellipsis,
+                                                maxLines: 1,
+                                              ),
+                                            ),
                                           ],
                                         ),
-                                        selected: isSelected,
-                                        onSelected: (bool selected) {
-                                          // Atualizar categoria sem setState para manter posição do scroll
-                                          _selectedCategoryNotifier.value =
-                                              categoria['nome'];
-                                        },
-                                        backgroundColor: Colors.grey[200],
-                                        selectedColor: Colors.black,
-                                        labelStyle: TextStyle(
-                                          color: isSelected
-                                              ? Colors.white
-                                              : Colors.black,
-                                          fontWeight: isSelected
-                                              ? FontWeight.bold
-                                              : FontWeight.normal,
-                                        ),
                                       ),
+                                      selected: isSelected,
+                                      onSelected: (bool selected) {
+                                        // Atualizar categoria sem setState para manter posição do scroll
+                                        _selectedCategoryNotifier.value =
+                                            categoria['nome'];
+                                      },
+                                      backgroundColor: Colors.grey[200],
+                                      selectedColor: Colors.black,
+                                      labelStyle: TextStyle(
+                                        color: isSelected
+                                            ? Colors.white
+                                            : Colors.black,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    );
+
+                                    // Adicionar long press para admin em categorias do banco
+                                    if (!isSystemCategory && _isAdmin) {
+                                      return Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 12,
+                                        ),
+                                        child: GestureDetector(
+                                          onLongPress: () =>
+                                              _showCategoryAdminOptions(
+                                                categoria,
+                                              ),
+                                          child: filterChip,
+                                        ),
+                                      );
+                                    }
+
+                                    return Padding(
+                                      padding: const EdgeInsets.only(right: 12),
+                                      child: filterChip,
                                     );
                                   },
                                 );
@@ -1043,19 +1197,62 @@ class _HomeScreenState extends State<HomeScreen> {
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 16,
                                 ),
-                                child: Text(
-                                  _searchQuery.isNotEmpty
-                                      ? '🔍 Resultados da busca'
-                                      : selectedCategory == 'Todos'
-                                      ? '🍰 Todos os Produtos'
-                                      : selectedCategory == 'Favoritos'
-                                      ? '❤️ Favoritos'
-                                      : '${_getCategoryIcon(selectedCategory)} $selectedCategory',
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  textAlign: TextAlign.center,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    if (_searchQuery.isNotEmpty) ...[
+                                      const Text(
+                                        '🔍 ',
+                                        style: TextStyle(fontSize: 20),
+                                      ),
+                                      const Text(
+                                        'Resultados da busca',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ] else if (selectedCategory == 'Todos') ...[
+                                      _buildCategoryIconWidget(
+                                        _getCategoryIcon('Todos'),
+                                        size: 28,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'Todos os Produtos',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ] else if (selectedCategory ==
+                                        'Favoritos') ...[
+                                      const Text(
+                                        '❤️ ',
+                                        style: TextStyle(fontSize: 20),
+                                      ),
+                                      const Text(
+                                        'Favoritos',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ] else ...[
+                                      _buildCategoryIconWidget(
+                                        _getCategoryIcon(selectedCategory),
+                                        size: 24,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        selectedCategory,
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               );
                             },
@@ -1171,6 +1368,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     ? () =>
                                                           _onProductTap(produto)
                                                     : null, // Usar comportamento padrão se não for guest mode
+                                                onProductDeleted: _refreshData,
+                                                isAdmin:
+                                                    _isAdmin, // Passar status de admin explicitamente
                                               ),
                                             ),
                                           );
@@ -1192,7 +1392,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _onProductTap(Map<String, dynamic> produto) {
+  Future<void> _onProductTap(Map<String, dynamic> produto) async {
     if (widget.isGuestMode) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1215,20 +1415,26 @@ class _HomeScreenState extends State<HomeScreen> {
       // Navegar para a tela de detalhes do produto
       try {
         debugPrint('🔗 Navegando para detalhes do produto: ${produto['nome']}');
-        Navigator.push(
+        final result = await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ProductDetailScreen(produto: produto),
           ),
         );
+        if (result == 'go_to_cart' && mounted) {
+          final provider = MainNavigationProvider.of(context);
+          provider?.navigateToPageDirect?.call(4);
+        }
       } catch (e) {
         debugPrint('❌ Erro ao navegar para detalhes: $e');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao abrir detalhes do produto: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao abrir detalhes do produto: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -1273,7 +1479,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const Divider(),
               ListTile(
-                leading: const Icon(Icons.delete, color: Colors.red),
+                leading: Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 24,
+                  height: 24,
+                  color: Colors.black,
+                ),
                 title: const Text('Excluir Produto'),
                 onTap: () {
                   Navigator.pop(context);
@@ -1342,7 +1553,18 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar'),
+              ],
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -1350,7 +1572,19 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Excluir'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 18,
+                  height: 18,
+                  color: Colors.black,
+                ),
+                const SizedBox(width: 4),
+                const Text('Excluir'),
+              ],
+            ),
           ),
         ],
       ),
@@ -1381,12 +1615,16 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao excluir produto: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (_isConnectionError(e)) {
+          _showConnectionErrorSnackbar();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao excluir produto: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -1401,7 +1639,7 @@ class _HomeScreenState extends State<HomeScreen> {
             style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
           ),
           content: const Text(
-            'Choose uma opção para adicionar ao sistema:',
+            'Selecione uma opção para adicionar ao aplicativo:',
             style: TextStyle(color: Colors.grey),
           ),
           actions: [
@@ -1445,13 +1683,19 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.category, color: Colors.blue[600]),
+                  Image.asset(
+                    'assets/icons/menu/add_category.png',
+                    width: 24,
+                    height: 24,
+                  ),
                   const SizedBox(width: 8),
-                  const Text(
-                    'Categoria',
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w600,
+                  const Flexible(
+                    child: Text(
+                      'Categoria',
+                      style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1536,11 +1780,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ],
                                 ),
                               ),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.fastfood,
+                              child: Center(
+                                child: CategoryIconWidget(
+                                  icone: produto['categoria_icone'],
                                   size: 50,
-                                  color: Colors.white,
                                 ),
                               ),
                             );
@@ -1555,11 +1798,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               colors: [Colors.orange[100]!, Colors.pink[100]!],
                             ),
                           ),
-                          child: const Center(
-                            child: Icon(
-                              Icons.fastfood,
+                          child: Center(
+                            child: CategoryIconWidget(
+                              icone: produto['categoria_icone'],
                               size: 50,
-                              color: Colors.white,
                             ),
                           ),
                         ),
@@ -1574,10 +1816,39 @@ class _HomeScreenState extends State<HomeScreen> {
                       final wasFavorite = _favoritesService.isFavorite(
                         productId,
                       );
+                      // Capture overlay before any async gaps
+                      final overlay = Overlay.of(context);
+
+                      // Feedback sonoro customizado
+                      try {
+                        debugPrint('🔊 Tentando reproduzir som de feedback...');
+                        if (wasFavorite) {
+                          await _audioPlayer.play(
+                            AssetSource('sounds/favorite_off.wav'),
+                            mode: PlayerMode.lowLatency,
+                          );
+                        } else {
+                          await _audioPlayer.play(
+                            AssetSource('sounds/favorite_on.wav'),
+                            mode: PlayerMode.lowLatency,
+                          );
+                        }
+                        debugPrint('✅ Comando de som enviado');
+                      } catch (e) {
+                        debugPrint('❌ Erro ao reproduzir som: $e');
+                      }
 
                       await _favoritesService.toggleFavorite(productId);
 
                       setState(() {});
+
+                      // Mostrar animação de coração
+                      if (mounted) {
+                        FavoriteHeartAnimation.showWithOverlay(
+                          overlay,
+                          isFavoriting: !wasFavorite,
+                        );
+                      }
 
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -1732,12 +2003,46 @@ class _HomeScreenState extends State<HomeScreen> {
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text(
-                                          '${produto['nome']} adicionado!',
+                                        content: Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.shopping_cart,
+                                              color: Colors.white,
+                                              size: 20,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                '${produto['nome']} adicionado!',
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                         backgroundColor: Colors.green,
                                         behavior: SnackBarBehavior.floating,
-                                        duration: const Duration(seconds: 2),
+                                        duration: const Duration(seconds: 3),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        action: SnackBarAction(
+                                          label: 'Ver Carrinho',
+                                          textColor: Colors.white,
+                                          onPressed: () {
+                                            final provider =
+                                                MainNavigationProvider.of(
+                                                  context,
+                                                );
+                                            if (provider
+                                                    ?.navigateToPageDirect !=
+                                                null) {
+                                              provider!.navigateToPageDirect!(
+                                                4,
+                                              );
+                                            }
+                                          },
+                                        ),
                                       ),
                                     );
                                   }
@@ -1780,6 +2085,622 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  // Métodos de admin para categorias
+  void _showCategoryAdminOptions(Map<String, dynamic> categoria) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: Center(
+                      child:
+                          categoria['icone'] != null &&
+                              categoria['icone'].toString().startsWith('asset:')
+                          ? _buildCategoryIconWidget(
+                              categoria['icone'],
+                              size: 24,
+                            )
+                          : Text(
+                              categoria['icone'] ?? '📦',
+                              style: const TextStyle(fontSize: 24),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      categoria['nome'],
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.edit, color: Colors.blue),
+                title: const Text('Editar Categoria'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showEditCategoryDialog(categoria);
+                },
+              ),
+              const Divider(),
+              ListTile(
+                leading: Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 24,
+                  height: 24,
+                  color: Colors.black,
+                ),
+                title: const Text('Excluir Categoria'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showDeleteCategoryConfirmation(categoria);
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showEditCategoryDialog(Map<String, dynamic> categoria) {
+    final nomeController = TextEditingController(text: categoria['nome'] ?? '');
+    final iconeController = TextEditingController(
+      text: categoria['icone'] ?? '',
+    );
+    bool isAtivo = categoria['ativo'] ?? true;
+    final iconeOriginal = categoria['icone'] ?? '📦';
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        key: const Key('edit_category_dialog'),
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Colors.purple, Colors.deepPurple],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.edit, color: Colors.white, size: 28),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CategoryIconWidget(icone: iconeOriginal, size: 24),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Editar ${categoria['nome']}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: MediaQuery.of(context).size.width * 0.8,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 20),
+                  // Campo Nome - Obrigatório
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.purple[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.purple[200]!),
+                    ),
+                    child: TextField(
+                      controller: nomeController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nome da Categoria',
+                        labelStyle: TextStyle(
+                          color: Colors.purple,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        prefixIcon: Icon(Icons.category, color: Colors.purple),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(16),
+                        helperText: 'Obrigatório',
+                        helperStyle: TextStyle(color: Colors.purple),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Campo Ícone - Opcional
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: TextField(
+                      controller: iconeController,
+                      onChanged: (value) {
+                        // Atualizar preview quando o valor mudar
+                        setDialogState(() {});
+                      },
+                      style: const TextStyle(color: Colors.black87),
+                      decoration: InputDecoration(
+                        labelText: 'Ícone (Emoji ou asset)',
+                        labelStyle: const TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        prefixIcon: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CategoryIconWidget(
+                              icone: iconeController.text.isEmpty
+                                  ? iconeOriginal
+                                  : iconeController.text,
+                              size: 24,
+                            ),
+                          ),
+                        ),
+                        hintText: '🍰 ou asset:assets/icons/icone.svg',
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.all(16),
+                        helperText:
+                            iconeController.text.startsWith('asset:') ||
+                                (iconeController.text.isEmpty &&
+                                    iconeOriginal.startsWith('asset:'))
+                            ? 'Ícone padrão do asset (coloque um emoji para substituir)'
+                            : 'Emoji ou caminho do asset',
+                        helperStyle: const TextStyle(color: Colors.black54),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Preview do ícone
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue[200]!),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.preview, color: Colors.blue, size: 20),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Preview:',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue[100]!),
+                          ),
+                          child: CategoryIconWidget(
+                            icone: iconeController.text.isEmpty
+                                ? iconeOriginal
+                                : iconeController.text,
+                            size: 32,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  // Configurações da Categoria
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.purple[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.purple[200]!),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(
+                              Icons.settings,
+                              color: Colors.purple,
+                              size: 20,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Configurações',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.purple,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Text(
+                              'Categoria Ativa',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const Spacer(),
+                            Switch(
+                              value: isAtivo,
+                              activeThumbColor: Colors.purple,
+                              onChanged: (value) {
+                                setDialogState(() {
+                                  isAtivo = value;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/icons/menu/cancel_button.png',
+                          width: 18,
+                          height: 18,
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'Cancelar',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      if (nomeController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('O nome da categoria é obrigatório'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      final navigator = Navigator.of(context);
+                      final messenger = ScaffoldMessenger.of(context);
+
+                      try {
+                        final iconeValue = iconeController.text.trim();
+                        final updateData = {
+                          'nome': nomeController.text.trim(),
+                          'icone': iconeValue.isEmpty
+                              ? (iconeOriginal.startsWith('asset:')
+                                    ? iconeOriginal
+                                    : '')
+                              : iconeValue,
+                          'ativo': isAtivo,
+                        };
+
+                        // Garantir que o ID seja int
+                        final catId = categoria['id'];
+                        final catIdInt = catId is int
+                            ? catId
+                            : int.parse(catId.toString());
+
+                        debugPrint(
+                          '📝 Atualizando categoria ID: $catIdInt com dados: $updateData',
+                        );
+
+                        bool updated = false;
+                        try {
+                          // Tentar update direto primeiro, com .select() para verificar se realmente atualizou
+                          final result = await Supabase.instance.client
+                              .from('categorias')
+                              .update(updateData)
+                              .eq('id', catIdInt)
+                              .select();
+                          debugPrint('📝 Resultado update direto: $result');
+                          updated = (result as List).isNotEmpty;
+                        } catch (updateError) {
+                          debugPrint('❌ Update direto falhou: $updateError');
+                        }
+
+                        if (!updated) {
+                          debugPrint(
+                            '⚠️ Update direto não atualizou - tentando RPC...',
+                          );
+                          // Fallback: tentar via RPC que bypassa RLS
+                          try {
+                            await Supabase.instance.client.rpc(
+                              'update_categoria_admin',
+                              params: {
+                                'categoria_id': catIdInt,
+                                'novo_nome': updateData['nome'],
+                                'novo_icone': updateData['icone'],
+                                'novo_ativo': updateData['ativo'],
+                              },
+                            );
+                            debugPrint('✅ Update via RPC bem-sucedido');
+                          } catch (rpcError) {
+                            debugPrint('❌ RPC update também falhou: $rpcError');
+                            final rpcErrorMsg = rpcError
+                                .toString()
+                                .toLowerCase();
+                            if (rpcErrorMsg.contains('function') &&
+                                rpcErrorMsg.contains('does not exist')) {
+                              debugPrint(
+                                '⚠️ Função update_categoria_admin não existe no Supabase!',
+                              );
+                              throw Exception(
+                                'Função de atualização não encontrada no servidor. '
+                                'Execute o SQL update_categoria_admin.sql no Supabase.',
+                              );
+                            }
+                            rethrow;
+                          }
+                        }
+
+                        if (mounted) {
+                          navigator.pop();
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Categoria atualizada com sucesso!',
+                              ),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                          _refreshData();
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Erro ao atualizar categoria: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.purple,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text('Salvar Alterações'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDeleteCategoryConfirmation(
+    Map<String, dynamic> categoria,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar Exclusão'),
+        content: Text(
+          'Tem certeza que deseja excluir a categoria "${categoria['nome']}"?\n\n'
+          '⚠️ Produtos associados a esta categoria poderão ficar sem categoria!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar'),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 18,
+                  height: 18,
+                  color: Colors.black,
+                ),
+                const SizedBox(width: 4),
+                const Text('Excluir'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _deleteCategory(categoria);
+    }
+  }
+
+  Future<void> _deleteCategory(Map<String, dynamic> categoria) async {
+    final catId = categoria['id'];
+    final catIdInt = catId is int ? catId : int.parse(catId.toString());
+
+    debugPrint(
+      '🗑️ [_deleteCategory] Iniciando exclusão - id: $catIdInt, nome: ${categoria['nome']}',
+    );
+
+    try {
+      // Tentar delete direto primeiro
+      debugPrint('🗑️ [_deleteCategory] Tentando delete direto...');
+      final deleteResult = await Supabase.instance.client
+          .from('categorias')
+          .delete()
+          .eq('id', catIdInt)
+          .select();
+
+      debugPrint(
+        '🗑️ [_deleteCategory] Resultado do delete direto: $deleteResult',
+      );
+
+      // Se o delete não retornou nada, pode ser que o RLS bloqueou
+      if (deleteResult.isEmpty) {
+        debugPrint(
+          '⚠️ [_deleteCategory] Delete direto retornou vazio - tentando RPC',
+        );
+
+        // Fallback: tentar via RPC que bypassa RLS
+        try {
+          debugPrint(
+            '🗑️ [_deleteCategory] Chamando RPC delete_categoria_admin com id: $catIdInt',
+          );
+          await Supabase.instance.client.rpc(
+            'delete_categoria_admin',
+            params: {'categoria_id': catIdInt},
+          );
+          debugPrint('✅ [_deleteCategory] RPC delete bem-sucedido');
+        } catch (rpcError) {
+          debugPrint('❌ [_deleteCategory] RPC delete falhou: $rpcError');
+          final rpcErrorMsg = rpcError.toString().toLowerCase();
+          if (rpcErrorMsg.contains('foreign key') ||
+              rpcErrorMsg.contains('23503') ||
+              rpcErrorMsg.contains('referential integrity')) {
+            throw Exception(
+              'Não é possível excluir esta categoria porque existem produtos vinculados a ela.',
+            );
+          }
+          // Se há múltiplas funções com o mesmo nome
+          if (rpcErrorMsg.contains('could not choose') ||
+              rpcErrorMsg.contains('multiple choices')) {
+            throw Exception(
+              'Erro de configuração no servidor. Contate o administrador.',
+            );
+          }
+          rethrow;
+        }
+      } else {
+        debugPrint('✅ [_deleteCategory] Delete direto bem-sucedido');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Categoria excluída com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Resetar categoria selecionada se era a que foi excluída
+        if (_selectedCategoryNotifier.value == categoria['nome']) {
+          _selectedCategoryNotifier.value = 'Todos';
+        }
+        _refreshData();
+      }
+    } catch (e) {
+      debugPrint('❌ [_deleteCategory] Erro final: $e');
+      if (mounted) {
+        if (_isConnectionError(e)) {
+          _showConnectionErrorSnackbar();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao excluir categoria: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+    }
   }
 
   Widget _buildProductPrice(Map<String, dynamic> produto) {
@@ -1857,13 +2778,19 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    return Text(
-      CurrencyFormatter.format(precoAtual),
-      style: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.bold,
-        color: Colors.green,
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Preço', style: TextStyle(fontSize: 10, color: Colors.grey)),
+        Text(
+          CurrencyFormatter.format(precoAtual),
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.green,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -3,7 +3,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/cart_service.dart';
 import '../utils/constants.dart';
-import '../widgets/main_navigation_provider.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Map<String, dynamic> produto;
@@ -998,13 +997,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     final hasImage = imagens is List && imagens.isNotEmpty;
 
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
+      onTap: () async {
+        final result = await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ProductDetailScreen(produto: produto),
           ),
         );
+        if (result == 'go_to_cart' && mounted) {
+          Navigator.of(context).pop('go_to_cart');
+        }
       },
       child: Card(
         elevation: 2,
@@ -1126,28 +1128,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                   action: SnackBarAction(
                                     label: 'Ver Carrinho',
                                     textColor: Colors.white,
-                                    onPressed: () async {
-                                      if (!mounted) return;
-
-                                      // Capturar provider ANTES de fazer o pop
-                                      final provider =
-                                          MainNavigationProvider.of(context);
-                                      final navigator = Navigator.of(context);
-
-                                      // Voltar para MainScreen (fecha todas as rotas até a primeira)
-                                      navigator.popUntil(
-                                        (route) => route.isFirst,
-                                      );
-
-                                      // Aguardar um frame para garantir navegação
-                                      await Future.delayed(
-                                        const Duration(milliseconds: 100),
-                                      );
-
-                                      if (provider?.navigateToPageDirect !=
-                                          null) {
-                                        provider!.navigateToPageDirect!(4);
-                                      }
+                                    onPressed: () {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).hideCurrentSnackBar();
+                                      Navigator.of(context).pop('go_to_cart');
                                     },
                                   ),
                                 ),
@@ -1503,24 +1488,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             action: SnackBarAction(
               label: 'Ver Carrinho',
               textColor: Colors.white,
-              onPressed: () async {
-                // Navegar para o carrinho
-                if (!mounted) return;
-
-                // Capturar provider ANTES de fazer o pop
-                final provider = MainNavigationProvider.of(context);
-                final navigator = Navigator.of(context);
-
-                // Voltar para MainScreen (fecha todas as rotas até a primeira)
-                navigator.popUntil((route) => route.isFirst);
-
-                // Aguardar um frame para garantir navegação
-                await Future.delayed(const Duration(milliseconds: 100));
-
-                // Navegar para carrinho
-                if (provider?.navigateToPageDirect != null) {
-                  provider!.navigateToPageDirect!(4);
-                }
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                Navigator.of(context).pop('go_to_cart');
               },
             ),
           ),

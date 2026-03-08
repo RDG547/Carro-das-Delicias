@@ -9,6 +9,7 @@ import '../widgets/main_navigation_provider.dart';
 import '../utils/constants.dart';
 import '../services/notification_service.dart';
 import '../services/location_tracking_service.dart';
+import '../widgets/category_icon_widget.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -28,6 +29,7 @@ class _AdminScreenState extends State<AdminScreen>
   List<Map<String, dynamic>> _usuarios = [];
   List<Map<String, dynamic>> _pedidos = [];
   bool _isLoading = false;
+  String _filtroUsuarios = 'todos'; // 'todos', 'admin', 'client'
 
   // Subscription para escutar pedidos em tempo real
   StreamSubscription<List<Map<String, dynamic>>>? _pedidosSubscription;
@@ -185,10 +187,67 @@ class _AdminScreenState extends State<AdminScreen>
           .order('ordem', ascending: true);
 
       // Carregar usuários
-      final usuariosResponse = await Supabase.instance.client
-          .from('profiles')
-          .select()
-          .order('created_at', ascending: false);
+      // Tentar via RPC primeiro (bypass RLS), senão fallback para select normal
+      List<dynamic> usuariosResponse = [];
+      try {
+        debugPrint('👥 Tentando carregar usuários via RPC get_all_users...');
+        usuariosResponse = await Supabase.instance.client.rpc('get_all_users');
+        debugPrint('✅ Usuários carregados via RPC: ${usuariosResponse.length}');
+        for (var u in usuariosResponse.take(3)) {
+          debugPrint('   - ${u['email']} (${u['role']})');
+        }
+      } catch (rpcError) {
+        debugPrint('⚠️ RPC get_all_users falhou: $rpcError');
+        final rpcErrorStr = rpcError.toString().toLowerCase();
+
+        // Se a função não existe, não tentar outros métodos que também vão falhar
+        if (rpcErrorStr.contains('function') &&
+            rpcErrorStr.contains('does not exist')) {
+          debugPrint('⚠️ Função get_all_users não existe no Supabase');
+        }
+
+        // Fallback: tentar carregar via auth admin (apenas se for admin)
+        try {
+          debugPrint('👥 Tentando carregar via auth.admin.listUsers...');
+          final authUsers = await Supabase.instance.client.auth.admin
+              .listUsers();
+          usuariosResponse = authUsers
+              .map(
+                (u) => {
+                  'id': u.id,
+                  'email': u.email,
+                  'full_name':
+                      u.userMetadata?['full_name'] ??
+                      u.userMetadata?['name'] ??
+                      'Usuário',
+                  'role': u.userMetadata?['role'] ?? 'client',
+                  'created_at': u.createdAt is DateTime
+                      ? (u.createdAt as DateTime).toIso8601String()
+                      : u.createdAt.toString(),
+                },
+              )
+              .toList();
+          debugPrint(
+            '✅ Usuários carregados via auth.admin: ${usuariosResponse.length}',
+          );
+        } catch (authError) {
+          debugPrint('⚠️ auth.admin.listUsers falhou: $authError');
+          // Fallback final: select normal (pode retornar apenas o usuário logado devido ao RLS)
+          debugPrint('👥 Tentando select normal na tabela profiles...');
+          try {
+            usuariosResponse = await Supabase.instance.client
+                .from('profiles')
+                .select()
+                .order('created_at', ascending: false);
+            debugPrint(
+              '✅ Usuários carregados via select: ${usuariosResponse.length}',
+            );
+          } catch (selectError) {
+            debugPrint('❌ Select profiles também falhou: $selectError');
+            usuariosResponse = [];
+          }
+        }
+      }
 
       // Carregar pedidos com itens
       final pedidosResponse = await Supabase.instance.client
@@ -240,6 +299,12 @@ class _AdminScreenState extends State<AdminScreen>
         _usuarios = List<Map<String, dynamic>>.from(usuariosResponse);
         _pedidos = List<Map<String, dynamic>>.from(pedidosWithProfiles);
       });
+
+      debugPrint('📊 Dados carregados:');
+      debugPrint('   - Produtos: ${_produtos.length}');
+      debugPrint('   - Categorias: ${_categorias.length}');
+      debugPrint('   - Usuários: ${_usuarios.length}');
+      debugPrint('   - Pedidos: ${_pedidos.length}');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -565,32 +630,67 @@ class _AdminScreenState extends State<AdminScreen>
                 tabs: const [
                   Tab(
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('Dashboard'),
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.dashboard, size: 18),
+                          SizedBox(width: 6),
+                          Text('Dashboard'),
+                        ],
+                      ),
                     ),
                   ),
                   Tab(
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('Pedidos'),
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.receipt_long, size: 18),
+                          SizedBox(width: 6),
+                          Text('Pedidos'),
+                        ],
+                      ),
                     ),
                   ),
                   Tab(
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('Produtos'),
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.inventory_2, size: 18),
+                          SizedBox(width: 6),
+                          Text('Produtos'),
+                        ],
+                      ),
                     ),
                   ),
                   Tab(
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('Categorias'),
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.category, size: 18),
+                          SizedBox(width: 6),
+                          Text('Categorias'),
+                        ],
+                      ),
                     ),
                   ),
                   Tab(
                     child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('Usuários'),
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.people, size: 18),
+                          SizedBox(width: 6),
+                          Text('Usuários'),
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -805,7 +905,7 @@ class _AdminScreenState extends State<AdminScreen>
                           Expanded(
                             child: _buildStatusSummary(
                               'Pendentes',
-                              _pedidos
+                              _pedidosReais
                                   .where((p) => p['status'] == 'pendente')
                                   .length,
                               Colors.orange,
@@ -815,7 +915,7 @@ class _AdminScreenState extends State<AdminScreen>
                           Expanded(
                             child: _buildStatusSummary(
                               'Confirmados',
-                              _pedidos
+                              _pedidosReais
                                   .where((p) => p['status'] == 'confirmado')
                                   .length,
                               Colors.blue,
@@ -825,7 +925,7 @@ class _AdminScreenState extends State<AdminScreen>
                           Expanded(
                             child: _buildStatusSummary(
                               'Entregues',
-                              _pedidos
+                              _pedidosReais
                                   .where((p) => p['status'] == 'entregue')
                                   .length,
                               Colors.green,
@@ -835,7 +935,7 @@ class _AdminScreenState extends State<AdminScreen>
                           Expanded(
                             child: _buildStatusSummary(
                               'Cancelados',
-                              _pedidos
+                              _pedidosReais
                                   .where((p) => p['status'] == 'cancelado')
                                   .length,
                               Colors.red,
@@ -933,7 +1033,12 @@ class _AdminScreenState extends State<AdminScreen>
                 onPressed: _showAddProductDialog,
                 backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
-                child: const Icon(Icons.add),
+                child: Image.asset(
+                  'assets/icons/menu/add_button.png',
+                  width: 24,
+                  height: 24,
+                  color: Colors.white,
+                ),
               ),
             ],
           ),
@@ -1026,14 +1131,15 @@ class _AdminScreenState extends State<AdminScreen>
                                 ],
                               ),
                             ),
-                            const PopupMenuItem(
+                            PopupMenuItem(
                               value: 'delete',
                               child: Row(
                                 children: [
-                                  Icon(
-                                    Icons.delete,
-                                    size: 20,
-                                    color: Colors.red,
+                                  Image.asset(
+                                    'assets/icons/menu/delete_button.png',
+                                    width: 20,
+                                    height: 20,
+                                    color: Colors.black,
                                   ),
                                   SizedBox(width: 8),
                                   Text(
@@ -1096,7 +1202,12 @@ class _AdminScreenState extends State<AdminScreen>
                 backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
                 heroTag: "add_category",
-                child: const Icon(Icons.add),
+                child: Image.asset(
+                  'assets/icons/menu/add_button.png',
+                  width: 24,
+                  height: 24,
+                  color: Colors.white,
+                ),
               ),
             ],
           ),
@@ -1114,11 +1225,22 @@ class _AdminScreenState extends State<AdminScreen>
               : ReorderableListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: _filteredCategorias.length,
+                  proxyDecorator: (child, index, animation) {
+                    return Material(
+                      elevation: 4,
+                      borderRadius: BorderRadius.circular(12),
+                      clipBehavior: Clip.antiAlias,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width - 32,
+                        ),
+                        child: child,
+                      ),
+                    );
+                  },
                   onReorder: (oldIndex, newIndex) async {
+                    if (oldIndex < newIndex) newIndex--;
                     setState(() {
-                      if (oldIndex < newIndex) {
-                        newIndex -= 1;
-                      }
                       final item = _filteredCategorias.removeAt(oldIndex);
                       _filteredCategorias.insert(newIndex, item);
 
@@ -1166,10 +1288,23 @@ class _AdminScreenState extends State<AdminScreen>
                     return Card(
                       key: ValueKey(categoria['id']),
                       margin: const EdgeInsets.only(bottom: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       child: ListTile(
-                        leading: Text(
-                          categoria['icone'] ?? '📦',
-                          style: const TextStyle(fontSize: 24),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        leading: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Center(
+                            child: CategoryIconWidget(
+                              icone: categoria['icone'] ?? '📦',
+                              categoryName: categoria['nome'],
+                              size: 28,
+                            ),
+                          ),
                         ),
                         title: Text(categoria['nome'] ?? 'Categoria'),
                         trailing: PopupMenuButton(
@@ -1184,14 +1319,15 @@ class _AdminScreenState extends State<AdminScreen>
                                 ],
                               ),
                             ),
-                            const PopupMenuItem(
+                            PopupMenuItem(
                               value: 'delete',
                               child: Row(
                                 children: [
-                                  Icon(
-                                    Icons.delete,
-                                    size: 20,
-                                    color: Colors.red,
+                                  Image.asset(
+                                    'assets/icons/menu/delete_button.png',
+                                    width: 20,
+                                    height: 20,
+                                    color: Colors.black,
                                   ),
                                   SizedBox(width: 8),
                                   Text(
@@ -1206,10 +1342,12 @@ class _AdminScreenState extends State<AdminScreen>
                             if (value == 'edit') {
                               _showEditCategoryDialog(categoria);
                             } else if (value == 'delete') {
-                              _showDeleteConfirmation(
-                                'categoria',
-                                categoria['id'],
-                              );
+                              // Garantir que o ID seja passado como int para evitar conflito de tipos no RPC
+                              final catId = categoria['id'];
+                              final catIdInt = catId is int
+                                  ? catId
+                                  : int.parse(catId.toString());
+                              _showDeleteConfirmation('categoria', catIdInt);
                             }
                           },
                         ),
@@ -1223,26 +1361,38 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   Widget _buildUsuariosTab() {
+    // Filtrar e ordenar: admins primeiro
+    final filteredUsuarios =
+        _usuarios.where((u) {
+          if (_filtroUsuarios == 'admin') return u['role'] == 'admin';
+          if (_filtroUsuarios == 'client') return u['role'] != 'admin';
+          return true;
+        }).toList()..sort((a, b) {
+          final aAdmin = a['role'] == 'admin' ? 0 : 1;
+          final bAdmin = b['role'] == 'admin' ? 0 : 1;
+          return aAdmin.compareTo(bAdmin);
+        });
+
     return Column(
       children: [
-        // Header
-        Container(
-          padding: const EdgeInsets.all(16),
-          child: const Row(
+        // Filtros
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Usuários do Sistema',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-              ),
+              _buildUserFilter('Todos', 'todos', Icons.people),
+              const SizedBox(width: 8),
+              _buildUserFilter('Admin', 'admin', Icons.admin_panel_settings),
+              const SizedBox(width: 8),
+              _buildUserFilter('Usuário', 'client', Icons.person),
             ],
           ),
         ),
+        const SizedBox(height: 12),
 
         // Lista de usuários
         Expanded(
-          child: _usuarios.isEmpty
+          child: filteredUsuarios.isEmpty
               ? const Center(
                   child: Text(
                     'Nenhum usuário encontrado',
@@ -1251,9 +1401,9 @@ class _AdminScreenState extends State<AdminScreen>
                 )
               : ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _usuarios.length,
+                  itemCount: filteredUsuarios.length,
                   itemBuilder: (context, index) {
-                    final usuario = _usuarios[index];
+                    final usuario = filteredUsuarios[index];
                     final isAdmin = usuario['role'] == 'admin';
 
                     return Card(
@@ -1296,7 +1446,7 @@ class _AdminScreenState extends State<AdminScreen>
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    isAdmin ? 'Tornar Cliente' : 'Tornar Admin',
+                                    isAdmin ? 'Tornar Usuário' : 'Tornar Admin',
                                   ),
                                 ],
                               ),
@@ -1314,6 +1464,40 @@ class _AdminScreenState extends State<AdminScreen>
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildUserFilter(String label, String value, IconData icon) {
+    final isSelected = _filtroUsuarios == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _filtroUsuarios = value),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.black : Colors.grey[200],
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: isSelected ? Colors.white : Colors.black,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.black,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1489,10 +1673,8 @@ class _AdminScreenState extends State<AdminScreen>
               child: ReorderableListView.builder(
                 itemCount: tempCategorias.length,
                 onReorder: (oldIndex, newIndex) {
+                  if (oldIndex < newIndex) newIndex--;
                   setDialogState(() {
-                    if (oldIndex < newIndex) {
-                      newIndex -= 1;
-                    }
                     final item = tempCategorias.removeAt(oldIndex);
                     tempCategorias.insert(newIndex, item);
                   });
@@ -1513,7 +1695,26 @@ class _AdminScreenState extends State<AdminScreen>
                           ),
                         ),
                       ),
-                      title: Text(categoria['nome']),
+                      title: Row(
+                        children: [
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CategoryIconWidget(
+                              icone: categoria['icone'] ?? '📦',
+                              categoryName: categoria['nome'],
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              categoria['nome'],
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                       trailing: const Icon(Icons.drag_handle),
                     ),
                   );
@@ -1527,7 +1728,18 @@ class _AdminScreenState extends State<AdminScreen>
                 children: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancelar'),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/icons/menu/cancel_button.png',
+                          width: 18,
+                          height: 18,
+                        ),
+                        const SizedBox(width: 4),
+                        const Text('Cancelar'),
+                      ],
+                    ),
                   ),
                   ElevatedButton(
                     onPressed: () async {
@@ -1599,6 +1811,7 @@ class _AdminScreenState extends State<AdminScreen>
       text: categoria['icone'] ?? '',
     );
     bool isAtivo = categoria['ativo'] ?? true;
+    final iconeOriginal = categoria['icone'] ?? '📦';
 
     showDialog(
       context: context,
@@ -1622,6 +1835,16 @@ class _AdminScreenState extends State<AdminScreen>
               children: [
                 const Icon(Icons.edit, color: Colors.white, size: 28),
                 const SizedBox(width: 12),
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CategoryIconWidget(
+                    icone: iconeOriginal,
+                    categoryName: categoria['nome'],
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Editar ${categoria['nome']}',
@@ -1676,22 +1899,79 @@ class _AdminScreenState extends State<AdminScreen>
                     ),
                     child: TextField(
                       controller: iconeController,
-                      decoration: const InputDecoration(
-                        labelText: 'Ícone (Emoji)',
-                        labelStyle: TextStyle(
+                      onChanged: (value) {
+                        // Atualizar preview quando o valor mudar
+                        setDialogState(() {});
+                      },
+                      style: const TextStyle(color: Colors.black87),
+                      decoration: InputDecoration(
+                        labelText: 'Ícone (Emoji ou asset)',
+                        labelStyle: const TextStyle(
                           color: Colors.black87,
                           fontWeight: FontWeight.w500,
                         ),
-                        prefixIcon: Icon(
-                          Icons.emoji_emotions,
-                          color: Colors.black54,
+                        prefixIcon: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CategoryIconWidget(
+                              icone: iconeController.text.isEmpty
+                                  ? iconeOriginal
+                                  : iconeController.text,
+                              size: 24,
+                            ),
+                          ),
                         ),
-                        hintText: 'Ex: 🍰, 🎂, 🥧',
+                        hintText: '🍰 ou asset:assets/icons/icone.svg',
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(16),
-                        helperText: 'Opcional',
-                        helperStyle: TextStyle(color: Colors.black54),
+                        contentPadding: const EdgeInsets.all(16),
+                        helperText:
+                            iconeController.text.startsWith('asset:') ||
+                                (iconeController.text.isEmpty &&
+                                    iconeOriginal.startsWith('asset:'))
+                            ? 'Ícone padrão do asset (coloque um emoji para substituir)'
+                            : 'Emoji ou caminho do asset',
+                        helperStyle: const TextStyle(color: Colors.black54),
                       ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Preview do ícone
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue[200]!),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.preview, color: Colors.blue, size: 20),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Preview:',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue[100]!),
+                          ),
+                          child: CategoryIconWidget(
+                            icone: iconeController.text.isEmpty
+                                ? iconeOriginal
+                                : iconeController.text,
+                            size: 32,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -1757,7 +2037,18 @@ class _AdminScreenState extends State<AdminScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/icons/menu/cancel_button.png',
+                    width: 18,
+                    height: 18,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text('Cancelar'),
+                ],
+              ),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -1775,16 +2066,73 @@ class _AdminScreenState extends State<AdminScreen>
                 final messenger = ScaffoldMessenger.of(context);
 
                 try {
-                  await Supabase.instance.client
-                      .from('categorias')
-                      .update({
-                        'nome': nomeController.text.trim(),
-                        'icone': iconeController.text.trim().isEmpty
-                            ? '📦'
-                            : iconeController.text.trim(),
-                        'ativo': isAtivo,
-                      })
-                      .eq('id', categoria['id']);
+                  final iconeValue = iconeController.text.trim();
+                  final updateData = {
+                    'nome': nomeController.text.trim(),
+                    'icone': iconeValue.isEmpty
+                        ? (iconeOriginal.startsWith('asset:')
+                              ? iconeOriginal
+                              : '')
+                        : iconeValue,
+                    'ativo': isAtivo,
+                  };
+
+                  // Garantir que o ID seja int
+                  final catId = categoria['id'];
+                  final catIdInt = catId is int
+                      ? catId
+                      : int.parse(catId.toString());
+
+                  debugPrint(
+                    '📝 Atualizando categoria ID: $catIdInt com dados: $updateData',
+                  );
+
+                  bool updated = false;
+                  try {
+                    // Tentar update direto primeiro, com .select() para verificar se realmente atualizou
+                    final result = await Supabase.instance.client
+                        .from('categorias')
+                        .update(updateData)
+                        .eq('id', catIdInt)
+                        .select();
+                    debugPrint('📝 Resultado update direto: $result');
+                    updated = (result as List).isNotEmpty;
+                  } catch (updateError) {
+                    debugPrint('❌ Update direto falhou: $updateError');
+                  }
+
+                  if (!updated) {
+                    debugPrint(
+                      '⚠️ Update direto não atualizou - tentando RPC...',
+                    );
+                    // Fallback: tentar via RPC que bypassa RLS
+                    try {
+                      await Supabase.instance.client.rpc(
+                        'update_categoria_admin',
+                        params: {
+                          'categoria_id': catIdInt,
+                          'novo_nome': updateData['nome'],
+                          'novo_icone': updateData['icone'],
+                          'novo_ativo': updateData['ativo'],
+                        },
+                      );
+                      debugPrint('✅ Update via RPC bem-sucedido');
+                    } catch (rpcError) {
+                      debugPrint('❌ RPC update também falhou: $rpcError');
+                      final rpcErrorMsg = rpcError.toString().toLowerCase();
+                      if (rpcErrorMsg.contains('function') &&
+                          rpcErrorMsg.contains('does not exist')) {
+                        debugPrint(
+                          '⚠️ Função update_categoria_admin não existe no Supabase!',
+                        );
+                        throw Exception(
+                          'Função de atualização não encontrada no servidor. '
+                          'Execute o SQL update_categoria_admin.sql no Supabase.',
+                        );
+                      }
+                      rethrow;
+                    }
+                  }
 
                   if (mounted) {
                     navigator.pop();
@@ -1823,6 +2171,9 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   void _showDeleteConfirmation(String type, dynamic id) {
+    debugPrint(
+      '🗑️ _showDeleteConfirmation chamado - type: $type, id: $id (tipo: ${id.runtimeType})',
+    );
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1847,7 +2198,18 @@ class _AdminScreenState extends State<AdminScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar'),
+              ],
+            ),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -1856,15 +2218,74 @@ class _AdminScreenState extends State<AdminScreen>
 
               navigator.pop();
 
+              debugPrint('🗑️ Iniciando exclusão de $type com id: $id');
+
               try {
                 String tableName = type == 'produto'
                     ? 'produtos'
                     : 'categorias';
 
-                await Supabase.instance.client
+                // Tentar delete direto primeiro
+                debugPrint(
+                  '🗑️ Tentando delete direto na tabela $tableName...',
+                );
+                final deleteResult = await Supabase.instance.client
                     .from(tableName)
                     .delete()
-                    .eq('id', id);
+                    .eq('id', id)
+                    .select();
+
+                debugPrint('🗑️ Resultado do delete direto: $deleteResult');
+
+                // Se o delete não retornou nada, pode ser que o RLS bloqueou
+                if (deleteResult.isEmpty) {
+                  debugPrint(
+                    '⚠️ Delete direto retornou vazio - possível bloqueio RLS',
+                  );
+
+                  // Tentar via RPC que bypassa RLS
+                  debugPrint('🗑️ Tentando delete via RPC...');
+                  try {
+                    // Garantir que o ID seja int para evitar conflito de funções sobrecarregadas
+                    final idInt = id is int ? id : int.parse(id.toString());
+                    debugPrint('🗑️ ID convertido para int: $idInt');
+
+                    if (type == 'produto') {
+                      await Supabase.instance.client.rpc(
+                        'delete_produto_admin',
+                        params: {'produto_id': idInt},
+                      );
+                    } else {
+                      await Supabase.instance.client.rpc(
+                        'delete_categoria_admin',
+                        params: {'categoria_id': idInt},
+                      );
+                    }
+                    debugPrint('✅ Delete via RPC bem-sucedido');
+                  } catch (rpcError) {
+                    debugPrint('❌ RPC delete falhou: $rpcError');
+                    final rpcErrorMsg = rpcError.toString().toLowerCase();
+                    if (rpcErrorMsg.contains('foreign key') ||
+                        rpcErrorMsg.contains('23503') ||
+                        rpcErrorMsg.contains('referential integrity')) {
+                      throw Exception(
+                        'Não é possível excluir esta categoria porque existem produtos vinculados a ela. '
+                        'Remova ou altere a categoria dos produtos primeiro.',
+                      );
+                    }
+                    // Se o RPC não existe, mostrar mensagem específica
+                    if (rpcErrorMsg.contains('function') &&
+                        rpcErrorMsg.contains('does not exist')) {
+                      throw Exception(
+                        'Função de exclusão não encontrada no servidor. '
+                        'Por favor, execute o SQL de configuração no Supabase.',
+                      );
+                    }
+                    rethrow;
+                  }
+                } else {
+                  debugPrint('✅ Delete direto bem-sucedido');
+                }
 
                 if (mounted) {
                   messenger.showSnackBar(
@@ -1878,11 +2299,13 @@ class _AdminScreenState extends State<AdminScreen>
                   _loadData();
                 }
               } catch (e) {
+                debugPrint('❌ Erro final ao excluir: $e');
                 if (mounted) {
                   messenger.showSnackBar(
                     SnackBar(
-                      content: Text('Erro ao excluir $type: $e'),
+                      content: Text('Erro ao excluir: $e'),
                       backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 5),
                     ),
                   );
                 }
@@ -1892,7 +2315,19 @@ class _AdminScreenState extends State<AdminScreen>
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Excluir'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 18,
+                  height: 18,
+                  color: Colors.black,
+                ),
+                const SizedBox(width: 4),
+                const Text('Excluir'),
+              ],
+            ),
           ),
         ],
       ),
@@ -2225,7 +2660,18 @@ class _AdminScreenState extends State<AdminScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancelar'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar'),
+              ],
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -2433,6 +2879,7 @@ class _AdminScreenState extends State<AdminScreen>
               _buildStatusFilter('Em Preparo', 'em preparo'),
               _buildStatusFilter('Saiu Entrega', 'saiu para entrega'),
               _buildStatusFilter('Entregues', 'entregue'),
+              _buildStatusFilter('Testes', 'teste'),
               _buildStatusFilter('Cancelados', 'cancelado'),
             ],
           ),
@@ -2534,6 +2981,9 @@ class _AdminScreenState extends State<AdminScreen>
     final itens = pedido['pedido_itens'] as List? ?? [];
     final total = pedido['total'] ?? 0.0;
     final dataPedido = DateTime.tryParse(pedido['created_at'] ?? '');
+    final dataEntrega = pedido['data_entrega'] != null
+        ? DateTime.tryParse(pedido['data_entrega'].toString())
+        : null;
     final cliente = pedido['profiles'];
 
     return Card(
@@ -2578,6 +3028,33 @@ class _AdminScreenState extends State<AdminScreen>
                     ),
                   ),
                   const Spacer(),
+                  if (pedido['is_teste'] == true || status == 'teste')
+                    Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.deepPurple,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.science, color: Colors.white, size: 12),
+                          SizedBox(width: 2),
+                          Text(
+                            'TESTE',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   Text(
                     '#${pedido['id'].toString().padLeft(4, '0')}',
                     style: TextStyle(
@@ -2647,9 +3124,55 @@ class _AdminScreenState extends State<AdminScreen>
                 ],
               ),
 
+              // Data de entrega
+              if (dataEntrega != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.local_shipping,
+                      color: Colors.orange[700],
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Entrega: ${dataEntrega.day.toString().padLeft(2, '0')}/${dataEntrega.month.toString().padLeft(2, '0')}/${dataEntrega.year}',
+                      style: TextStyle(
+                        color: Colors.orange[700],
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+
               // Ações de alteração de status
               const SizedBox(height: 16),
               _buildStatusActions(pedido),
+
+              // Botão excluir para pedidos de teste
+              if (pedido['is_teste'] == true || status == 'teste') ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _excluirPedidoTeste(pedido),
+                    icon: Image.asset(
+                      'assets/icons/menu/delete_button.png',
+                      width: 16,
+                      height: 16,
+                      color: Colors.black,
+                    ),
+                    label: const Text('Excluir Pedido de Teste'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.red),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -2673,6 +3196,8 @@ class _AdminScreenState extends State<AdminScreen>
         return Colors.green;
       case 'cancelado':
         return Colors.red;
+      case 'teste':
+        return Colors.deepPurple;
       default:
         return Colors.grey;
     }
@@ -2694,6 +3219,8 @@ class _AdminScreenState extends State<AdminScreen>
         return Icons.check_circle;
       case 'cancelado':
         return Icons.cancel;
+      case 'teste':
+        return Icons.science;
       default:
         return Icons.help;
     }
@@ -2715,6 +3242,8 @@ class _AdminScreenState extends State<AdminScreen>
         return 'Em Preparo';
       case 'saiu para entrega':
         return 'Saiu para Entrega';
+      case 'teste':
+        return 'Teste';
       default:
         return 'Desconhecido';
     }
@@ -2834,6 +3363,12 @@ class _AdminScreenState extends State<AdminScreen>
             'icon': Icons.cancel,
             'color': Colors.red,
           },
+          {
+            'status': 'confirmado',
+            'label': 'Voltar Confirmado',
+            'icon': Icons.check_circle_outline,
+            'color': Colors.grey,
+          },
         ];
       case 'saiu para entrega':
         return [
@@ -2880,6 +3415,15 @@ class _AdminScreenState extends State<AdminScreen>
             'color': Colors.blue,
           },
         ];
+      case 'teste':
+        return [
+          {
+            'status': 'confirmado',
+            'label': 'Confirmar',
+            'icon': Icons.check_circle_outline,
+            'color': Colors.blue,
+          },
+        ];
       default:
         return [];
     }
@@ -2887,12 +3431,17 @@ class _AdminScreenState extends State<AdminScreen>
 
   String? _selectedStatusFilter;
 
+  /// Pedidos reais (exclui pedidos de teste) para estatísticas
+  List<Map<String, dynamic>> get _pedidosReais => _pedidos
+      .where((p) => p['status'] != 'teste' && p['is_teste'] != true)
+      .toList();
+
   int _getPedidosHoje() {
     final hoje = DateTime.now();
     final inicioHoje = DateTime(hoje.year, hoje.month, hoje.day);
     final fimHoje = inicioHoje.add(const Duration(days: 1));
 
-    return _pedidos.where((pedido) {
+    return _pedidosReais.where((pedido) {
       final dataPedido = DateTime.tryParse(pedido['created_at'] ?? '');
       if (dataPedido == null) return false;
       return dataPedido.isAfter(inicioHoje) && dataPedido.isBefore(fimHoje);
@@ -2900,7 +3449,7 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   String _getFaturamentoTotal() {
-    final total = _pedidos
+    final total = _pedidosReais
         .where((p) => p['status'] == 'entregue' || p['status'] == 'confirmado')
         .fold(0.0, (sum, p) => sum + (p['total'] ?? 0.0));
     return total.toStringAsFixed(2);
@@ -2911,7 +3460,7 @@ class _AdminScreenState extends State<AdminScreen>
     final inicioHoje = DateTime(hoje.year, hoje.month, hoje.day);
     final fimHoje = inicioHoje.add(const Duration(days: 1));
 
-    final totalHoje = _pedidos
+    final totalHoje = _pedidosReais
         .where((pedido) {
           final dataPedido = DateTime.tryParse(pedido['created_at'] ?? '');
           if (dataPedido == null) return false;
@@ -2928,7 +3477,7 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   String _getTicketMedio() {
-    final pedidosEntregues = _pedidos
+    final pedidosEntregues = _pedidosReais
         .where((p) => p['status'] == 'entregue')
         .toList();
     if (pedidosEntregues.isEmpty) return '0.00';
@@ -2942,10 +3491,10 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   String _getTaxaEntrega() {
-    final totalPedidos = _pedidos.length;
+    final totalPedidos = _pedidosReais.length;
     if (totalPedidos == 0) return '0';
 
-    final pedidosEntregues = _pedidos
+    final pedidosEntregues = _pedidosReais
         .where((p) => p['status'] == 'entregue')
         .length;
     final taxa = (pedidosEntregues / totalPedidos) * 100;
@@ -3036,6 +3585,9 @@ class _AdminScreenState extends State<AdminScreen>
   void _showPedidoDetails(Map<String, dynamic> pedido) {
     final itens = pedido['pedido_itens'] as List? ?? [];
     final cliente = pedido['profiles'];
+    final dataEntregaDetail = pedido['data_entrega'] != null
+        ? DateTime.tryParse(pedido['data_entrega'].toString())
+        : null;
 
     showDialog(
       context: context,
@@ -3045,6 +3597,24 @@ class _AdminScreenState extends State<AdminScreen>
             Icon(Icons.receipt_long, color: Colors.blue[700], size: 28),
             const SizedBox(width: 12),
             Text('Pedido #${pedido['id'].toString().padLeft(4, '0')}'),
+            if (pedido['is_teste'] == true || pedido['status'] == 'teste') ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurple,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'TESTE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
         content: SingleChildScrollView(
@@ -3118,6 +3688,12 @@ class _AdminScreenState extends State<AdminScreen>
               if (pedido['observacoes'] != null &&
                   pedido['observacoes'].isNotEmpty)
                 _buildDetailRow('Observações:', pedido['observacoes']),
+
+              if (dataEntregaDetail != null)
+                _buildDetailRow(
+                  'Data de Entrega:',
+                  '${dataEntregaDetail.day.toString().padLeft(2, '0')}/${dataEntregaDetail.month.toString().padLeft(2, '0')}/${dataEntregaDetail.year}',
+                ),
 
               const SizedBox(height: 16),
               const Divider(),
@@ -3244,6 +3820,20 @@ class _AdminScreenState extends State<AdminScreen>
           ),
         ),
         actions: [
+          if (pedido['is_teste'] == true || pedido['status'] == 'teste')
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _excluirPedidoTeste(pedido);
+              },
+              icon: Image.asset(
+                'assets/icons/menu/delete_button.png',
+                width: 18,
+                height: 18,
+                color: Colors.red,
+              ),
+              label: const Text('Excluir', style: TextStyle(color: Colors.red)),
+            ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Fechar'),
@@ -3351,6 +3941,14 @@ class _AdminScreenState extends State<AdminScreen>
       }
 
       if (mounted) {
+        // Atualizar apenas o pedido alterado localmente, sem recarregar tudo
+        setState(() {
+          final index = _pedidos.indexWhere((p) => p['id'] == pedidoId);
+          if (index != -1) {
+            _pedidos[index] = {..._pedidos[index], 'status': novoStatus};
+          }
+        });
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -3360,8 +3958,6 @@ class _AdminScreenState extends State<AdminScreen>
           ),
         );
       }
-
-      _loadData(); // Recarregar dados
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3374,56 +3970,140 @@ class _AdminScreenState extends State<AdminScreen>
     }
   }
 
-  Future<void> _toggleUserRole(Map<String, dynamic> usuario) async {
+  Future<void> _excluirPedidoTeste(Map<String, dynamic> pedido) async {
+    final pedidoId = pedido['id'];
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text(
+          'Excluir Pedido de Teste',
+          textAlign: TextAlign.center,
+        ),
+        content: Text(
+          'Tem certeza que deseja excluir o pedido de teste #${pedidoId.toString().padLeft(4, '0')}?\n\nEsta ação não pode ser desfeita.',
+          textAlign: TextAlign.center,
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar'),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 18,
+                  height: 18,
+                  color: Colors.white,
+                ),
+                const SizedBox(width: 4),
+                const Text('Excluir'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
     try {
-      final currentUser = Supabase.instance.client.auth.currentUser;
-      final currentUserId = currentUser?.id;
+      final idInt = pedidoId is int ? pedidoId : int.parse(pedidoId.toString());
 
-      // Impede que admins promovam outros usuários a admin
-      if (usuario['role'] == 'client' && usuario['id'] != currentUserId) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Você não pode promover outros usuários a administrador. Apenas administradores podem se rebaixar a clientes.',
-              ),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 4),
-            ),
-          );
-        }
-        return; // Impede a promoção
-      }
-
-      // Verifica se está tentando rebaixar outro administrador
-      if (usuario['role'] == 'admin' && usuario['id'] != currentUserId) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Você não pode rebaixar outros administradores. Apenas administradores podem rebaixar a si próprios.',
-              ),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 4),
-            ),
-          );
-        }
-        return; // Impede a alteração
-      }
-
-      // Apenas permite que admins se rebaixem a clientes
-      final newRole = usuario['role'] == 'admin' ? 'client' : 'admin';
-
+      // Tentar excluir itens do pedido primeiro
+      // Tentar excluir itens do pedido primeiro
       await Supabase.instance.client
-          .from('profiles')
-          .update({'role': newRole})
-          .eq('id', usuario['id']);
+          .from('pedido_itens')
+          .delete()
+          .eq('pedido_id', idInt)
+          .select();
+
+      // Tentar excluir o pedido diretamente
+      final deleteResult = await Supabase.instance.client
+          .from('pedidos')
+          .delete()
+          .eq('id', idInt)
+          .select();
+
+      // Se o delete direto retornou vazio, possível bloqueio RLS - tentar via RPC
+      if (deleteResult.isEmpty) {
+        debugPrint(
+          '⚠️ Delete direto do pedido retornou vazio - tentando via RPC',
+        );
+        try {
+          await Supabase.instance.client.rpc(
+            'delete_pedido_teste_admin',
+            params: {'p_pedido_id': idInt},
+          );
+          debugPrint('✅ Delete via RPC bem-sucedido');
+        } catch (rpcError) {
+          debugPrint('❌ RPC delete_pedido_teste_admin falhou: $rpcError');
+          rethrow;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _pedidos.removeWhere((p) => p['id'] == pedidoId);
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Pedido de teste #${pedidoId.toString().padLeft(4, '0')} excluído com sucesso!',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+
+      await _loadData();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao excluir pedido: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleUserRole(Map<String, dynamic> usuario) async {
+    final newRole = usuario['role'] == 'admin' ? 'user' : 'admin';
+    final userName = usuario['full_name'] ?? usuario['email'] ?? 'Usuário';
+
+    try {
+      // Usar RPC com SECURITY DEFINER para bypass de RLS
+      await Supabase.instance.client.rpc(
+        'update_user_role',
+        params: {'target_user_id': usuario['id'], 'new_role': newRole},
+      );
+      debugPrint('✅ Update role via RPC bem-sucedido: $newRole');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Usuário ${usuario['full_name']} agora é ${newRole == 'admin' ? 'administrador' : 'cliente'}',
+              '$userName agora é ${newRole == 'admin' ? 'administrador' : 'usuário'}',
             ),
             backgroundColor: Colors.green,
           ),
@@ -3432,10 +4112,14 @@ class _AdminScreenState extends State<AdminScreen>
 
       _loadData();
     } catch (e) {
+      debugPrint('❌ Erro ao alterar role: $e');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Erro ao alterar role: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao alterar role: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }

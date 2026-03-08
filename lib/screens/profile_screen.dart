@@ -8,6 +8,7 @@ import '../widgets/main_navigation_provider.dart';
 import '../services/image_service.dart';
 import '../services/favorites_service.dart';
 import '../widgets/animated_widgets.dart';
+import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final bool isGuestMode;
@@ -452,8 +453,10 @@ class _ProfileScreenState extends State<ProfileScreen>
           AnimatedButton(
             text: 'Fazer Login',
             onPressed: () {
-              Navigator.of(context).pop();
-              // Aqui você pode navegar para a tela de login se necessário
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const LoginScreen()),
+                (route) => false,
+              );
             },
             backgroundColor: Colors.black,
             textColor: Colors.white,

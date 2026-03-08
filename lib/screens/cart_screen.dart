@@ -167,8 +167,10 @@ class _CartScreenState extends State<CartScreen> {
                       children: [
                         if (_cartService.items.isNotEmpty)
                           IconButton(
-                            icon: const Icon(
-                              Icons.delete_sweep,
+                            icon: Image.asset(
+                              'assets/icons/menu/delete_button.png',
+                              width: 24,
+                              height: 24,
                               color: Colors.white,
                             ),
                             onPressed: _showClearCartDialog,
@@ -657,7 +659,18 @@ class _CartScreenState extends State<CartScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar'),
+              ],
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -668,7 +681,19 @@ class _CartScreenState extends State<CartScreen> {
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Limpar'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 18,
+                  height: 18,
+                  color: Colors.black,
+                ),
+                const SizedBox(width: 4),
+                const Text('Limpar'),
+              ],
+            ),
           ),
         ],
       ),

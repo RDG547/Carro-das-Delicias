@@ -27,15 +27,21 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
   DateTime? _lastUpdate;
   bool _isAdmin = false;
   double _currentZoom = 16.0;
-  String? _currentAddress; // Endereço completo da kombi
+  String? _currentAddress;
   bool _isLoadingAddress = false;
 
+  // Multi-Kombi support
+  List<Map<String, dynamic>> _allKombis = [];
+  String? _selectedAdminId;
+  final Map<String, String> _vendorNames = {};
+
   // Controlador para o top sheet arrastável (invertido)
-  bool _isSheetExpanded =
-      false; // Controla se o sheet está expandido ou retraído
-  // Altura calculada dinamicamente baseada no tamanho da tela
+  bool _isSheetExpanded = false;
   double get _sheetCollapsedHeight => 60.0;
-  double get _sheetExpandedHeight => 280.0;
+  double get _sheetExpandedHeight {
+    final onlineCount = _allKombis.where((k) => k['is_online'] == true).length;
+    return onlineCount > 1 ? 340.0 : 280.0;
+  }
 
   @override
   void initState() {
@@ -98,21 +104,11 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
   }
 
   Future<void> _loadInitialLocation() async {
-    final location = await _trackingService.getCurrentKombiLocation();
-    if (location != null && mounted) {
-      final latitude = location['latitude'] as double?;
-      final longitude = location['longitude'] as double?;
-      final isOnline = location['is_online'] as bool? ?? false;
-
-      if (latitude != null && longitude != null) {
-        setState(() {
-          _kombiLocation = Point(coordinates: Position(longitude, latitude));
-          _isOnline = isOnline;
-          _lastUpdate = DateTime.now();
-        });
-        _updateMarker();
-        _reverseGeocode(latitude, longitude);
-      }
+    final kombis = await _trackingService.getAllOnlineKombis();
+    if (kombis.isNotEmpty && mounted) {
+      await _loadVendorNames(kombis);
+      setState(() => _allKombis = kombis);
+      _selectKombi(kombis.first['admin_id'] as String);
     }
   }
 
@@ -124,31 +120,60 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
   }
 
   void _subscribeToLocationUpdates() {
-    _locationSubscription = _trackingService.watchKombiLocation().listen(
-      (locationData) {
-        if (locationData != null && mounted) {
-          final latitude = locationData['latitude'] as double?;
-          final longitude = locationData['longitude'] as double?;
-          final isOnline = locationData['is_online'] as bool? ?? false;
+    _locationSubscription = _trackingService.watchAllKombis().listen(
+      (allData) {
+        if (!mounted) return;
 
-          if (latitude != null && longitude != null) {
-            setState(() {
-              _kombiLocation = Point(
-                coordinates: Position(longitude, latitude),
-              );
-              _isOnline = isOnline;
-              _lastUpdate = DateTime.now();
-            });
-            _updateMarker();
-            _animateToLocation();
-            _reverseGeocode(latitude, longitude);
-          }
-        } else if (mounted) {
+        final onlineKombis = allData
+            .where((d) => d['is_online'] == true)
+            .toList();
+
+        // Carregar nomes de vendedores novos
+        final currentIds = _vendorNames.keys.toSet();
+        final hasNewIds = allData.any(
+          (k) => !currentIds.contains(k['admin_id'] as String),
+        );
+        if (hasNewIds) {
+          _loadVendorNames(allData);
+        }
+
+        setState(() => _allKombis = allData);
+
+        if (onlineKombis.isEmpty) {
           setState(() {
             _isOnline = false;
             _kombiLocation = null;
+            _selectedAdminId = null;
           });
           _clearMarker();
+          return;
+        }
+
+        // Se a kombi selecionada ficou offline, selecionar a primeira online
+        final selectedStillOnline = onlineKombis.any(
+          (k) => k['admin_id'] == _selectedAdminId,
+        );
+        if (!selectedStillOnline) {
+          _selectKombi(onlineKombis.first['admin_id'] as String);
+          return;
+        }
+
+        // Atualizar localização da kombi selecionada
+        final selected = onlineKombis.firstWhere(
+          (k) => k['admin_id'] == _selectedAdminId,
+        );
+        final latitude = selected['latitude'] as double?;
+        final longitude = selected['longitude'] as double?;
+
+        if (latitude != null && longitude != null) {
+          setState(() {
+            _kombiLocation = Point(coordinates: Position(longitude, latitude));
+            _isOnline = true;
+            _lastUpdate = DateTime.now();
+          });
+          _updateMarker();
+          _animateToLocation();
+          _reverseGeocode(latitude, longitude);
         }
       },
       onError: (error) {
@@ -157,6 +182,44 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
         }
       },
     );
+  }
+
+  Future<void> _loadVendorNames(List<Map<String, dynamic>> kombis) async {
+    final adminIds = kombis.map((k) => k['admin_id'] as String).toList();
+    final newNames = await _trackingService.getVendorNames(adminIds);
+    if (mounted) {
+      setState(() => _vendorNames.addAll(newNames));
+    }
+  }
+
+  void _selectKombi(String adminId) {
+    final kombi = _allKombis.firstWhere(
+      (k) => k['admin_id'] == adminId,
+      orElse: () => <String, dynamic>{},
+    );
+    if (kombi.isEmpty) return;
+
+    final latitude = kombi['latitude'] as double?;
+    final longitude = kombi['longitude'] as double?;
+    final isOnline = kombi['is_online'] as bool? ?? false;
+
+    setState(() {
+      _selectedAdminId = adminId;
+      _isOnline = isOnline;
+      if (latitude != null && longitude != null) {
+        _kombiLocation = Point(coordinates: Position(longitude, latitude));
+        _lastUpdate = DateTime.now();
+      } else {
+        _kombiLocation = null;
+      }
+      _currentAddress = null;
+    });
+
+    if (latitude != null && longitude != null) {
+      _updateMarker();
+      _animateToLocation();
+      _reverseGeocode(latitude, longitude);
+    }
   }
 
   Future<void> _updateMarker() async {
@@ -177,7 +240,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
       iconColor: 0xFFFF6B35, // Cor laranja vibrante
       iconRotate: 0.0,
       iconAnchor: IconAnchor.CENTER,
-      textField: 'Kombi',
+      textField: _vendorNames[_selectedAdminId] ?? 'Kombi',
       textSize: 12.0,
       textColor: 0xFF000000,
       textOffset: [0.0, 2.0],
@@ -425,7 +488,6 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
   }
 
   @override
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
@@ -446,7 +508,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
           },
         ),
         title: const Text(
-          'Rastreamento da Kombi',
+          'Rastreamento das Kombis',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -481,7 +543,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Kombi Offline',
+                          'Nenhuma Kombi Online',
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -490,7 +552,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'A Kombi não está compartilhando\nsua localização no momento.',
+                          'Nenhuma Kombi está compartilhando\nsua localização no momento.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 16,
@@ -671,6 +733,95 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
 
                       // Conteúdo expansível
                       if (_isSheetExpanded) ...[
+                        // Seletor de Kombis (quando há mais de uma online)
+                        if (_allKombis
+                                .where((k) => k['is_online'] == true)
+                                .length >
+                            1) ...[
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Selecione uma Kombi:',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey[700],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(
+                                    children: _allKombis
+                                        .where((k) => k['is_online'] == true)
+                                        .map((kombi) {
+                                          final adminId =
+                                              kombi['admin_id'] as String;
+                                          final isSelected =
+                                              adminId == _selectedAdminId;
+                                          final vendorName =
+                                              _vendorNames[adminId] ??
+                                              'Vendedor';
+                                          return Padding(
+                                            padding: const EdgeInsets.only(
+                                              right: 8,
+                                            ),
+                                            child: ChoiceChip(
+                                              label: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Container(
+                                                    width: 8,
+                                                    height: 8,
+                                                    decoration:
+                                                        const BoxDecoration(
+                                                          color: Colors.green,
+                                                          shape:
+                                                              BoxShape.circle,
+                                                        ),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Text(vendorName),
+                                                ],
+                                              ),
+                                              selected: isSelected,
+                                              selectedColor: Colors.orange[100],
+                                              backgroundColor: Colors.grey[100],
+                                              labelStyle: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: isSelected
+                                                    ? FontWeight.bold
+                                                    : FontWeight.normal,
+                                                color: isSelected
+                                                    ? Colors.orange[900]
+                                                    : Colors.grey[800],
+                                              ),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                side: BorderSide(
+                                                  color: isSelected
+                                                      ? Colors.orange
+                                                      : Colors.grey[300]!,
+                                                ),
+                                              ),
+                                              onSelected: (_) =>
+                                                  _selectKombi(adminId),
+                                            ),
+                                          );
+                                        })
+                                        .toList(),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+
                         // Status badge centralizado
                         Center(
                           child: Container(
@@ -709,7 +860,9 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  _isOnline ? 'KOMBI ONLINE' : 'KOMBI OFFLINE',
+                                  _isOnline
+                                      ? '${_vendorNames[_selectedAdminId] ?? 'KOMBI'} - ONLINE'
+                                      : 'KOMBI OFFLINE',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,

@@ -7,6 +7,8 @@ import '../services/notification_service.dart';
 import '../utils/constants.dart';
 import 'abacatepay_payment_screen.dart';
 import 'stripe_payment_screen.dart';
+import '../widgets/d_plus_one_info_dialog.dart';
+import '../widgets/category_icon_widget.dart';
 
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({super.key});
@@ -15,9 +17,13 @@ class CheckoutScreen extends StatefulWidget {
   State<CheckoutScreen> createState() => _CheckoutScreenState();
 }
 
-class _CheckoutScreenState extends State<CheckoutScreen> {
+class _CheckoutScreenState extends State<CheckoutScreen>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _cartService = CartService();
+  final _scrollController = ScrollController();
+  late AnimationController _scrollIndicatorController;
+  bool _showScrollIndicator = true;
 
   // Controllers para os campos do formulário
   final _nomeController = TextEditingController();
@@ -34,18 +40,58 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _isLoading = false;
   bool _isLoadingUserData = true;
   int _pedidosConcluidos = 0; // Contador de pedidos concluídos (reputação)
+  DateTime? _dataEntrega; // Data agendada para entrega (null = D+1 padrão)
+  bool _isPedidoTeste = false; // Pedido de teste (somente admin)
+  bool _isAdmin = false; // Se o usuário logado é admin
+
+  // Calcula a taxa de serviço baseada no método de pagamento
+  double get _taxaServico {
+    if (_isPedidoTeste) return 0.0;
+    final subtotal = _cartService.total;
+    switch (_metodoPagamento) {
+      case 'pix':
+        return 1.00;
+      case 'credito':
+        return (subtotal * 0.0399) + 0.39;
+      default:
+        return 0.0;
+    }
+  }
+
+  // Total do pedido com taxa de serviço incluída
+  double get _totalComTaxa => _cartService.total + _taxaServico;
 
   @override
   void initState() {
     super.initState();
     _cartService.addListener(_onCartChanged);
-    _loadUserData(); // Carregar dados do usuário automaticamente
-    _loadReputacao(); // Carregar reputação do usuário
+    _loadUserData();
+    _loadReputacao();
+
+    _scrollIndicatorController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+
+    _scrollController.addListener(() {
+      if (_scrollController.offset > 50 && _showScrollIndicator) {
+        setState(() => _showScrollIndicator = false);
+      }
+    });
+
+    // Mostrar popup informativo sobre entrega D+1
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        DPlusOneInfoDialog.show(context);
+      }
+    });
   }
 
   @override
   void dispose() {
     _cartService.removeListener(_onCartChanged);
+    _scrollController.dispose();
+    _scrollIndicatorController.dispose();
     _nomeController.dispose();
     _telefoneController.dispose();
     _enderecoController.dispose();
@@ -75,9 +121,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             .maybeSingle();
 
         if (response != null && mounted) {
+          // Verificar se é admin
+          _isAdmin = response['role'] == 'admin';
           // Preencher campos automaticamente com dados do perfil
           _nomeController.text = response['name'] ?? '';
-          _telefoneController.text = response['phone'] ?? '';
+          String phoneDigits = (response['phone'] ?? '').replaceAll(
+            RegExp(r'[^\d]'),
+            '',
+          );
+          if (phoneDigits.startsWith('55') && phoneDigits.length > 11) {
+            phoneDigits = phoneDigits.substring(2);
+          }
+          _telefoneController.text = _PhoneInputFormatter.format(phoneDigits);
 
           // Se existir endereço salvo, preencher também
           if (response['address'] != null) {
@@ -97,7 +152,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           final userMetadata = user.userMetadata;
           if (userMetadata != null) {
             _nomeController.text = userMetadata['name'] ?? '';
-            _telefoneController.text = userMetadata['phone'] ?? '';
+            String phoneDigits = (userMetadata['phone'] ?? '').replaceAll(
+              RegExp(r'[^\d]'),
+              '',
+            );
+            if (phoneDigits.startsWith('55') && phoneDigits.length > 11) {
+              phoneDigits = phoneDigits.substring(2);
+            }
+            _telefoneController.text = _PhoneInputFormatter.format(phoneDigits);
           }
         }
       }
@@ -166,8 +228,69 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         elevation: 0,
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'Informação sobre entrega',
+            onPressed: () => DPlusOneInfoDialog.show(context, forceShow: true),
+          ),
+        ],
       ),
-      body: _cartService.isEmpty ? _buildEmptyCart() : _buildCheckoutForm(),
+      body: _cartService.isEmpty
+          ? _buildEmptyCart()
+          : Stack(
+              children: [
+                _buildCheckoutForm(),
+                if (_showScrollIndicator)
+                  Positioned(
+                    bottom: 16,
+                    left: 0,
+                    right: 0,
+                    child: AnimatedBuilder(
+                      animation: _scrollIndicatorController,
+                      builder: (context, child) {
+                        return Transform.translate(
+                          offset: Offset(
+                            0,
+                            -8 * _scrollIndicatorController.value,
+                          ),
+                          child: child,
+                        );
+                      },
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.keyboard_arrow_down,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Role para baixo',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
       bottomNavigationBar: _cartService.isEmpty ? null : _buildBottomBar(),
     );
   }
@@ -217,6 +340,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return Form(
       key: _formKey,
       child: ListView(
+        controller: _scrollController,
         addRepaintBoundaries: true,
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
         children: [
@@ -234,6 +358,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
           // Método de pagamento
           RepaintBoundary(child: _buildPaymentMethodSection()),
+          const SizedBox(height: 24),
+
+          // Agendamento de entrega
+          RepaintBoundary(child: _buildScheduleSection()),
           const SizedBox(height: 24),
 
           // Observações
@@ -276,6 +404,43 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   children: [
                     Row(
                       children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: SizedBox(
+                            width: 36,
+                            height: 36,
+                            child:
+                                item.imagemUrl != null &&
+                                    item.imagemUrl!.isNotEmpty
+                                ? Image.network(
+                                    item.imagemUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        color: Colors.orange[50],
+                                        child: Center(
+                                          child: CategoryIconWidget(
+                                            icone: null,
+                                            categoryName: item.categoriaNome,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  )
+                                : Container(
+                                    color: Colors.orange[50],
+                                    child: Center(
+                                      child: CategoryIconWidget(
+                                        icone: null,
+                                        categoryName: item.categoriaNome,
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             '${item.quantidade}x ${item.nome}',
@@ -315,12 +480,54 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                const Text('Subtotal:', style: TextStyle(fontSize: 14)),
+                Text(
+                  CurrencyFormatter.format(_cartService.total),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ],
+            ),
+            if (_taxaServico > 0) ...[
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Taxa de serviço',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      const SizedBox(width: 4),
+                      Tooltip(
+                        message: _metodoPagamento == 'pix'
+                            ? 'Taxa fixa de R\$ 1,00 para pagamento via PIX'
+                            : 'Taxa de 3,99% + R\$ 0,39 para pagamento via cartão',
+                        child: Icon(
+                          Icons.info_outline,
+                          size: 14,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    CurrencyFormatter.format(_taxaServico),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
                 const Text(
                   'Total:',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  CurrencyFormatter.format(_cartService.total),
+                  CurrencyFormatter.format(_totalComTaxa),
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -391,16 +598,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             TextFormField(
               controller: _telefoneController,
               decoration: const InputDecoration(
-                labelText: 'Telefone *',
+                labelText: 'Telefone/WhatsApp *',
                 prefixIcon: Icon(Icons.phone),
+                prefixText: '+55 ',
                 border: OutlineInputBorder(),
-                hintText: '(11) 99999-9999',
+                hintText: '(21) 99086-5138',
               ),
               keyboardType: TextInputType.phone,
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-                _PhoneInputFormatter(),
-              ],
+              inputFormatters: [_PhoneInputFormatter()],
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
                   return 'Telefone é obrigatório';
@@ -519,7 +724,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Widget _buildPaymentMethodSection() {
-    final bool podeUsarDinheiro = _pedidosConcluidos >= 5;
+    final user = Supabase.instance.client.auth.currentUser;
+    final bool isGuest = user == null;
+    final bool podeUsarDinheiro = !isGuest && _pedidosConcluidos >= 5;
+    final bool isAdmin = _isAdmin;
 
     return Card(
       elevation: 2,
@@ -550,6 +758,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               onTap: () {
                 setState(() {
                   _metodoPagamento = 'pix';
+                  _isPedidoTeste = false;
                 });
               },
               child: Container(
@@ -625,6 +834,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               onTap: () {
                 setState(() {
                   _metodoPagamento = 'credito';
+                  _isPedidoTeste = false;
                 });
               },
               child: Container(
@@ -670,12 +880,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     Expanded(
                       child: Row(
                         children: [
-                          Image.network(
-                            'https://img.icons8.com/color/48/bank-card-back-side.png',
+                          Image.asset(
+                            'assets/icons/menu/credit_card.png',
                             width: 24,
                             height: 24,
-                            errorBuilder: (context, error, stackTrace) =>
-                                const Icon(Icons.credit_card, size: 24),
                           ),
                           const SizedBox(width: 12),
                           const Text(
@@ -695,7 +903,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
             const SizedBox(height: 12),
 
-            // Dinheiro - Requer 5 pedidos concluídos
+            // Dinheiro - Requer login e 5 pedidos concluídos
             Opacity(
               opacity: podeUsarDinheiro ? 1.0 : 0.5,
               child: InkWell(
@@ -703,13 +911,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     ? () {
                         setState(() {
                           _metodoPagamento = 'dinheiro';
+                          _isPedidoTeste = false;
                         });
                       }
                     : () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
-                              '🔒 Você precisa de 5 pedidos concluídos para pagar em dinheiro. Progresso: $_pedidosConcluidos/5',
+                              isGuest
+                                  ? '🔒 Visitantes não podem pagar em dinheiro. Faça login ou cadastre-se.'
+                                  : '🔒 Você precisa de 5 pedidos concluídos para pagar em dinheiro. Progresso: $_pedidosConcluidos/5',
                             ),
                             backgroundColor: Colors.orange,
                           ),
@@ -765,12 +976,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           children: [
                             Row(
                               children: [
-                                Image.network(
-                                  'https://img.icons8.com/material/24/wallet--v1.png',
+                                Image.asset(
+                                  'assets/icons/menu/money.png',
                                   width: 24,
                                   height: 24,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      const Icon(Icons.payments, size: 24),
                                 ),
                                 const SizedBox(width: 12),
                                 const Text(
@@ -792,12 +1001,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             Text(
                               podeUsarDinheiro
                                   ? 'Pagamento na entrega'
+                                  : isGuest
+                                  ? 'Indisponível para visitantes'
                                   : 'Requer $_pedidosConcluidos/5 pedidos concluídos',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: podeUsarDinheiro
                                     ? Colors.grey
                                     : Colors.orange,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
@@ -820,7 +1032,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     border: const OutlineInputBorder(),
                     hintText: 'Ex: R\$ 50,00',
                     helperText:
-                        'Total: ${CurrencyFormatter.format(_cartService.total)}',
+                        'Total: ${CurrencyFormatter.format(_totalComTaxa)}',
                   ),
                   keyboardType: TextInputType.number,
                   inputFormatters: [
@@ -838,6 +1050,305 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       _troco = numericValue / 100;
                     }
                   },
+                ),
+              ),
+            ],
+
+            // Opção de pedido teste (somente admin)
+            if (isAdmin) ...[
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () {
+                  setState(() {
+                    if (_isPedidoTeste) {
+                      _isPedidoTeste = false;
+                      _metodoPagamento = 'pix';
+                    } else {
+                      _isPedidoTeste = true;
+                      _metodoPagamento = 'teste';
+                    }
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: _isPedidoTeste
+                          ? Colors.deepPurple
+                          : Colors.grey.shade300,
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    color: _isPedidoTeste
+                        ? Colors.deepPurple.withValues(alpha: 0.1)
+                        : null,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _isPedidoTeste
+                                ? Colors.deepPurple
+                                : Colors.grey,
+                            width: 2,
+                          ),
+                          color: _isPedidoTeste ? Colors.deepPurple : null,
+                        ),
+                        child: _isPedidoTeste
+                            ? const Icon(
+                                Icons.check,
+                                size: 14,
+                                color: Colors.white,
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(Icons.science, color: Colors.deepPurple),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Pedido de Teste (Admin)',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              'Sem pagamento. O pedido será marcado como teste.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Calcula a data mínima para entrega considerando D+1 e regras de fim de semana
+  DateTime _calcularDataMinimaEntrega() {
+    final now = DateTime.now();
+    DateTime minDate;
+
+    switch (now.weekday) {
+      case DateTime.friday:
+        // Sexta: próxima entrega é segunda
+        minDate = now.add(const Duration(days: 3));
+        break;
+      case DateTime.saturday:
+        // Sábado: próxima entrega é segunda
+        minDate = now.add(const Duration(days: 2));
+        break;
+      case DateTime.sunday:
+        // Domingo: próxima entrega é segunda
+        minDate = now.add(const Duration(days: 1));
+        break;
+      default:
+        // Seg-Qui: D+1 normal
+        minDate = now.add(const Duration(days: 1));
+        // Se D+1 cair no domingo, pular para segunda
+        if (minDate.weekday == DateTime.sunday) {
+          minDate = minDate.add(const Duration(days: 1));
+        }
+    }
+
+    return DateTime(minDate.year, minDate.month, minDate.day);
+  }
+
+  // Verifica se uma data é válida para entrega (não domingo)
+  bool _isDataEntregaValida(DateTime date) {
+    return date.weekday != DateTime.sunday;
+  }
+
+  String _formatDate(DateTime date) {
+    const diasSemana = [
+      '',
+      'Segunda',
+      'Terça',
+      'Quarta',
+      'Quinta',
+      'Sexta',
+      'Sábado',
+      'Domingo',
+    ];
+    final dia = date.day.toString().padLeft(2, '0');
+    final mes = date.month.toString().padLeft(2, '0');
+    return '${diasSemana[date.weekday]}, $dia/$mes/${date.year}';
+  }
+
+  Widget _buildScheduleSection() {
+    final dataMinima = _calcularDataMinimaEntrega();
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.calendar_today, color: Colors.orange[700]),
+                const SizedBox(width: 8),
+                Text(
+                  'Agendar Entrega',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange[700],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.orange[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange[200]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: Colors.orange[700]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _dataEntrega == null
+                              ? 'Entrega padrão: ${_formatDate(dataMinima)} (D+1)'
+                              : 'Sem agendamento: entrega em ${_formatDate(dataMinima)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.orange[800],
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Deseja receber em outra data? Agende abaixo para escolher o dia de sua preferência.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.orange[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _dataEntrega ?? dataMinima,
+                        firstDate: dataMinima,
+                        lastDate: DateTime.now().add(const Duration(days: 60)),
+                        selectableDayPredicate: _isDataEntregaValida,
+                        helpText: 'Escolha a data de entrega',
+                        cancelText: 'Cancelar',
+                        confirmText: 'Confirmar',
+                        builder: (context, child) {
+                          return Theme(
+                            data: Theme.of(context).copyWith(
+                              colorScheme: ColorScheme.light(
+                                primary: Colors.orange[700]!,
+                                onPrimary: Colors.white,
+                                surface: Colors.white,
+                                onSurface: Colors.black,
+                              ),
+                            ),
+                            child: child!,
+                          );
+                        },
+                      );
+                      if (picked != null) {
+                        setState(() => _dataEntrega = picked);
+                      }
+                    },
+                    icon: const Icon(Icons.date_range),
+                    label: Text(
+                      _dataEntrega != null
+                          ? _formatDate(_dataEntrega!)
+                          : 'Escolher data',
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange[700],
+                      side: BorderSide(color: Colors.orange[300]!),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+                if (_dataEntrega != null) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () => setState(() => _dataEntrega = null),
+                    icon: const Icon(Icons.close, color: Colors.red),
+                    tooltip: 'Remover agendamento (usar D+1)',
+                  ),
+                ],
+              ],
+            ),
+
+            if (_dataEntrega != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green[200]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle,
+                      size: 16,
+                      color: Colors.green[700],
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Entrega agendada para ${_formatDate(_dataEntrega!)}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -916,7 +1427,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                 ),
                 Text(
-                  CurrencyFormatter.format(_cartService.total),
+                  CurrencyFormatter.format(_totalComTaxa),
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
@@ -1078,7 +1589,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     // Validação adicional para troco
     if (_metodoPagamento == 'dinheiro' &&
         _troco > 0 &&
-        _troco < _cartService.total) {
+        _troco < _totalComTaxa) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Row(
@@ -1111,14 +1622,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       }
 
       // Para PIX e crédito, processar pagamento ANTES de criar pedido
-      if (_metodoPagamento == 'pix') {
+      // Pedidos de teste (admin) pulam o pagamento
+      if (_isPedidoTeste) {
+        debugPrint('🧪 Pedido de teste - pulando pagamento');
+      } else if (_metodoPagamento == 'pix') {
         // Navegar para tela de pagamento PIX
         final result = await Navigator.push<Map<String, dynamic>>(
           context,
           MaterialPageRoute(
             builder: (context) => AbacatePayPaymentScreen(
               pedidoId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
-              amount: _cartService.total,
+              amount: _totalComTaxa,
               description: 'Pedido - Carro das Delícias',
             ),
           ),
@@ -1143,7 +1657,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           MaterialPageRoute(
             builder: (context) => StripePaymentScreen(
               pedidoId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
-              amount: _cartService.total,
+              amount: _totalComTaxa,
               description: 'Pedido - Carro das Delícias',
               customerEmail: user.email ?? '',
             ),
@@ -1175,17 +1689,23 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         'cep': _cepController.text.trim().isEmpty
             ? null
             : _cepController.text.trim(),
-        'metodo_pagamento': _metodoPagamento,
+        'metodo_pagamento': _isPedidoTeste ? 'teste' : _metodoPagamento,
         'valor_troco': _metodoPagamento == 'dinheiro' && _troco > 0
             ? _troco
             : null,
-        'total': _cartService.total,
-        'status': (_metodoPagamento == 'pix' || _metodoPagamento == 'credito')
+        'total': _totalComTaxa,
+        'status': _isPedidoTeste
+            ? 'teste'
+            : (_metodoPagamento == 'pix' || _metodoPagamento == 'credito')
             ? 'pago'
             : 'pendente',
+        'is_teste': _isPedidoTeste,
         'observacoes': _observacoesController.text.trim().isEmpty
             ? null
             : _observacoesController.text.trim(),
+        'data_entrega':
+            _dataEntrega?.toIso8601String() ??
+            _calcularDataMinimaEntrega().toIso8601String(),
         'created_at': DateTime.now().toIso8601String(),
       };
 
@@ -1228,7 +1748,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         await NotificationService.notifyAdminsNewOrder(
           orderId: pedidoId,
           customerName: _nomeController.text.trim(),
-          total: _cartService.total,
+          total: _totalComTaxa,
         );
         debugPrint('✅ Admins notificados sobre pedido #$pedidoId');
       } catch (e) {
@@ -1246,7 +1766,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
       if (mounted) {
         // Salvar total antes de limpar o carrinho
-        final totalPedido = _cartService.total;
+        final totalPedido = _totalComTaxa;
 
         // Limpar carrinho após criar pedido
         await _cartService.clearCart();
@@ -1275,6 +1795,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   void _showSuccessDialog(Map<String, dynamic> pedido, double totalPedido) {
+    final dataEntregaStr = pedido['data_entrega'] != null
+        ? _formatDate(DateTime.parse(pedido['data_entrega']))
+        : _formatDate(_calcularDataMinimaEntrega());
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1296,10 +1820,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             const SizedBox(height: 12),
             Text('Total: ${CurrencyFormatter.format(totalPedido)}'),
             Text('Pagamento: ${_getPaymentMethodName(_metodoPagamento)}'),
+            Text('📅 Entrega: $dataEntregaStr'),
             const SizedBox(height: 12),
             const Text(
-              'Entraremos em contato em breve para confirmar a entrega.',
+              'Se necessário, entraremos em contato para confirmar os detalhes da entrega.',
               style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                border: Border.all(color: Colors.red[300]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                '⚠️ Importante: Caso os dados de contato ou endereço informados estejam incorretos e não seja possível localizar o cliente, não haverá devolução do valor pago.',
+                style: TextStyle(fontSize: 12, color: Colors.red),
+              ),
             ),
           ],
         ),
@@ -1359,30 +1897,57 @@ class _PhoneInputFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    final newText = newValue.text;
-    if (newText.length <= 11) {
-      if (newText.length <= 2) {
-        return newValue.copyWith(text: newText);
-      } else if (newText.length <= 6) {
-        return newValue.copyWith(
-          text: '(${newText.substring(0, 2)}) ${newText.substring(2)}',
-          selection: TextSelection.collapsed(offset: newText.length + 3),
-        );
-      } else if (newText.length <= 10) {
-        return newValue.copyWith(
-          text:
-              '(${newText.substring(0, 2)}) ${newText.substring(2, 6)}-${newText.substring(6)}',
-          selection: TextSelection.collapsed(offset: newText.length + 4),
-        );
-      } else {
-        return newValue.copyWith(
-          text:
-              '(${newText.substring(0, 2)}) ${newText.substring(2, 7)}-${newText.substring(7, 11)}',
-          selection: TextSelection.collapsed(offset: 15),
-        );
+    final text = newValue.text;
+    final digits = text.replaceAll(RegExp(r'[^\d]'), '');
+
+    // Cap at 11 digits (DDD + celular)
+    final capped = digits.length > 11 ? digits.substring(0, 11) : digits;
+
+    final formatted = format(capped);
+
+    // Calculate cursor position based on digit count before cursor
+    int cursorPos = newValue.selection.baseOffset.clamp(0, text.length);
+    int digitsBeforeCursor = text
+        .substring(0, cursorPos)
+        .replaceAll(RegExp(r'[^\d]'), '')
+        .length;
+
+    // If digits were capped, adjust digitsBeforeCursor
+    if (digitsBeforeCursor > capped.length) {
+      digitsBeforeCursor = capped.length;
+    }
+
+    int newPos = _mapDigitCountToOffset(formatted, digitsBeforeCursor);
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(
+        offset: newPos.clamp(0, formatted.length),
+      ),
+    );
+  }
+
+  static String format(String digits) {
+    if (digits.isEmpty) return '';
+    if (digits.length <= 2) return '($digits';
+    if (digits.length <= 6) {
+      return '(${digits.substring(0, 2)}) ${digits.substring(2)}';
+    }
+    if (digits.length <= 10) {
+      return '(${digits.substring(0, 2)}) ${digits.substring(2, 6)}-${digits.substring(6)}';
+    }
+    return '(${digits.substring(0, 2)}) ${digits.substring(2, 7)}-${digits.substring(7)}';
+  }
+
+  int _mapDigitCountToOffset(String formatted, int digitCount) {
+    int count = 0;
+    for (int i = 0; i < formatted.length; i++) {
+      if (RegExp(r'\d').hasMatch(formatted[i])) {
+        if (count == digitCount) return i;
+        count++;
       }
     }
-    return oldValue;
+    return formatted.length;
   }
 }
 

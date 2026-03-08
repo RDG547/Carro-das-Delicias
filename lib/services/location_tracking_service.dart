@@ -189,6 +189,43 @@ class LocationTrackingService {
     }
   }
 
+  /// Obtém todas as Kombis online
+  Future<List<Map<String, dynamic>>> getAllOnlineKombis() async {
+    try {
+      final response = await _supabase
+          .from('kombi_location')
+          .select()
+          .eq('is_online', true);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('Erro ao obter Kombis online: $e');
+      return [];
+    }
+  }
+
+  /// Obtém nomes dos vendedores a partir dos admin_ids
+  Future<Map<String, String>> getVendorNames(List<String> adminIds) async {
+    if (adminIds.isEmpty) return {};
+    try {
+      final response = await _supabase
+          .from('profiles')
+          .select('id, name')
+          .inFilter('id', adminIds);
+
+      final map = <String, String>{};
+      for (final row in response) {
+        final id = row['id'] as String;
+        final name = row['name'] as String? ?? 'Vendedor';
+        map[id] = name;
+      }
+      return map;
+    } catch (e) {
+      debugPrint('Erro ao obter nomes dos vendedores: $e');
+      return {};
+    }
+  }
+
   /// Stream de atualizações de localização em tempo real
   Stream<Map<String, dynamic>?> watchKombiLocation() {
     return _supabase
@@ -196,6 +233,11 @@ class LocationTrackingService {
         .stream(primaryKey: ['id'])
         .eq('is_online', true)
         .map((data) => data.isNotEmpty ? data.first : null);
+  }
+
+  /// Stream de todas as Kombis (online e offline)
+  Stream<List<Map<String, dynamic>>> watchAllKombis() {
+    return _supabase.from('kombi_location').stream(primaryKey: ['id']);
   }
 
   /// Verifica se está rastreando

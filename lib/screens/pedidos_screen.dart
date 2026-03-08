@@ -18,6 +18,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
   List<Map<String, dynamic>> _pedidos = [];
   bool _isLoading = true;
   StreamSubscription<List<Map<String, dynamic>>>? _pedidosSubscription;
+  int _realtimeRetryCount = 0;
+  static const int _maxRealtimeRetries = 5;
+  Timer? _retryTimer;
 
   @override
   void initState() {
@@ -29,12 +32,16 @@ class _PedidosScreenState extends State<PedidosScreen> {
   @override
   void dispose() {
     _pedidosSubscription?.cancel();
+    _retryTimer?.cancel();
     super.dispose();
   }
 
   void _setupRealtimeSubscription() {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
+
+    // Cancelar subscription anterior se existir
+    _pedidosSubscription?.cancel();
 
     // Escutar mudanças em tempo real na tabela de pedidos
     _pedidosSubscription = Supabase.instance.client
@@ -47,10 +54,28 @@ class _PedidosScreenState extends State<PedidosScreen> {
             debugPrint(
               '🔔 Pedidos atualizados em tempo real: ${data.length} pedidos',
             );
+            _realtimeRetryCount = 0; // Reset retry count on success
             _processarPedidosRealtime(data);
           },
           onError: (error) {
             debugPrint('❌ Erro no stream de pedidos: $error');
+            // Retry with exponential backoff on timeout/error
+            if (_realtimeRetryCount < _maxRealtimeRetries && mounted) {
+              _realtimeRetryCount++;
+              final delay = Duration(seconds: 2 * _realtimeRetryCount);
+              debugPrint(
+                '🔄 Tentando reconectar stream de pedidos em ${delay.inSeconds}s '
+                '(tentativa $_realtimeRetryCount/$_maxRealtimeRetries)',
+              );
+              _retryTimer?.cancel();
+              _retryTimer = Timer(delay, () {
+                if (mounted) _setupRealtimeSubscription();
+              });
+            } else {
+              debugPrint(
+                '⚠️ Máximo de tentativas de reconexão atingido para stream de pedidos',
+              );
+            }
           },
         );
   }
@@ -61,6 +86,11 @@ class _PedidosScreenState extends State<PedidosScreen> {
     try {
       // Para cada pedido, buscar os itens relacionados
       List<Map<String, dynamic>> pedidosProcessados = [];
+
+      // Filtrar pedidos de teste
+      pedidosData = pedidosData
+          .where((p) => p['status'] != 'teste' && p['is_teste'] != true)
+          .toList();
 
       for (var pedido in pedidosData) {
         // Buscar itens do pedido
@@ -104,12 +134,14 @@ class _PedidosScreenState extends State<PedidosScreen> {
             'subtotal': item['subtotal'],
             'observacoes': item['observacoes'],
             'tamanho': tamanhoFormatado,
+            'imagem_url': produto?['imagem_url'],
           };
         }).toList();
 
         pedidosProcessados.add({
           'id': pedido['id'],
           'data': pedido['created_at'],
+          'data_entrega': pedido['data_entrega'],
           'status': pedido['status'],
           'total': pedido['total'],
           'cliente_nome': pedido['cliente_nome'],
@@ -146,8 +178,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
         return;
       }
 
-      // Carregar pedidos do usuário atual do banco de dados
-      // Não mostrar pedidos com status 'pendente' ou 'aguardando_pagamento'
+      // Carregar todos os pedidos do usuário atual do banco de dados
       final response = await Supabase.instance.client
           .from('pedidos')
           .select('''
@@ -163,7 +194,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
             )
           ''')
           .eq('user_id', user.id)
-          .not('status', 'in', '(pendente,aguardando_pagamento)')
+          .neq('status', 'teste')
           .order('created_at', ascending: false);
 
       // Processar os dados dos pedidos
@@ -197,6 +228,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
                 'subtotal': item['subtotal'],
                 'observacoes': item['observacoes'],
                 'tamanho': tamanhoFormatado,
+                'imagem_url': produto?['imagem_url'],
               };
             })
             .toList();
@@ -204,6 +236,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
         return {
           'id': pedido['id'],
           'data': pedido['created_at'],
+          'data_entrega': pedido['data_entrega'],
           'status': pedido['status'],
           'total': pedido['total'],
           'cliente_nome': pedido['cliente_nome'],
@@ -276,6 +309,18 @@ class _PedidosScreenState extends State<PedidosScreen> {
     }
   }
 
+  String _formatDateShort(String dateStr) {
+    try {
+      final date = DateTime.parse(dateStr);
+      const diasSemana = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+      final day = date.day.toString().padLeft(2, '0');
+      final month = date.month.toString().padLeft(2, '0');
+      return '${diasSemana[date.weekday]}, $day/$month/${date.year}';
+    } catch (e) {
+      return dateStr;
+    }
+  }
+
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'pendente':
@@ -292,6 +337,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
         return Colors.orange;
       case 'saiu para entrega':
         return Colors.purple;
+      case 'teste':
+        return Colors.deepPurple;
       default:
         return Colors.grey;
     }
@@ -313,6 +360,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
         return Icons.kitchen;
       case 'saiu para entrega':
         return Icons.delivery_dining;
+      case 'teste':
+        return Icons.science;
       default:
         return Icons.help;
     }
@@ -676,6 +725,27 @@ class _PedidosScreenState extends State<PedidosScreen> {
                               fontSize: 14,
                             ),
                           ),
+                          if (pedido['data_entrega'] != null) ...[
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.calendar_today,
+                                  size: 12,
+                                  color: Colors.orange[700],
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Entrega: ${_formatDateShort(pedido['data_entrega'])}',
+                                  style: TextStyle(
+                                    color: Colors.orange[700],
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                           const SizedBox(height: 4),
                           Row(
                             children: [
@@ -751,6 +821,37 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                   padding: const EdgeInsets.only(bottom: 4),
                                   child: Row(
                                     children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: SizedBox(
+                                          width: 30,
+                                          height: 30,
+                                          child: item['imagem_url'] != null
+                                              ? Image.network(
+                                                  item['imagem_url'],
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (_, _, _) =>
+                                                      Container(
+                                                        color:
+                                                            Colors.orange[50],
+                                                        child: const Icon(
+                                                          Icons.fastfood,
+                                                          size: 18,
+                                                          color: Colors.orange,
+                                                        ),
+                                                      ),
+                                                )
+                                              : Container(
+                                                  color: Colors.orange[50],
+                                                  child: const Icon(
+                                                    Icons.fastfood,
+                                                    size: 18,
+                                                    color: Colors.orange,
+                                                  ),
+                                                ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
                                       Expanded(
                                         child: RichText(
                                           text: TextSpan(
@@ -1022,6 +1123,18 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     }
   }
 
+  String _formatDateShort(String dateStr) {
+    try {
+      final date = DateTime.parse(dateStr);
+      const diasSemana = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+      final day = date.day.toString().padLeft(2, '0');
+      final month = date.month.toString().padLeft(2, '0');
+      return '${diasSemana[date.weekday]}, $day/$month/${date.year}';
+    } catch (e) {
+      return dateStr;
+    }
+  }
+
   String _formatPrice(dynamic price) {
     if (price is num) {
       return 'R\$ ${price.toStringAsFixed(2).replaceAll('.', ',')}';
@@ -1209,6 +1322,15 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                 _formatDate(widget.pedido['data']),
                 Colors.blue,
               ),
+              if (widget.pedido['data_entrega'] != null) ...[
+                const SizedBox(height: 12),
+                _buildDetailRow(
+                  Icons.local_shipping,
+                  'Entrega Agendada',
+                  _formatDateShort(widget.pedido['data_entrega']),
+                  Colors.orange,
+                ),
+              ],
               const SizedBox(height: 12),
 
               // Status atual (atualizado em tempo real)
@@ -1338,6 +1460,35 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                   ),
                   child: Row(
                     children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: item['imagem_url'] != null
+                              ? Image.network(
+                                  item['imagem_url'],
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => Container(
+                                    color: Colors.orange[50],
+                                    child: const Icon(
+                                      Icons.fastfood,
+                                      size: 22,
+                                      color: Colors.orange,
+                                    ),
+                                  ),
+                                )
+                              : Container(
+                                  color: Colors.orange[50],
+                                  child: const Icon(
+                                    Icons.fastfood,
+                                    size: 22,
+                                    color: Colors.orange,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,

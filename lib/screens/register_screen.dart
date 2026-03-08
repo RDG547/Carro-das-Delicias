@@ -303,13 +303,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     return BaseScreen(
       title: 'Cadastro',
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+      padding: const EdgeInsets.fromLTRB(24.0, 8.0, 24.0, 24.0),
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 20),
-
+            Center(
+              child: Image.asset(
+                'assets/icons/Icon.png',
+                height: 100,
+                fit: BoxFit.contain,
+              ),
+            ),
+            const SizedBox(height: 24),
             // Título
             Text(
               'Criar conta',

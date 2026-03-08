@@ -200,7 +200,18 @@ class PermissionService {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancelar'),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/icons/menu/cancel_button.png',
+                    width: 18,
+                    height: 18,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text('Cancelar'),
+                ],
+              ),
             ),
             ElevatedButton(
               onPressed: () async {

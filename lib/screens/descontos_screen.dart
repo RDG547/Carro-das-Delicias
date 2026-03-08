@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/base_screen.dart';
 import '../providers/admin_status_provider.dart';
@@ -6,6 +7,29 @@ import '../widgets/app_menu.dart';
 import '../widgets/main_navigation_provider.dart';
 import '../services/cart_service.dart';
 import 'product_detail_screen.dart';
+
+/// Constrói o widget do ícone de categoria (suporta SVG asset, PNG asset, URL de imagem e emoji)
+Widget _buildCategoryIconWidget(String? icone, {double size = 24}) {
+  if (icone == null) return const SizedBox.shrink();
+  if (icone.startsWith('asset:')) {
+    final assetPath = icone.replaceFirst('asset:', '');
+    if (assetPath.endsWith('.svg')) {
+      return SvgPicture.asset(assetPath, width: size, height: size);
+    } else {
+      return Image.asset(assetPath, width: size, height: size);
+    }
+  } else if (icone.startsWith('http')) {
+    return Image.network(
+      icone,
+      width: size,
+      height: size,
+      errorBuilder: (context, error, stackTrace) =>
+          const Icon(Icons.broken_image, size: 16),
+    );
+  } else {
+    return Text(icone, style: TextStyle(fontSize: size * 0.67));
+  }
+}
 
 class DescontosScreen extends StatefulWidget {
   const DescontosScreen({super.key});
@@ -86,13 +110,17 @@ class _DescontosScreenState extends State<DescontosScreen> {
     }
   }
 
-  void _navigateToProductDetail(Map<String, dynamic> produto) {
-    Navigator.push(
+  void _navigateToProductDetail(Map<String, dynamic> produto) async {
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ProductDetailScreen(produto: produto),
       ),
     );
+    if (result == 'go_to_cart' && mounted) {
+      final provider = MainNavigationProvider.of(context);
+      provider?.navigateToPageDirect?.call(4);
+    }
   }
 
   void _addToCart(Map<String, dynamic> produto) {
@@ -108,7 +136,7 @@ class _DescontosScreenState extends State<DescontosScreen> {
   }
 
   Widget _buildEmojiPlaceholder(Map<String, dynamic>? categoria) {
-    final String emoji = categoria?['icone'] ?? '🍰';
+    final String icone = categoria?['icone'] ?? '🍰';
     return Container(
       width: 120,
       height: 120,
@@ -116,7 +144,13 @@ class _DescontosScreenState extends State<DescontosScreen> {
         color: Colors.grey[100],
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Center(child: Text(emoji, style: const TextStyle(fontSize: 60))),
+      child: Center(
+        child: SizedBox(
+          width: 80,
+          height: 80,
+          child: _buildCategoryIconWidget(icone, size: 72),
+        ),
+      ),
     );
   }
 
@@ -246,12 +280,26 @@ class _DescontosScreenState extends State<DescontosScreen> {
                                         color: Colors.grey[200],
                                         borderRadius: BorderRadius.circular(12),
                                       ),
-                                      child: Text(
-                                        '${categoria['icone']} ${categoria['nome']}',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                        ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: _buildCategoryIconWidget(
+                                              categoria['icone'] ?? '📦',
+                                              size: 14,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            categoria['nome'] ?? '',
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                 ],

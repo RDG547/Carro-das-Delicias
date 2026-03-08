@@ -467,7 +467,18 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
               _pollingTimer?.cancel();
               Navigator.of(context).pop({'success': false});
             },
-            child: const Text('Cancelar', style: TextStyle(color: Colors.red)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar', style: TextStyle(color: Colors.red)),
+              ],
+            ),
           ),
         ],
       ),
