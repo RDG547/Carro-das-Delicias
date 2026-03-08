@@ -25,7 +25,6 @@ workflows:
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
       - name: Prepare build assets
         script: |
-          touch "$CM_BUILD_DIR/.env"
           mkdir -p "$CM_BUILD_DIR/assets/sounds"
           [ -f "$CM_BUILD_DIR/assets/sounds/.gitkeep" ] || touch "$CM_BUILD_DIR/assets/sounds/.gitkeep"
       - name: Get Flutter packages
@@ -39,9 +38,6 @@ workflows:
           flutter test
       - name: Build Android Release
         script: |
-          touch "$CM_BUILD_DIR/.env"
-          mkdir -p "$CM_BUILD_DIR/assets/sounds"
-          [ -f "$CM_BUILD_DIR/assets/sounds/.gitkeep" ] || touch "$CM_BUILD_DIR/assets/sounds/.gitkeep"
           flutter build appbundle --release
     artifacts:
       - android/app/build/outputs/**/*.aab
@@ -79,7 +75,6 @@ workflows:
           xcode-project use-profiles
       - name: Prepare build assets
         script: |
-          touch "$CM_BUILD_DIR/.env"
           mkdir -p "$CM_BUILD_DIR/assets/sounds"
           [ -f "$CM_BUILD_DIR/assets/sounds/.gitkeep" ] || touch "$CM_BUILD_DIR/assets/sounds/.gitkeep"
       - name: Get Flutter packages
@@ -93,9 +88,6 @@ workflows:
           flutter analyze
       - name: Build iOS IPA
         script: |
-          touch "$CM_BUILD_DIR/.env"
-          mkdir -p "$CM_BUILD_DIR/assets/sounds"
-          [ -f "$CM_BUILD_DIR/assets/sounds/.gitkeep" ] || touch "$CM_BUILD_DIR/assets/sounds/.gitkeep"
           flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa

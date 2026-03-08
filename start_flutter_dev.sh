@@ -163,7 +163,17 @@ echo ""
 if [ "$1" = "--flutter" ]; then
     echo "🚀 Iniciando Flutter automaticamente..."
     cd $PROJECT_PATH
-    flutter run --dart-define=SUPABASE_URL=https://rlpnatsygjdzijpwhfxo.supabase.co --dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJscG5hdHN5Z2pkemlqcHdoZnhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4NzE5MjYsImV4cCI6MjA3MzQ0NzkyNn0.UzHldJo7CVJj2Kk-jgQRQ7IuF3ae0MomaO5HbxrjAPw
+    # Carrega variáveis do .env se existir
+    DART_DEFINES=""
+    if [ -f "$PROJECT_PATH/.env" ]; then
+        while IFS='=' read -r key value; do
+            # Ignora comentários e linhas vazias
+            [[ "$key" =~ ^#.*$ ]] && continue
+            [[ -z "$key" ]] && continue
+            DART_DEFINES="$DART_DEFINES --dart-define=$key=$value"
+        done < "$PROJECT_PATH/.env"
+    fi
+    flutter run $DART_DEFINES
 fi
 
 echo "🎯 Script concluído!"
