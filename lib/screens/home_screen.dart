@@ -2708,29 +2708,30 @@ class _HomeScreenState extends State<HomeScreen> {
     final preco = produto['preco'];
     final precoAnterior = produto['preco_anterior'];
 
-    // Se tem múltiplos tamanhos, mostrar o menor preço
+    // Se tem tamanhos, mostrar o menor preço
     if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
-      double menorPreco = double.infinity;
+      final precos = <double>{};
       for (var tamanho in tamanhos) {
         final precoTamanho = tamanho['preco']?.toDouble() ?? 0.0;
-        if (precoTamanho < menorPreco && precoTamanho > 0) {
-          menorPreco = precoTamanho;
-        }
+        if (precoTamanho > 0) precos.add(precoTamanho);
       }
 
-      if (menorPreco == double.infinity) {
+      if (precos.isEmpty) {
         return const Text(
           'Sem preço',
           style: TextStyle(fontSize: 12, color: Colors.grey),
         );
       }
 
+      final menorPreco = precos.reduce((a, b) => a < b ? a : b);
+      final temMultiplosPrecos = precos.length > 1;
+
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'A partir de',
-            style: TextStyle(fontSize: 10, color: Colors.grey),
+          Text(
+            temMultiplosPrecos ? 'A partir de' : 'Preço',
+            style: const TextStyle(fontSize: 10, color: Colors.grey),
           ),
           Text(
             CurrencyFormatter.format(menorPreco),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
+import 'config/env_config.dart';
 import 'services/notification_service.dart';
 import 'auth_wrapper.dart';
 import 'screens/checkout_screen.dart';
@@ -9,6 +10,9 @@ import 'screens/checkout_screen.dart';
 Future<void> main() async {
   // Garante que os bindings do Flutter foram inicializados
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Carrega variáveis de ambiente do .env
+  await EnvConfig.load();
 
   // Inicializa o Supabase com configuração segura
   await Supabase.initialize(
