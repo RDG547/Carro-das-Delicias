@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../config/env_config.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Serviço para integração com o Stripe para pagamentos com cartão
 class StripeService {
-  static String get _secretKey => EnvConfig.get('STRIPE_SECRET_KEY');
+  static String get _secretKey => dotenv.env['STRIPE_SECRET_KEY'] ?? '';
   static const String _baseUrl = 'https://api.stripe.com/v1';
 
   // URLs de retorno (substituir por URLs reais em produção)

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
-import 'config/env_config.dart';
 import 'services/notification_service.dart';
 import 'auth_wrapper.dart';
 import 'screens/checkout_screen.dart';
@@ -11,8 +11,12 @@ Future<void> main() async {
   // Garante que os bindings do Flutter foram inicializados
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Carrega variáveis de ambiente do .env
-  await EnvConfig.load();
+  // Carrega variáveis de ambiente do .env (bundled como asset)
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (_) {
+    // .env pode não existir no CI — segue com valores vazios
+  }
 
   // Inicializa o Supabase com configuração segura
   await Supabase.initialize(
