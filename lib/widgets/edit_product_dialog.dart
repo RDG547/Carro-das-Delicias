@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/catalog_sync_service.dart';
 import '../services/image_service.dart';
 import 'form_dialogs.dart'; // Para usar CurrencyInputFormatter
 import 'category_icon_widget.dart';
@@ -41,6 +42,16 @@ class _EditProductDialogState extends State<EditProductDialog> {
   // Lista de imagens do produto (suporte a múltiplas imagens)
   List<String> _productImages = [];
   bool _isUploadingImages = false;
+
+  String _formatCurrencyText(dynamic value) {
+    final numericValue = value is num
+        ? value.toDouble()
+        : double.tryParse(value?.toString() ?? '');
+    if (numericValue == null || numericValue <= 0) {
+      return '';
+    }
+    return 'R\$ ${numericValue.toStringAsFixed(2).replaceAll('.', ',')}';
+  }
 
   @override
   void initState() {
@@ -94,12 +105,11 @@ class _EditProductDialogState extends State<EditProductDialog> {
     // Inicializar preço formatado como R$ X,XX
     final precoRaw = widget.produto['preco'];
     if (precoRaw != null) {
-      final precoDouble = double.tryParse(precoRaw.toString()) ?? 0.0;
       _precoController = TextEditingController(
-        text: 'R\$ ${precoDouble.toStringAsFixed(2).replaceAll('.', ',')}',
+        text: _formatCurrencyText(precoRaw),
       );
     } else {
-      _precoController = TextEditingController(text: 'R\$ 0,00');
+      _precoController = TextEditingController();
     }
 
     // Verificar se tem múltiplos tamanhos
@@ -110,7 +120,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
         _sizes.add({
           'nameController': TextEditingController(text: tamanho['nome'] ?? ''),
           'precoController': TextEditingController(
-            text: tamanho['preco']?.toString() ?? '',
+            text: _formatCurrencyText(tamanho['preco']),
           ),
         });
       }
@@ -404,6 +414,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
               backgroundColor: Colors.green,
             ),
           );
+          CatalogSyncService.instance.notifyCatalogChanged();
           widget.onProductUpdated();
         }
         return;
@@ -444,6 +455,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
             backgroundColor: Colors.green,
           ),
         );
+        CatalogSyncService.instance.notifyCatalogChanged();
         widget.onProductUpdated();
       }
     } catch (e) {
@@ -570,7 +582,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                         ),
                         hintText: 'R\$ 0,00',
                         hintStyle: TextStyle(
-                          color: Colors.grey.withValues(alpha: 0.5),
+                          color: Colors.grey.withValues(alpha: 0.28),
                         ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.all(16),
@@ -1228,9 +1240,14 @@ class _EditProductDialogState extends State<EditProductDialog> {
                                     keyboardType: TextInputType.number,
                                     inputFormatters: [CurrencyInputFormatter()],
                                     enableInteractiveSelection: false,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       labelText: 'Preço',
                                       hintText: 'R\$ 0,00',
+                                      hintStyle: TextStyle(
+                                        color: Colors.grey.withValues(
+                                          alpha: 0.28,
+                                        ),
+                                      ),
                                       border: OutlineInputBorder(),
                                       contentPadding: EdgeInsets.all(12),
                                     ),
@@ -1243,7 +1260,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                                     'assets/icons/menu/delete_button.png',
                                     width: 20,
                                     height: 20,
-                                    color: Colors.black,
+                                    color: Colors.red,
                                   ),
                                 ),
                               ],
@@ -1306,16 +1323,17 @@ class _EditProductDialogState extends State<EditProductDialog> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: ElevatedButton(
+                child: ElevatedButton.icon(
                   onPressed: _updateProduct,
+                  icon: const Icon(Icons.save, size: 18),
+                  label: const Text(
+                    'Salvar Alterações',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                  child: const Text(
-                    'Atualizar',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),

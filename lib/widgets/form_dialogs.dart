@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:io';
+import '../services/catalog_sync_service.dart';
 import '../services/image_service.dart';
 import 'category_icon_widget.dart';
 
@@ -14,8 +15,8 @@ class CurrencyInputFormatter extends TextInputFormatter {
   ) {
     if (newValue.text.isEmpty) {
       return const TextEditingValue(
-        text: 'R\$ 0,00',
-        selection: TextSelection.collapsed(offset: 7),
+        text: '',
+        selection: TextSelection.collapsed(offset: 0),
       );
     }
 
@@ -24,8 +25,8 @@ class CurrencyInputFormatter extends TextInputFormatter {
 
     if (digitsOnly.isEmpty) {
       return const TextEditingValue(
-        text: 'R\$ 0,00',
-        selection: TextSelection.collapsed(offset: 7),
+        text: '',
+        selection: TextSelection.collapsed(offset: 0),
       );
     }
 
@@ -61,10 +62,10 @@ class AddProductDialog extends StatefulWidget {
 class _AddProductDialogState extends State<AddProductDialog> {
   final _nomeController = TextEditingController();
   final _descricaoController = TextEditingController();
-  final _precoController = TextEditingController(text: 'R\$ 0,00');
-  final _precoAnteriorController = TextEditingController(text: 'R\$ 0,00');
-  final _precoComDescontoController = TextEditingController(text: 'R\$ 0,00');
-  final _valorDescontoController = TextEditingController(text: 'R\$ 0,00');
+  final _precoController = TextEditingController();
+  final _precoAnteriorController = TextEditingController();
+  final _precoComDescontoController = TextEditingController();
+  final _valorDescontoController = TextEditingController();
   final _imagemUrlController = TextEditingController();
   String? _selectedCategoryId;
   bool _isDisponivel = true;
@@ -98,7 +99,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
         'nome': '',
         'preco': 0.0,
         'nameController': TextEditingController(),
-        'precoController': TextEditingController(text: 'R\$ 0,00'),
+        'precoController': TextEditingController(),
       });
     });
   }
@@ -350,6 +351,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
             backgroundColor: Colors.green,
           ),
         );
+        CatalogSyncService.instance.notifyCatalogChanged();
         widget.onProductAdded();
       }
     } catch (e) {
@@ -473,7 +475,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                         ),
                         hintText: 'R\$ 0,00',
                         hintStyle: TextStyle(
-                          color: Colors.grey.withValues(alpha: 0.5),
+                          color: Colors.grey.withValues(alpha: 0.28),
                         ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.all(16),
@@ -505,7 +507,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                         ),
                         hintText: 'R\$ 0,00',
                         hintStyle: TextStyle(
-                          color: Colors.grey.withValues(alpha: 0.5),
+                          color: Colors.grey.withValues(alpha: 0.28),
                         ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.all(16),
@@ -535,7 +537,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                         ),
                         hintText: 'R\$ 0,00',
                         hintStyle: TextStyle(
-                          color: Colors.grey.withValues(alpha: 0.5),
+                          color: Colors.grey.withValues(alpha: 0.28),
                         ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.all(16),
@@ -1157,6 +1159,11 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                               decoration: InputDecoration(
                                                 labelText: 'Preço *',
                                                 hintText: 'R\$ 0,00',
+                                                hintStyle: TextStyle(
+                                                  color: Colors.grey.withValues(
+                                                    alpha: 0.28,
+                                                  ),
+                                                ),
                                                 border: OutlineInputBorder(
                                                   borderRadius:
                                                       BorderRadius.circular(8),
@@ -1187,7 +1194,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                               'assets/icons/menu/delete_button.png',
                                               width: 20,
                                               height: 20,
-                                              color: Colors.black,
+                                              color: Colors.red,
                                             ),
                                             onPressed: () => _removeSize(index),
                                             padding: EdgeInsets.zero,
@@ -1270,7 +1277,10 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       const SizedBox(width: 6),
                       const Text(
                         'Adicionar',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -1571,7 +1581,10 @@ class _AddCategoryDialogState extends State<AddCategoryDialog> {
                       const SizedBox(width: 6),
                       const Text(
                         'Adicionar',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),

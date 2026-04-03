@@ -8,6 +8,8 @@ import '../widgets/app_menu.dart';
 import '../widgets/main_navigation_provider.dart';
 import '../utils/constants.dart';
 import '../services/notification_service.dart';
+import '../services/app_settings_service.dart';
+import '../services/catalog_sync_service.dart';
 import '../services/location_tracking_service.dart';
 import '../widgets/category_icon_widget.dart';
 
@@ -29,10 +31,13 @@ class _AdminScreenState extends State<AdminScreen>
   List<Map<String, dynamic>> _usuarios = [];
   List<Map<String, dynamic>> _pedidos = [];
   bool _isLoading = false;
-  String _filtroUsuarios = 'todos'; // 'todos', 'admin', 'client'
+  final ValueNotifier<String> _userFilterNotifier = ValueNotifier('todos');
 
   // Subscription para escutar pedidos em tempo real
   StreamSubscription<List<Map<String, dynamic>>>? _pedidosSubscription;
+  RealtimeChannel? _catalogChannel;
+  Timer? _catalogRefreshDebounce;
+  late final VoidCallback _catalogSyncListener;
 
   // Controladores de busca
   final TextEditingController _searchCategoryController =
@@ -58,6 +63,10 @@ class _AdminScreenState extends State<AdminScreen>
     );
 
     _loadData();
+    _catalogSyncListener = () {
+      _scheduleCatalogRefresh();
+    };
+    CatalogSyncService.instance.addListener(_catalogSyncListener);
     _setupRealtimeSubscription(); // Adicionar listener em tempo real
     _checkTrackingStatus(); // Verificar estado do rastreamento
     _fadeController.forward();
@@ -119,9 +128,15 @@ class _AdminScreenState extends State<AdminScreen>
     _fadeController.dispose();
     _searchCategoryController.dispose();
     _pedidosSubscription?.cancel(); // Cancelar subscription ao sair
+    _catalogRefreshDebounce?.cancel();
+    CatalogSyncService.instance.removeListener(_catalogSyncListener);
+    if (_catalogChannel != null) {
+      Supabase.instance.client.removeChannel(_catalogChannel!);
+    }
     // NÃO chamar _locationService.dispose() pois o serviço deve continuar rodando
     // O rastreamento só deve parar quando o admin desativar manualmente via toggle
     _isTrackingLocationNotifier.dispose(); // Limpar notifier
+    _userFilterNotifier.dispose();
     super.dispose();
   }
 
@@ -216,6 +231,7 @@ class _AdminScreenState extends State<AdminScreen>
                 (u) => {
                   'id': u.id,
                   'email': u.email,
+                  'avatar_url': u.userMetadata?['avatar_url'],
                   'full_name':
                       u.userMetadata?['full_name'] ??
                       u.userMetadata?['name'] ??
@@ -248,6 +264,40 @@ class _AdminScreenState extends State<AdminScreen>
           }
         }
       }
+
+      final usuarioIds = usuariosResponse
+          .map((u) => u['id'])
+          .whereType<String>()
+          .toSet();
+      final usuariosProfilesResponse = usuarioIds.isNotEmpty
+          ? await Supabase.instance.client
+                .from('profiles')
+                .select('id, name, email, phone, role, avatar_url')
+                .inFilter('id', usuarioIds.toList())
+          : <Map<String, dynamic>>[];
+      final usuariosProfilesMap = Map<String, Map<String, dynamic>>.fromEntries(
+        usuariosProfilesResponse.map(
+          (profile) => MapEntry(
+            profile['id'].toString(),
+            Map<String, dynamic>.from(profile),
+          ),
+        ),
+      );
+      final mergedUsuarios = usuariosResponse.map((usuario) {
+        final usuarioMap = Map<String, dynamic>.from(usuario);
+        final profile = usuariosProfilesMap[usuarioMap['id']?.toString()];
+        return {
+          ...usuarioMap,
+          'full_name':
+              usuarioMap['full_name'] ??
+              profile?['name'] ??
+              usuarioMap['name'] ??
+              'Usuário',
+          'email': usuarioMap['email'] ?? profile?['email'] ?? '',
+          'role': usuarioMap['role'] ?? profile?['role'] ?? 'client',
+          'avatar_url': usuarioMap['avatar_url'] ?? profile?['avatar_url'],
+        };
+      }).toList();
 
       // Carregar pedidos com itens
       final pedidosResponse = await Supabase.instance.client
@@ -296,7 +346,7 @@ class _AdminScreenState extends State<AdminScreen>
         // Respeitar a ordem do banco de dados (campo 'ordem')
         // As categorias já vêm ordenadas pela query .order('ordem', ascending: true)
         _filteredCategorias = List.from(_categorias);
-        _usuarios = List<Map<String, dynamic>>.from(usuariosResponse);
+        _usuarios = List<Map<String, dynamic>>.from(mergedUsuarios);
         _pedidos = List<Map<String, dynamic>>.from(pedidosWithProfiles);
       });
 
@@ -336,6 +386,31 @@ class _AdminScreenState extends State<AdminScreen>
             debugPrint('❌ [ADMIN] Erro no stream de pedidos: $error');
           },
         );
+
+    _catalogChannel = Supabase.instance.client
+        .channel('admin-catalog-changes')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'produtos',
+          callback: (_) => _scheduleCatalogRefresh(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'categorias',
+          callback: (_) => _scheduleCatalogRefresh(),
+        )
+        .subscribe();
+  }
+
+  void _scheduleCatalogRefresh() {
+    _catalogRefreshDebounce?.cancel();
+    _catalogRefreshDebounce = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        _loadData();
+      }
+    });
   }
 
   /// Processar pedidos recebidos em tempo real
@@ -1139,7 +1214,7 @@ class _AdminScreenState extends State<AdminScreen>
                                     'assets/icons/menu/delete_button.png',
                                     width: 20,
                                     height: 20,
-                                    color: Colors.black,
+                                    color: Colors.red,
                                   ),
                                   SizedBox(width: 8),
                                   Text(
@@ -1327,7 +1402,7 @@ class _AdminScreenState extends State<AdminScreen>
                                     'assets/icons/menu/delete_button.png',
                                     width: 20,
                                     height: 20,
-                                    color: Colors.black,
+                                    color: Colors.red,
                                   ),
                                   SizedBox(width: 8),
                                   Text(
@@ -1361,117 +1436,195 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   Widget _buildUsuariosTab() {
-    // Filtrar e ordenar: admins primeiro
-    final filteredUsuarios =
-        _usuarios.where((u) {
-          if (_filtroUsuarios == 'admin') return u['role'] == 'admin';
-          if (_filtroUsuarios == 'client') return u['role'] != 'admin';
-          return true;
-        }).toList()..sort((a, b) {
-          final aAdmin = a['role'] == 'admin' ? 0 : 1;
-          final bAdmin = b['role'] == 'admin' ? 0 : 1;
-          return aAdmin.compareTo(bAdmin);
-        });
+    return ValueListenableBuilder<String>(
+      valueListenable: _userFilterNotifier,
+      builder: (context, selectedFilter, child) {
+        final filteredUsuarios =
+            _usuarios.where((u) {
+              if (selectedFilter == 'admin') return u['role'] == 'admin';
+              if (selectedFilter == 'client') return u['role'] != 'admin';
+              return true;
+            }).toList()..sort((a, b) {
+              final aAdmin = a['role'] == 'admin' ? 0 : 1;
+              final bAdmin = b['role'] == 'admin' ? 0 : 1;
+              return aAdmin.compareTo(bAdmin);
+            });
 
-    return Column(
-      children: [
-        // Filtros
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              _buildUserFilter('Todos', 'todos', Icons.people),
-              const SizedBox(width: 8),
-              _buildUserFilter('Admin', 'admin', Icons.admin_panel_settings),
-              const SizedBox(width: 8),
-              _buildUserFilter('Usuário', 'client', Icons.person),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Lista de usuários
-        Expanded(
-          child: filteredUsuarios.isEmpty
-              ? const Center(
-                  child: Text(
-                    'Nenhum usuário encontrado',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  _buildUserFilter(
+                    label: 'Todos',
+                    value: 'todos',
+                    icon: Icons.people,
+                    selectedFilter: selectedFilter,
                   ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: filteredUsuarios.length,
-                  itemBuilder: (context, index) {
-                    final usuario = filteredUsuarios[index];
-                    final isAdmin = usuario['role'] == 'admin';
+                  const SizedBox(width: 8),
+                  _buildUserFilter(
+                    label: 'Admin',
+                    value: 'admin',
+                    icon: Icons.admin_panel_settings,
+                    selectedFilter: selectedFilter,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildUserFilter(
+                    label: 'Usuário',
+                    value: 'client',
+                    icon: Icons.person,
+                    selectedFilter: selectedFilter,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: filteredUsuarios.isEmpty
+                    ? const Center(
+                        key: ValueKey('empty-users'),
+                        child: Text(
+                          'Nenhum usuário encontrado',
+                          style: TextStyle(fontSize: 16, color: Colors.grey),
+                        ),
+                      )
+                    : ListView.builder(
+                        key: ValueKey('users-$selectedFilter'),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: filteredUsuarios.length,
+                        itemBuilder: (context, index) {
+                          final usuario = filteredUsuarios[index];
+                          final isAdmin = usuario['role'] == 'admin';
 
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: isAdmin
-                              ? Colors.red[100]
-                              : Colors.blue[100],
-                          child: Icon(
-                            isAdmin ? Icons.admin_panel_settings : Icons.person,
-                            color: isAdmin ? Colors.red : Colors.blue,
-                          ),
-                        ),
-                        title: Text(usuario['full_name'] ?? 'Usuário'),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(usuario['email'] ?? ''),
-                            Text(
-                              isAdmin ? 'Administrador' : 'Cliente',
-                              style: TextStyle(
-                                color: isAdmin ? Colors.red : Colors.blue,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        trailing: PopupMenuButton(
-                          itemBuilder: (context) => [
-                            PopupMenuItem(
-                              value: 'toggle_role',
-                              child: Row(
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            child: ListTile(
+                              leading: _buildUserAvatar(usuario, isAdmin),
+                              title: Text(usuario['full_name'] ?? 'Usuário'),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Icon(
-                                    isAdmin
-                                        ? Icons.person
-                                        : Icons.admin_panel_settings,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
+                                  Text(usuario['email'] ?? ''),
                                   Text(
-                                    isAdmin ? 'Tornar Usuário' : 'Tornar Admin',
+                                    isAdmin ? 'Administrador' : 'Cliente',
+                                    style: TextStyle(
+                                      color: isAdmin ? Colors.red : Colors.blue,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ],
                               ),
+                              trailing: PopupMenuButton(
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                    value: 'toggle_role',
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          isAdmin
+                                              ? Icons.person
+                                              : Icons.admin_panel_settings,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          isAdmin
+                                              ? 'Tornar Usuário'
+                                              : 'Tornar Admin',
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                onSelected: (value) {
+                                  if (value == 'toggle_role') {
+                                    _toggleUserRole(usuario);
+                                  }
+                                },
+                              ),
                             ),
-                          ],
-                          onSelected: (value) {
-                            if (value == 'toggle_role') {
-                              _toggleUserRole(usuario);
-                            }
-                          },
-                        ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
-        ),
-      ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildUserFilter(String label, String value, IconData icon) {
-    final isSelected = _filtroUsuarios == value;
+  Widget _buildUserAvatar(Map<String, dynamic> usuario, bool isAdmin) {
+    final avatarUrl = usuario['avatar_url']?.toString();
+    final fullName = usuario['full_name']?.toString().trim().isNotEmpty == true
+        ? usuario['full_name'].toString().trim()
+        : 'Usuário';
+
+    return SizedBox(
+      width: 48,
+      height: 48,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: isAdmin ? Colors.red[100] : Colors.blue[100],
+            backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
+                ? NetworkImage(avatarUrl)
+                : null,
+            child: avatarUrl == null || avatarUrl.isEmpty
+                ? Text(
+                    fullName.substring(0, 1).toUpperCase(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: isAdmin ? Colors.red : Colors.blue,
+                    ),
+                  )
+                : null,
+          ),
+          Positioned(
+            right: -2,
+            bottom: -2,
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Icon(
+                isAdmin ? Icons.admin_panel_settings : Icons.person,
+                size: 12,
+                color: isAdmin ? Colors.red : Colors.blue,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUserFilter({
+    required String label,
+    required String value,
+    required IconData icon,
+    required String selectedFilter,
+  }) {
+    final isSelected = selectedFilter == value;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _filtroUsuarios = value),
+        onTap: () => _userFilterNotifier.value = value,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
@@ -1723,73 +1876,73 @@ class _AdminScreenState extends State<AdminScreen>
             ),
             actionsAlignment: MainAxisAlignment.center,
             actions: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Image.asset(
-                          'assets/icons/menu/cancel_button.png',
-                          width: 18,
-                          height: 18,
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image.asset(
+                      'assets/icons/menu/cancel_button.png',
+                      width: 18,
+                      height: 18,
+                    ),
+                    const SizedBox(width: 4),
+                    const Text('Cancelar'),
+                  ],
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final scaffoldMessenger = ScaffoldMessenger.of(context);
+                  final navigator = Navigator.of(context);
+
+                  try {
+                    // Atualizar a ordem de cada categoria no banco de dados
+                    for (int i = 0; i < tempCategorias.length; i++) {
+                      final categoria = tempCategorias[i];
+                      await Supabase.instance.client
+                          .from('categorias')
+                          .update({'ordem': i})
+                          .eq('id', categoria['id']);
+                    }
+
+                    // Atualizar o estado local imediatamente
+                    if (mounted) {
+                      setState(() {
+                        _categorias = List.from(tempCategorias);
+                        _filteredCategorias = List.from(tempCategorias);
+                      });
+
+                      scaffoldMessenger.showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Ordem das categorias atualizada com sucesso!',
+                          ),
+                          backgroundColor: Colors.green,
                         ),
-                        const SizedBox(width: 4),
-                        const Text('Cancelar'),
-                      ],
-                    ),
-                  ),
-                  ElevatedButton(
-                    onPressed: () async {
-                      final scaffoldMessenger = ScaffoldMessenger.of(context);
-                      final navigator = Navigator.of(context);
-
-                      try {
-                        // Atualizar a ordem de cada categoria no banco de dados
-                        for (int i = 0; i < tempCategorias.length; i++) {
-                          final categoria = tempCategorias[i];
-                          await Supabase.instance.client
-                              .from('categorias')
-                              .update({'ordem': i})
-                              .eq('id', categoria['id']);
-                        }
-
-                        // Atualizar o estado local imediatamente
-                        if (mounted) {
-                          setState(() {
-                            _categorias = List.from(tempCategorias);
-                            _filteredCategorias = List.from(tempCategorias);
-                          });
-
-                          scaffoldMessenger.showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Ordem das categorias atualizada com sucesso!',
-                              ),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                          navigator.pop();
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          scaffoldMessenger.showSnackBar(
-                            SnackBar(
-                              content: Text('Erro ao reordenar categorias: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                    ),
-                    child: const Text('Salvar Ordem'),
-                  ),
-                ],
+                      );
+                      navigator.pop();
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      scaffoldMessenger.showSnackBar(
+                        SnackBar(
+                          content: Text('Erro ao reordenar categorias: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.save, size: 18),
+                    SizedBox(width: 6),
+                    Text('Salvar Ordem'),
+                  ],
+                ),
               ),
             ],
           );
@@ -2162,7 +2315,14 @@ class _AdminScreenState extends State<AdminScreen>
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
-              child: const Text('Salvar Alterações'),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.save, size: 18),
+                  SizedBox(width: 6),
+                  Text('Salvar Alterações'),
+                ],
+              ),
             ),
           ],
         ),
@@ -2525,6 +2685,12 @@ class _AdminScreenState extends State<AdminScreen>
                   icon: Icons.tune,
                   items: [
                     _buildSettingsItem(
+                      title: 'Configurações de Pagamento',
+                      subtitle: 'Definir quando dinheiro fica disponível',
+                      icon: Icons.payments,
+                      onTap: _showPaymentSettings,
+                    ),
+                    _buildSettingsItem(
                       title: 'Configurações de Notificação',
                       subtitle: 'Gerenciar notificações do sistema',
                       icon: Icons.notifications_outlined,
@@ -2766,6 +2932,165 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
+  void _showPaymentSettings() async {
+    Navigator.of(context).pop();
+
+    final initialSettings = await AppSettingsService.getCashPaymentSettings();
+    if (!mounted) return;
+
+    var selectedAvailability = initialSettings.availability;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Configurações de Pagamento'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Defina quando o pagamento em dinheiro ficará disponível:',
+              ),
+              const SizedBox(height: 16),
+              _buildPaymentOptionTile(
+                title: 'Todos os clientes autenticados',
+                subtitle: 'Libera dinheiro para qualquer usuário logado.',
+                isSelected:
+                    selectedAvailability == CashPaymentAvailability.allUsers,
+                onTap: () {
+                  setDialogState(() {
+                    selectedAvailability = CashPaymentAvailability.allUsers;
+                  });
+                },
+              ),
+              const SizedBox(height: 8),
+              _buildPaymentOptionTile(
+                title: 'Mínimo de 5 pedidos concluídos',
+                subtitle:
+                    'Mantém o desbloqueio de dinheiro só após 5 entregas.',
+                isSelected:
+                    selectedAvailability ==
+                    CashPaymentAvailability.minimumCompletedOrders,
+                onTap: () {
+                  setDialogState(() {
+                    selectedAvailability =
+                        CashPaymentAvailability.minimumCompletedOrders;
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/icons/menu/cancel_button.png',
+                    width: 18,
+                    height: 18,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text('Cancelar'),
+                ],
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final navigator = Navigator.of(dialogContext);
+                final settings = CashPaymentSettings(
+                  availability: selectedAvailability,
+                  minimumCompletedOrders: 5,
+                );
+
+                try {
+                  await AppSettingsService.saveCashPaymentSettings(settings);
+                  if (!mounted) return;
+                  navigator.pop();
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Configuração do pagamento em dinheiro atualizada!',
+                      ),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } catch (error) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Erro ao salvar configuração: $error'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.save, size: 18),
+              label: const Text('Salvar Alterações'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentOptionTile({
+    required String title,
+    required String subtitle,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? Colors.green : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
+          color: isSelected
+              ? Colors.green.withValues(alpha: 0.08)
+              : Colors.transparent,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: isSelected ? Colors.green : Colors.grey,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showMaintenanceOptions() {
     Navigator.of(context).pop(); // Fechar configurações
     showDialog(
@@ -2974,6 +3299,25 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
+  DateTime? _getDeliveredAt(Map<String, dynamic> pedido) {
+    final rawDeliveredAt =
+        pedido['entregue_em'] ??
+        (pedido['status'] == 'entregue' ? pedido['updated_at'] : null);
+    if (rawDeliveredAt == null) return null;
+    return DateTime.tryParse(rawDeliveredAt.toString())?.toLocal();
+  }
+
+  String _formatDateTime(DateTime value) {
+    final localValue = value.toLocal();
+    return '${localValue.day.toString().padLeft(2, '0')}/${localValue.month.toString().padLeft(2, '0')}/${localValue.year} ${localValue.hour.toString().padLeft(2, '0')}:${localValue.minute.toString().padLeft(2, '0')}:${localValue.second.toString().padLeft(2, '0')}';
+  }
+
+  bool _isMissingPedidoColumnError(dynamic error) {
+    final errorMessage = error.toString().toLowerCase();
+    return errorMessage.contains('entregue_em') ||
+        errorMessage.contains('updated_at');
+  }
+
   Widget _buildPedidoCard(Map<String, dynamic> pedido) {
     final status = pedido['status'] ?? 'pendente';
     final statusColor = _getStatusColor(status);
@@ -2981,9 +3325,10 @@ class _AdminScreenState extends State<AdminScreen>
     final itens = pedido['pedido_itens'] as List? ?? [];
     final total = pedido['total'] ?? 0.0;
     final dataPedido = DateTime.tryParse(pedido['created_at'] ?? '');
-    final dataEntrega = pedido['data_entrega'] != null
+    final dataEntregaAgendada = pedido['data_entrega'] != null
         ? DateTime.tryParse(pedido['data_entrega'].toString())
         : null;
+    final entregueEm = _getDeliveredAt(pedido);
     final cliente = pedido['profiles'];
 
     return Card(
@@ -3118,14 +3463,33 @@ class _AdminScreenState extends State<AdminScreen>
                   const Spacer(),
                   if (dataPedido != null)
                     Text(
-                      '${dataPedido.day.toString().padLeft(2, '0')}/${dataPedido.month.toString().padLeft(2, '0')} ${dataPedido.hour.toString().padLeft(2, '0')}:${dataPedido.minute.toString().padLeft(2, '0')}:${dataPedido.second.toString().padLeft(2, '0')}',
+                      _formatDateTime(dataPedido),
                       style: TextStyle(color: Colors.grey[600], fontSize: 12),
                     ),
                 ],
               ),
 
-              // Data de entrega
-              if (dataEntrega != null) ...[
+              if (entregueEm != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle,
+                      color: Colors.green[700],
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Entregue: ${_formatDateTime(entregueEm)}',
+                      style: TextStyle(
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ] else if (dataEntregaAgendada != null) ...[
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -3136,7 +3500,7 @@ class _AdminScreenState extends State<AdminScreen>
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Entrega: ${dataEntrega.day.toString().padLeft(2, '0')}/${dataEntrega.month.toString().padLeft(2, '0')}/${dataEntrega.year}',
+                      'Entrega: ${dataEntregaAgendada.day.toString().padLeft(2, '0')}/${dataEntregaAgendada.month.toString().padLeft(2, '0')}/${dataEntregaAgendada.year}',
                       style: TextStyle(
                         color: Colors.orange[700],
                         fontWeight: FontWeight.w600,
@@ -3585,13 +3949,15 @@ class _AdminScreenState extends State<AdminScreen>
   void _showPedidoDetails(Map<String, dynamic> pedido) {
     final itens = pedido['pedido_itens'] as List? ?? [];
     final cliente = pedido['profiles'];
-    final dataEntregaDetail = pedido['data_entrega'] != null
+    final dataEntregaAgendada = pedido['data_entrega'] != null
         ? DateTime.tryParse(pedido['data_entrega'].toString())
         : null;
+    final entregueEm = _getDeliveredAt(pedido);
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         title: Row(
           children: [
             Icon(Icons.receipt_long, color: Colors.blue[700], size: 28),
@@ -3689,11 +4055,14 @@ class _AdminScreenState extends State<AdminScreen>
                   pedido['observacoes'].isNotEmpty)
                 _buildDetailRow('Observações:', pedido['observacoes']),
 
-              if (dataEntregaDetail != null)
+              if (dataEntregaAgendada != null)
                 _buildDetailRow(
-                  'Data de Entrega:',
-                  '${dataEntregaDetail.day.toString().padLeft(2, '0')}/${dataEntregaDetail.month.toString().padLeft(2, '0')}/${dataEntregaDetail.year}',
+                  'Entrega Agendada:',
+                  '${dataEntregaAgendada.day.toString().padLeft(2, '0')}/${dataEntregaAgendada.month.toString().padLeft(2, '0')}/${dataEntregaAgendada.year}',
                 ),
+
+              if (entregueEm != null)
+                _buildDetailRow('Entregue em:', _formatDateTime(entregueEm)),
 
               const SizedBox(height: 16),
               const Divider(),
@@ -3820,23 +4189,50 @@ class _AdminScreenState extends State<AdminScreen>
           ),
         ),
         actions: [
-          if (pedido['is_teste'] == true || pedido['status'] == 'teste')
-            TextButton.icon(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _excluirPedidoTeste(pedido);
-              },
-              icon: Image.asset(
-                'assets/icons/menu/delete_button.png',
-                width: 18,
-                height: 18,
-                color: Colors.red,
-              ),
-              label: const Text('Excluir', style: TextStyle(color: Colors.red)),
+          SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (pedido['is_teste'] == true || pedido['status'] == 'teste')
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        _excluirPedidoTeste(pedido);
+                      },
+                      icon: Image.asset(
+                        'assets/icons/menu/delete_button.png',
+                        width: 18,
+                        height: 18,
+                        color: Colors.red,
+                      ),
+                      label: const Text(
+                        'Excluir',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  ),
+                if (pedido['is_teste'] == true || pedido['status'] == 'teste')
+                  const SizedBox(height: 8),
+                Center(
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, size: 18),
+                    label: const Text('Fechar'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fechar'),
           ),
         ],
       ),
@@ -3883,6 +4279,7 @@ class _AdminScreenState extends State<AdminScreen>
   ) async {
     final statusLabel = _getStatusLabel(novoStatus);
     final pedidoId = pedido['id'];
+    final deliveredAt = DateTime.now();
 
     // Confirmação para mudanças importantes
     if (novoStatus == 'cancelado' || novoStatus == 'entregue') {
@@ -3923,11 +4320,29 @@ class _AdminScreenState extends State<AdminScreen>
 
     try {
       final oldStatus = pedido['status'];
+      final fullUpdateData = <String, dynamic>{
+        'status': novoStatus,
+        'updated_at': deliveredAt.toIso8601String(),
+      };
+      if (novoStatus == 'entregue') {
+        fullUpdateData['entregue_em'] = deliveredAt.toIso8601String();
+      }
 
-      await Supabase.instance.client
-          .from('pedidos')
-          .update({'status': novoStatus})
-          .eq('id', pedidoId);
+      try {
+        await Supabase.instance.client
+            .from('pedidos')
+            .update(fullUpdateData)
+            .eq('id', pedidoId);
+      } catch (error) {
+        if (_isMissingPedidoColumnError(error)) {
+          await Supabase.instance.client
+              .from('pedidos')
+              .update({'status': novoStatus})
+              .eq('id', pedidoId);
+        } else {
+          rethrow;
+        }
+      }
 
       // Notificar o usuário sobre a mudança de status
       final userId = pedido['user_id'];
@@ -3945,7 +4360,13 @@ class _AdminScreenState extends State<AdminScreen>
         setState(() {
           final index = _pedidos.indexWhere((p) => p['id'] == pedidoId);
           if (index != -1) {
-            _pedidos[index] = {..._pedidos[index], 'status': novoStatus};
+            _pedidos[index] = {
+              ..._pedidos[index],
+              'status': novoStatus,
+              'updated_at': deliveredAt.toIso8601String(),
+              if (novoStatus == 'entregue')
+                'entregue_em': deliveredAt.toIso8601String(),
+            };
           }
         });
 

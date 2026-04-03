@@ -58,7 +58,6 @@ class BaseScreen extends StatelessWidget {
     final Widget content = AnimatedSwitcher(
       duration: const Duration(milliseconds: 400),
       child: Padding(
-        key: ValueKey('${child.runtimeType}_${child.hashCode}_$hashCode'),
         padding:
             padding ??
             const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),

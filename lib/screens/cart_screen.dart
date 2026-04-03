@@ -652,7 +652,7 @@ class _CartScreenState extends State<CartScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Limpar Carrinho'),
+        title: const Text('Limpar Carrinho', textAlign: TextAlign.center),
         content: const Text(
           'Tem certeza que deseja remover todos os itens do carrinho?',
         ),
@@ -688,7 +688,7 @@ class _CartScreenState extends State<CartScreen> {
                   'assets/icons/menu/delete_button.png',
                   width: 18,
                   height: 18,
-                  color: Colors.black,
+                  color: Colors.white,
                 ),
                 const SizedBox(width: 4),
                 const Text('Limpar'),

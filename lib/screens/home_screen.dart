@@ -13,11 +13,16 @@ import '../widgets/category_icon_widget.dart';
 import '../widgets/favorite_heart_animation.dart';
 import '../widgets/app_menu.dart';
 import '../utils/custom_fab_location.dart';
+import '../utils/app_snackbar.dart';
 import '../utils/constants.dart';
+import '../utils/product_action_helper.dart';
 import '../services/favorites_service.dart';
 import '../services/cart_service.dart';
+import '../services/catalog_sync_service.dart';
 import '../services/fuzzy_search_service.dart';
+import '../services/main_navigation_service.dart';
 import '../widgets/main_navigation_provider.dart';
+import 'cart_screen.dart';
 import 'product_detail_screen.dart';
 
 // CurrencyInputFormatter para formatação de preços
@@ -55,22 +60,32 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+enum ProductSortOption { latest, alphabetical }
+
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   final _searchController = TextEditingController();
   final _scrollController = ScrollController();
   final _searchFocusNode = FocusNode();
   final _searchQueryNotifier = ValueNotifier<String>('');
   final _selectedCategoryNotifier = ValueNotifier<String>('Todos');
+  final _sortOptionNotifier = ValueNotifier<ProductSortOption>(
+    ProductSortOption.latest,
+  );
   Timer? _searchDebounce;
+  Timer? _catalogRefreshDebounce;
+  late final VoidCallback _catalogSyncListener;
 
   // Getters para compatibilidade
   String get _searchQuery => _searchQueryNotifier.value;
   String get _selectedCategory => _selectedCategoryNotifier.value;
+  ProductSortOption get _sortOption => _sortOptionNotifier.value;
 
   // Cache para resultados filtrados
   List<Map<String, dynamic>>? _cachedFilteredProducts;
   String _lastSearchQuery = '';
   String _lastSelectedCategory = '';
+  ProductSortOption _lastSortOption = ProductSortOption.latest;
 
   List<Map<String, dynamic>> _produtos = [];
   List<Map<String, dynamic>> _categorias = [];
@@ -79,14 +94,38 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOfflineMode = false;
   bool _adminStatusChecked = false;
   bool _hasScrolledDown = false; // Flag para controlar primeira rolagem
+  bool _showScrollIndicator = true;
   final _favoritesService = FavoritesService();
   final _cartService = CartService();
   RealtimeChannel? _productsChannel;
   late final AudioPlayer _audioPlayer;
+  late final AnimationController _scrollIndicatorController;
 
   // Referência centralizada ao mapa de overrides de ícones
   static const Map<String, String> _categoryIconOverrides =
       CategoryIconWidget.categoryIconOverrides;
+  static const List<double> _grayscaleMatrix = [
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ];
 
   // Getter para categorias com favoritos dinâmico
   List<Map<String, dynamic>> get _categoriasComFavoritos {
@@ -154,6 +193,51 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _hideScrollIndicator() {
+    if (!_showScrollIndicator) return;
+
+    _scrollIndicatorController.stop();
+    setState(() {
+      _showScrollIndicator = false;
+    });
+  }
+
+  void _updateScrollIndicatorAvailability() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+
+      final canScroll = _scrollController.position.maxScrollExtent > 24;
+      if (canScroll && !_showScrollIndicator && !_hasScrolledDown) {
+        _scrollIndicatorController.repeat(reverse: true);
+        setState(() {
+          _showScrollIndicator = true;
+        });
+      } else if (!canScroll && _showScrollIndicator) {
+        _hideScrollIndicator();
+      }
+    });
+  }
+
+  void _openCartPage() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      if (MainNavigationService.navigateToCart()) {
+        return;
+      }
+
+      final provider = MainNavigationProvider.of(context);
+      if (provider?.navigateToPageDirect != null) {
+        provider!.navigateToPageDirect!(MainNavigationService.cartPageIndex);
+        return;
+      }
+
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (context) => const CartScreen()));
+    });
+  }
+
   // Verificar se consegue conectar com o Supabase
   Future<bool> _checkSupabaseConnection() async {
     try {
@@ -217,29 +301,42 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _audioPlayer = AudioPlayer();
+    _scrollIndicatorController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _scrollController.addListener(() {
+      if (_scrollController.offset > 50 && _showScrollIndicator) {
+        _hideScrollIndicator();
+      }
+    });
     // Configurar volume máximo
     _audioPlayer.setVolume(1.0);
     _searchController.addListener(_onSearchChanged);
 
     // Invalidar cache quando categoria muda
     _selectedCategoryNotifier.addListener(_onCategoryChanged);
+    _sortOptionNotifier.addListener(_onCategoryChanged);
 
     // Carregar favoritos e escutar mudanças
     _favoritesService.addListener(_onFavoritesChanged);
     _favoritesService.loadFavorites();
+    _catalogSyncListener = () {
+      _scheduleCatalogReload(preserveScrollPosition: true);
+    };
+    CatalogSyncService.instance.addListener(_catalogSyncListener);
 
     // Carregar dados após um pequeno delay para garantir que o widget esteja pronto
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
       _setupRealtimeSubscription();
+      _scheduleScrollIndicatorAvailabilityChecks();
     });
   }
 
   void _setupRealtimeSubscription() {
     try {
       final supabase = Supabase.instance.client;
-
-      Timer? debounceTimer;
 
       // Criar canal de subscription para produtos
       _productsChannel = supabase
@@ -252,18 +349,8 @@ class _HomeScreenState extends State<HomeScreen> {
               debugPrint(
                 '🔄 Atualização em tempo real detectada: ${payload.eventType}',
               );
-
-              // Debounce para evitar múltiplas recargas
-              debounceTimer?.cancel();
-              debounceTimer = Timer(const Duration(milliseconds: 500), () {
-                // Recarregar dados preservando posição do scroll
-                if (mounted) {
-                  debugPrint(
-                    '📥 Recarregando dados após atualização em tempo real',
-                  );
-                  _loadData(preserveScrollPosition: true);
-                }
-              });
+              debugPrint('📥 Agendando recarga após atualização em tempo real');
+              _scheduleCatalogReload(preserveScrollPosition: true);
             },
           )
           .subscribe();
@@ -330,20 +417,49 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onCategoryChanged() {
     _cachedFilteredProducts = null; // Invalidar cache para forçar rebuild
+    _scheduleScrollIndicatorAvailabilityChecks();
   }
 
   @override
   void dispose() {
     _audioPlayer.dispose();
     _searchDebounce?.cancel();
+    _catalogRefreshDebounce?.cancel();
+    _scrollIndicatorController.dispose();
     _searchController.dispose();
     _scrollController.dispose();
     _searchFocusNode.dispose();
     _searchQueryNotifier.dispose();
     _selectedCategoryNotifier.dispose();
+    _sortOptionNotifier.dispose();
     _favoritesService.removeListener(_onFavoritesChanged);
+    CatalogSyncService.instance.removeListener(_catalogSyncListener);
     _productsChannel?.unsubscribe();
     super.dispose();
+  }
+
+  void _scheduleCatalogReload({bool preserveScrollPosition = true}) {
+    _catalogRefreshDebounce?.cancel();
+    _catalogRefreshDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      _loadData(preserveScrollPosition: preserveScrollPosition);
+    });
+  }
+
+  void _scheduleScrollIndicatorAvailabilityChecks() {
+    const delays = [0, 120, 320];
+    for (final delay in delays) {
+      Future.delayed(Duration(milliseconds: delay), () {
+        if (mounted) {
+          _updateScrollIndicatorAvailability();
+        }
+      });
+    }
+  }
+
+  double _scrollIndicatorBottomOffset(BuildContext context) {
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+    return safeBottom + 104;
   }
 
   void _onSearchChanged() {
@@ -355,6 +471,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         // Atualizar apenas o valor da busca sem setState - mantém o foco!
         _searchQueryNotifier.value = _searchController.text;
+        _updateScrollIndicatorAvailability();
       }
     });
   }
@@ -365,6 +482,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (preserveScrollPosition && _scrollController.hasClients) {
       currentScrollPosition = _scrollController.position.pixels;
     }
+    final shouldResetScrollHint =
+        !preserveScrollPosition &&
+        (!_scrollController.hasClients || _scrollController.offset <= 0);
 
     setState(() {
       _isLoading = true;
@@ -432,7 +552,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 icone
               )
             ''')
-            .eq('ativo', true)
             .order('created_at', ascending: false)
             .then((data) => data as List<dynamic>)
             .catchError((e) {
@@ -547,6 +666,11 @@ class _HomeScreenState extends State<HomeScreen> {
             };
           }
         }).toList();
+        _produtos.sort((a, b) {
+          final aPriority = a['ativo'] == false ? 1 : 0;
+          final bPriority = b['ativo'] == false ? 1 : 0;
+          return aPriority.compareTo(bPriority);
+        });
 
         _debugLog('📊 Produtos processados com categorias:');
         for (int i = 0; i < _produtos.length && i < 3; i++) {
@@ -567,9 +691,18 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _cachedFilteredProducts = null;
+          _lastSearchQuery = '';
+          _lastSelectedCategory = '';
+          _lastSortOption = _sortOption;
           _adminStatusChecked =
               true; // Marcar admin status como verificado após carregamento inicial
         });
+
+        if (shouldResetScrollHint) {
+          _hasScrolledDown = false;
+        }
+        _scheduleScrollIndicatorAvailabilityChecks();
 
         // Restaurar posição do scroll apenas se foi solicitado e existe
         if (preserveScrollPosition &&
@@ -642,11 +775,27 @@ class _HomeScreenState extends State<HomeScreen> {
     debugPrint('✅ Refresh manual concluído');
   }
 
+  bool _isProductAvailable(Map<String, dynamic> produto) {
+    return produto['ativo'] != false;
+  }
+
+  void _showUnavailableProductMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Produto indisponível no momento. Aguarde a disponibilidade.',
+        ),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
   List<Map<String, dynamic>> get _filteredProducts {
     // Verificar se precisa reprocessar o cache
     if (_cachedFilteredProducts == null ||
         _lastSearchQuery != _searchQuery ||
-        _lastSelectedCategory != _selectedCategory) {
+        _lastSelectedCategory != _selectedCategory ||
+        _lastSortOption != _sortOption) {
       _debugLog(
         '🔍 Filtrando produtos: busca="$_searchQuery", categoria="$_selectedCategory"',
       );
@@ -671,9 +820,36 @@ class _HomeScreenState extends State<HomeScreen> {
         _cachedFilteredProducts = categoryFiltered;
       }
 
+      _cachedFilteredProducts =
+          List<Map<String, dynamic>>.from(_cachedFilteredProducts!)..sort((
+            a,
+            b,
+          ) {
+            final availabilityCompare = (a['ativo'] == false ? 1 : 0).compareTo(
+              b['ativo'] == false ? 1 : 0,
+            );
+            if (availabilityCompare != 0) {
+              return availabilityCompare;
+            }
+
+            if (_sortOption == ProductSortOption.alphabetical) {
+              return (a['nome'] ?? '').toString().toLowerCase().compareTo(
+                (b['nome'] ?? '').toString().toLowerCase(),
+              );
+            }
+
+            final aDate = DateTime.tryParse(a['created_at']?.toString() ?? '');
+            final bDate = DateTime.tryParse(b['created_at']?.toString() ?? '');
+            if (aDate != null && bDate != null) {
+              return bDate.compareTo(aDate);
+            }
+            return 0;
+          });
+
       // Atualizar cache
       _lastSearchQuery = _searchQuery;
       _lastSelectedCategory = _selectedCategory;
+      _lastSortOption = _sortOption;
     }
 
     return _cachedFilteredProducts!;
@@ -986,405 +1162,560 @@ class _HomeScreenState extends State<HomeScreen> {
           : NotificationListener<ScrollNotification>(
               onNotification: (ScrollNotification scrollInfo) {
                 // Marcar que o usuário já rolou a tela (sem setState para evitar rebuild)
-                if (scrollInfo.metrics.pixels > 100 && !_hasScrolledDown) {
+                if (scrollInfo.metrics.pixels > 50 && !_hasScrolledDown) {
                   _hasScrolledDown = true;
+                }
+                if (scrollInfo.metrics.pixels > 50 && _showScrollIndicator) {
+                  _hideScrollIndicator();
                 }
                 return false; // Permitir que outras notificações continuem
               },
               child: Builder(
                 builder: (context) {
-                  return RefreshIndicator(
-                    onRefresh: _refreshData,
-                    displacement: 80.0,
-                    edgeOffset: 0.0,
-                    strokeWidth: 2.0,
-                    backgroundColor: Colors.white,
-                    color: Colors.black,
-                    child: CustomScrollView(
-                      key: const PageStorageKey<String>('homeScrollView'),
-                      controller: _scrollController,
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      slivers: [
-                        // Barra de pesquisa
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: TextField(
-                              controller: _searchController,
-                              focusNode: _searchFocusNode,
-                              decoration: InputDecoration(
-                                hintText: 'Buscar produtos...',
-                                prefixIcon: const Icon(Icons.search),
-                                suffixIcon: ValueListenableBuilder<String>(
-                                  valueListenable: _searchQueryNotifier,
-                                  builder: (context, searchQuery, child) {
-                                    return searchQuery.isNotEmpty
-                                        ? IconButton(
-                                            icon: const Icon(Icons.clear),
-                                            onPressed: () {
-                                              _searchController.clear();
-                                              _searchQueryNotifier.value = '';
-                                            },
-                                          )
-                                        : const SizedBox.shrink();
-                                  },
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                  return Stack(
+                    children: [
+                      RefreshIndicator(
+                        onRefresh: _refreshData,
+                        displacement: 80.0,
+                        edgeOffset: 0.0,
+                        strokeWidth: 2.0,
+                        backgroundColor: Colors.white,
+                        color: Colors.black,
+                        child: CustomScrollView(
+                          key: const PageStorageKey<String>('homeScrollView'),
+                          controller: _scrollController,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          slivers: [
+                            // Barra de pesquisa
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: TextField(
+                                  controller: _searchController,
+                                  focusNode: _searchFocusNode,
+                                  decoration: InputDecoration(
+                                    hintText: 'Buscar produtos...',
+                                    prefixIcon: const Icon(Icons.search),
+                                    suffixIcon: ValueListenableBuilder<String>(
+                                      valueListenable: _searchQueryNotifier,
+                                      builder: (context, searchQuery, child) {
+                                        return searchQuery.isNotEmpty
+                                            ? IconButton(
+                                                icon: const Icon(Icons.clear),
+                                                onPressed: () {
+                                                  _searchController.clear();
+                                                  _searchQueryNotifier.value =
+                                                      '';
+                                                },
+                                              )
+                                            : const SizedBox.shrink();
+                                      },
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
 
-                        // Filtro de categorias - reativo sem rebuild completo
-                        SliverToBoxAdapter(
-                          child: SizedBox(
-                            height: 50,
-                            child: ValueListenableBuilder<String>(
-                              valueListenable: _selectedCategoryNotifier,
-                              builder: (context, selectedCategory, child) {
-                                return ListView.builder(
-                                  addRepaintBoundaries: true,
-                                  key: const PageStorageKey<String>(
-                                    'categoriesListView',
-                                  ),
-                                  scrollDirection: Axis.horizontal,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
-                                  itemCount: _categoriasComFavoritos.length,
-                                  itemBuilder: (context, index) {
-                                    if (index >=
-                                        _categoriasComFavoritos.length) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    final categoria =
-                                        _categoriasComFavoritos[index];
-                                    final isSelected =
-                                        selectedCategory == categoria['nome'];
+                            // Filtro de categorias - reativo sem rebuild completo
+                            SliverToBoxAdapter(
+                              child: SizedBox(
+                                height: 50,
+                                child: ValueListenableBuilder<String>(
+                                  valueListenable: _selectedCategoryNotifier,
+                                  builder: (context, selectedCategory, child) {
+                                    return ListView.builder(
+                                      addRepaintBoundaries: true,
+                                      key: const PageStorageKey<String>(
+                                        'categoriesListView',
+                                      ),
+                                      scrollDirection: Axis.horizontal,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      itemCount: _categoriasComFavoritos.length,
+                                      itemBuilder: (context, index) {
+                                        if (index >=
+                                            _categoriasComFavoritos.length) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        final categoria =
+                                            _categoriasComFavoritos[index];
+                                        final isSelected =
+                                            selectedCategory ==
+                                            categoria['nome'];
 
-                                    // Pular categoria 'Todos' e 'Favoritos' para long press admin
-                                    final isSystemCategory =
-                                        categoria['nome'] == 'Todos' ||
-                                        categoria['nome'] == 'Favoritos';
+                                        // Pular categoria 'Todos' e 'Favoritos' para long press admin
+                                        final isSystemCategory =
+                                            categoria['nome'] == 'Todos' ||
+                                            categoria['nome'] == 'Favoritos';
 
-                                    final filterChip = FilterChip(
-                                      label: ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxWidth:
-                                              120, // Limitar largura máxima
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            if (categoria['icone'] != null)
-                                              Padding(
-                                                padding: const EdgeInsets.only(
-                                                  right: 4,
-                                                ),
-                                                child: SizedBox(
-                                                  width: 20,
-                                                  height: 20,
-                                                  child: Center(
-                                                    child:
-                                                        _buildCategoryIconWidget(
-                                                          categoria['icone'],
-                                                          size: 18,
+                                        final filterChip = FilterChip(
+                                          label: ConstrainedBox(
+                                            constraints: const BoxConstraints(
+                                              maxWidth:
+                                                  120, // Limitar largura máxima
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (categoria['icone'] != null)
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                          right: 4,
                                                         ),
+                                                    child: SizedBox(
+                                                      width: 20,
+                                                      height: 20,
+                                                      child: Center(
+                                                        child:
+                                                            _buildCategoryIconWidget(
+                                                              categoria['icone'],
+                                                              size: 18,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                Flexible(
+                                                  child: Text(
+                                                    categoria['nome'],
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    maxLines: 1,
                                                   ),
                                                 ),
-                                              ),
-                                            Flexible(
-                                              child: Text(
-                                                categoria['nome'],
-                                                overflow: TextOverflow.ellipsis,
-                                                maxLines: 1,
-                                              ),
+                                              ],
                                             ),
-                                          ],
-                                        ),
-                                      ),
-                                      selected: isSelected,
-                                      onSelected: (bool selected) {
-                                        // Atualizar categoria sem setState para manter posição do scroll
-                                        _selectedCategoryNotifier.value =
-                                            categoria['nome'];
-                                      },
-                                      backgroundColor: Colors.grey[200],
-                                      selectedColor: Colors.black,
-                                      labelStyle: TextStyle(
-                                        color: isSelected
-                                            ? Colors.white
-                                            : Colors.black,
-                                        fontWeight: isSelected
-                                            ? FontWeight.bold
-                                            : FontWeight.normal,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      materialTapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    );
+                                          ),
+                                          selected: isSelected,
+                                          onSelected: (bool selected) {
+                                            // Atualizar categoria sem setState para manter posição do scroll
+                                            _selectedCategoryNotifier.value =
+                                                categoria['nome'];
+                                          },
+                                          backgroundColor: Colors.grey[200],
+                                          selectedColor: Colors.black,
+                                          labelStyle: TextStyle(
+                                            color: isSelected
+                                                ? Colors.white
+                                                : Colors.black,
+                                            fontWeight: isSelected
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          materialTapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                        );
 
-                                    // Adicionar long press para admin em categorias do banco
-                                    if (!isSystemCategory && _isAdmin) {
-                                      return Padding(
-                                        padding: const EdgeInsets.only(
-                                          right: 12,
-                                        ),
-                                        child: GestureDetector(
-                                          onLongPress: () =>
-                                              _showCategoryAdminOptions(
-                                                categoria,
-                                              ),
+                                        // Adicionar long press para admin em categorias do banco
+                                        if (!isSystemCategory && _isAdmin) {
+                                          return Padding(
+                                            padding: const EdgeInsets.only(
+                                              right: 12,
+                                            ),
+                                            child: GestureDetector(
+                                              onLongPress: () =>
+                                                  _showCategoryAdminOptions(
+                                                    categoria,
+                                                  ),
+                                              child: filterChip,
+                                            ),
+                                          );
+                                        }
+
+                                        return Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 12,
+                                          ),
                                           child: filterChip,
-                                        ),
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 16),
+                            ),
+
+                            // Seções de produtos especiais - reativas à categoria e busca
+                            ValueListenableBuilder<String>(
+                              valueListenable: _searchQueryNotifier,
+                              builder: (context, searchQuery, child) {
+                                return ValueListenableBuilder<String>(
+                                  valueListenable: _selectedCategoryNotifier,
+                                  builder: (context, selectedCategory, child) {
+                                    // Não mostrar seções em Favoritos ou durante busca
+                                    if (searchQuery.isNotEmpty ||
+                                        selectedCategory == 'Favoritos') {
+                                      return const SliverToBoxAdapter(
+                                        child: SizedBox.shrink(),
                                       );
                                     }
 
-                                    return Padding(
-                                      padding: const EdgeInsets.only(right: 12),
-                                      child: filterChip,
+                                    // Retornar seções especiais como MultiSliver
+                                    final slivers = _buildSpecialSections();
+                                    if (slivers.isEmpty) {
+                                      return const SliverToBoxAdapter(
+                                        child: SizedBox.shrink(),
+                                      );
+                                    }
+
+                                    // Usar SliverMainAxisGroup para agrupar múltiplos slivers
+                                    return SliverMainAxisGroup(
+                                      slivers: slivers,
                                     );
                                   },
                                 );
                               },
                             ),
-                          ),
-                        ),
 
-                        const SliverToBoxAdapter(child: SizedBox(height: 16)),
-
-                        // Seções de produtos especiais - reativas à categoria e busca
-                        ValueListenableBuilder<String>(
-                          valueListenable: _searchQueryNotifier,
-                          builder: (context, searchQuery, child) {
-                            return ValueListenableBuilder<String>(
-                              valueListenable: _selectedCategoryNotifier,
-                              builder: (context, selectedCategory, child) {
-                                // Não mostrar seções em Favoritos ou durante busca
-                                if (searchQuery.isNotEmpty ||
-                                    selectedCategory == 'Favoritos') {
-                                  return const SliverToBoxAdapter(
-                                    child: SizedBox.shrink(),
-                                  );
-                                }
-
-                                // Retornar seções especiais como MultiSliver
-                                final slivers = _buildSpecialSections();
-                                if (slivers.isEmpty) {
-                                  return const SliverToBoxAdapter(
-                                    child: SizedBox.shrink(),
-                                  );
-                                }
-
-                                // Usar SliverMainAxisGroup para agrupar múltiplos slivers
-                                return SliverMainAxisGroup(slivers: slivers);
-                              },
-                            );
-                          },
-                        ),
-
-                        // Título da seção principal - reativo à categoria
-                        SliverToBoxAdapter(
-                          child: ValueListenableBuilder<String>(
-                            valueListenable: _selectedCategoryNotifier,
-                            builder: (context, selectedCategory, child) {
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    if (_searchQuery.isNotEmpty) ...[
-                                      const Text(
-                                        '🔍 ',
-                                        style: TextStyle(fontSize: 20),
-                                      ),
-                                      const Text(
-                                        'Resultados da busca',
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ] else if (selectedCategory == 'Todos') ...[
-                                      _buildCategoryIconWidget(
-                                        _getCategoryIcon('Todos'),
-                                        size: 28,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        'Todos os Produtos',
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ] else if (selectedCategory ==
-                                        'Favoritos') ...[
-                                      const Text(
-                                        '❤️ ',
-                                        style: TextStyle(fontSize: 20),
-                                      ),
-                                      const Text(
-                                        'Favoritos',
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ] else ...[
-                                      _buildCategoryIconWidget(
-                                        _getCategoryIcon(selectedCategory),
-                                        size: 24,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        selectedCategory,
-                                        style: const TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-
-                        const SliverToBoxAdapter(child: SizedBox(height: 12)),
-
-                        // Lista de produtos filtrados - reativo à busca E categoria
-                        ValueListenableBuilder<String>(
-                          valueListenable: _searchQueryNotifier,
-                          builder: (context, searchQuery, child) {
-                            return ValueListenableBuilder<String>(
-                              valueListenable: _selectedCategoryNotifier,
-                              builder: (context, selectedCategory, child) {
-                                return _filteredProducts.isEmpty
-                                    ? SliverToBoxAdapter(
-                                        child: Center(
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 32,
-                                            ),
-                                            child: Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.center,
-                                              children: [
-                                                const SizedBox(height: 60),
-                                                Icon(
-                                                  _isOfflineMode
-                                                      ? Icons.wifi_off
-                                                      : _searchQuery.isNotEmpty
-                                                      ? Icons.search_off
-                                                      : Icons
-                                                            .shopping_cart_outlined,
-                                                  size: 64,
-                                                  color: _isOfflineMode
-                                                      ? Colors.red
-                                                      : Colors.grey,
-                                                ),
-                                                const SizedBox(height: 16),
-                                                Text(
-                                                  _isOfflineMode
-                                                      ? 'Sem conexão'
-                                                      : _searchQuery.isNotEmpty
-                                                      ? 'Nenhum produto encontrado'
-                                                      : 'Nenhum produto nesta categoria',
-                                                  style: Theme.of(
-                                                    context,
-                                                  ).textTheme.headlineSmall,
-                                                  textAlign: TextAlign.center,
-                                                ),
-                                                const SizedBox(height: 8),
-                                                Text(
-                                                  _isOfflineMode
-                                                      ? 'Verifique sua conexão com a internet'
-                                                      : _searchQuery.isNotEmpty
-                                                      ? 'Tente buscar por outro termo'
-                                                      : 'Produtos serão adicionados em breve!',
-                                                  style: TextStyle(
-                                                    color: Colors.grey[600],
-                                                  ),
-                                                  textAlign: TextAlign.center,
-                                                ),
-                                                if (_isOfflineMode) ...[
-                                                  const SizedBox(height: 16),
-                                                  ElevatedButton.icon(
-                                                    onPressed: _loadData,
-                                                    icon: const Icon(
-                                                      Icons.refresh,
-                                                    ),
-                                                    label: const Text(
-                                                      'Tentar novamente',
-                                                    ),
-                                                    style:
-                                                        ElevatedButton.styleFrom(
-                                                          backgroundColor:
-                                                              Colors.blue,
-                                                          foregroundColor:
-                                                              Colors.white,
-                                                        ),
-                                                  ),
-                                                ],
-                                              ],
+                            // Título da seção principal - reativo à categoria
+                            SliverToBoxAdapter(
+                              child: ValueListenableBuilder<String>(
+                                valueListenable: _selectedCategoryNotifier,
+                                builder: (context, selectedCategory, child) {
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        if (_searchQuery.isNotEmpty) ...[
+                                          const Text(
+                                            '🔍 ',
+                                            style: TextStyle(fontSize: 20),
+                                          ),
+                                          const Text(
+                                            'Resultados da busca',
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
                                             ),
                                           ),
-                                        ),
-                                      )
-                                    : SliverList(
-                                        delegate: SliverChildBuilderDelegate((
-                                          context,
-                                          index,
-                                        ) {
-                                          // Proteção contra índice fora do range durante rebuilds
-                                          if (index >=
-                                              _filteredProducts.length) {
-                                            return const SizedBox.shrink();
-                                          }
-
-                                          final produto =
-                                              _filteredProducts[index];
-                                          return RepaintBoundary(
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 16,
-                                                    vertical: 6,
-                                                  ),
-                                              child: AnimatedProductCard(
-                                                produto: produto,
-                                                onTap: widget.isGuestMode
-                                                    ? () =>
-                                                          _onProductTap(produto)
-                                                    : null, // Usar comportamento padrão se não for guest mode
-                                                onProductDeleted: _refreshData,
-                                                isAdmin:
-                                                    _isAdmin, // Passar status de admin explicitamente
-                                              ),
+                                        ] else if (selectedCategory ==
+                                            'Todos') ...[
+                                          _buildCategoryIconWidget(
+                                            _getCategoryIcon('Todos'),
+                                            size: 28,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          const Text(
+                                            'Todos os Produtos',
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
                                             ),
-                                          );
-                                        }, childCount: _filteredProducts.length),
-                                      );
-                              },
-                            );
-                          },
-                        ),
+                                          ),
+                                        ] else if (selectedCategory ==
+                                            'Favoritos') ...[
+                                          const Text(
+                                            '❤️ ',
+                                            style: TextStyle(fontSize: 20),
+                                          ),
+                                          const Text(
+                                            'Favoritos',
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ] else ...[
+                                          _buildCategoryIconWidget(
+                                            _getCategoryIcon(selectedCategory),
+                                            size: 24,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            selectedCategory,
+                                            style: const TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
 
-                        // Espaço extra no final
-                        const SliverToBoxAdapter(child: SizedBox(height: 80)),
-                      ],
-                    ),
+                            SliverToBoxAdapter(
+                              child: ValueListenableBuilder<ProductSortOption>(
+                                valueListenable: _sortOptionNotifier,
+                                builder: (context, sortOption, child) {
+                                  return Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      12,
+                                      16,
+                                      0,
+                                    ),
+                                    child: Wrap(
+                                      alignment: WrapAlignment.center,
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: [
+                                        ChoiceChip(
+                                          selected:
+                                              sortOption ==
+                                              ProductSortOption.latest,
+                                          showCheckmark: false,
+                                          label: const Text(
+                                            'Últimos lançamentos',
+                                          ),
+                                          avatar: const Icon(
+                                            Icons.schedule,
+                                            size: 18,
+                                          ),
+                                          onSelected: (_) {
+                                            _sortOptionNotifier.value =
+                                                ProductSortOption.latest;
+                                          },
+                                        ),
+                                        ChoiceChip(
+                                          selected:
+                                              sortOption ==
+                                              ProductSortOption.alphabetical,
+                                          showCheckmark: false,
+                                          label: const Text('Ordem alfabética'),
+                                          avatar: const Icon(
+                                            Icons.sort_by_alpha,
+                                            size: 18,
+                                          ),
+                                          onSelected: (_) {
+                                            _sortOptionNotifier.value =
+                                                ProductSortOption.alphabetical;
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 12),
+                            ),
+
+                            // Lista de produtos filtrados - reativo à busca E categoria
+                            ValueListenableBuilder<String>(
+                              valueListenable: _searchQueryNotifier,
+                              builder: (context, searchQuery, child) {
+                                return ValueListenableBuilder<String>(
+                                  valueListenable: _selectedCategoryNotifier,
+                                  builder: (context, selectedCategory, child) {
+                                    return ValueListenableBuilder<
+                                      ProductSortOption
+                                    >(
+                                      valueListenable: _sortOptionNotifier,
+                                      builder: (context, sortOption, child) {
+                                        return _filteredProducts.isEmpty
+                                            ? SliverToBoxAdapter(
+                                                child: Center(
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 32,
+                                                        ),
+                                                    child: Column(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .center,
+                                                      children: [
+                                                        const SizedBox(
+                                                          height: 60,
+                                                        ),
+                                                        Icon(
+                                                          _isOfflineMode
+                                                              ? Icons.wifi_off
+                                                              : _searchQuery
+                                                                    .isNotEmpty
+                                                              ? Icons.search_off
+                                                              : Icons
+                                                                    .shopping_cart_outlined,
+                                                          size: 64,
+                                                          color: _isOfflineMode
+                                                              ? Colors.red
+                                                              : Colors.grey,
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 16,
+                                                        ),
+                                                        Text(
+                                                          _isOfflineMode
+                                                              ? 'Sem conexão'
+                                                              : _searchQuery
+                                                                    .isNotEmpty
+                                                              ? 'Nenhum produto encontrado'
+                                                              : 'Nenhum produto nesta categoria',
+                                                          style:
+                                                              Theme.of(context)
+                                                                  .textTheme
+                                                                  .headlineSmall,
+                                                          textAlign:
+                                                              TextAlign.center,
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 8,
+                                                        ),
+                                                        Text(
+                                                          _isOfflineMode
+                                                              ? 'Verifique sua conexão com a internet'
+                                                              : _searchQuery
+                                                                    .isNotEmpty
+                                                              ? 'Tente buscar por outro termo'
+                                                              : 'Produtos serão adicionados em breve!',
+                                                          style: TextStyle(
+                                                            color: Colors
+                                                                .grey[600],
+                                                          ),
+                                                          textAlign:
+                                                              TextAlign.center,
+                                                        ),
+                                                        if (_isOfflineMode) ...[
+                                                          const SizedBox(
+                                                            height: 16,
+                                                          ),
+                                                          ElevatedButton.icon(
+                                                            onPressed:
+                                                                _loadData,
+                                                            icon: const Icon(
+                                                              Icons.refresh,
+                                                            ),
+                                                            label: const Text(
+                                                              'Tentar novamente',
+                                                            ),
+                                                            style: ElevatedButton.styleFrom(
+                                                              backgroundColor:
+                                                                  Colors.blue,
+                                                              foregroundColor:
+                                                                  Colors.white,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              )
+                                            : SliverList(
+                                                delegate: SliverChildBuilderDelegate(
+                                                  (context, index) {
+                                                    if (index >=
+                                                        _filteredProducts
+                                                            .length) {
+                                                      return const SizedBox.shrink();
+                                                    }
+
+                                                    final produto =
+                                                        _filteredProducts[index];
+                                                    return RepaintBoundary(
+                                                      child: Padding(
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 16,
+                                                              vertical: 6,
+                                                            ),
+                                                        child: AnimatedProductCard(
+                                                          produto: produto,
+                                                          onTap:
+                                                              widget.isGuestMode
+                                                              ? () =>
+                                                                    _onProductTap(
+                                                                      produto,
+                                                                    )
+                                                              : null,
+                                                          onProductDeleted:
+                                                              _refreshData,
+                                                          isAdmin: _isAdmin,
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                  childCount:
+                                                      _filteredProducts.length,
+                                                ),
+                                              );
+                                      },
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+
+                            // Espaço extra no final
+                            const SliverToBoxAdapter(
+                              child: SizedBox(height: 80),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_showScrollIndicator)
+                        Positioned(
+                          bottom: _scrollIndicatorBottomOffset(context),
+                          left: 0,
+                          right: 0,
+                          child: AnimatedBuilder(
+                            animation: _scrollIndicatorController,
+                            builder: (context, child) {
+                              return Transform.translate(
+                                offset: Offset(
+                                  0,
+                                  -8 * _scrollIndicatorController.value,
+                                ),
+                                child: child,
+                              );
+                            },
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.keyboard_arrow_down,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'Role para baixo',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   );
                 },
               ),
@@ -1393,6 +1724,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onProductTap(Map<String, dynamic> produto) async {
+    if (!_isProductAvailable(produto)) {
+      _showUnavailableProductMessage();
+      return;
+    }
+
     if (widget.isGuestMode) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1422,8 +1758,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
         if (result == 'go_to_cart' && mounted) {
-          final provider = MainNavigationProvider.of(context);
-          provider?.navigateToPageDirect?.call(4);
+          _openCartPage();
         }
       } catch (e) {
         debugPrint('❌ Erro ao navegar para detalhes: $e');
@@ -1483,7 +1818,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   'assets/icons/menu/delete_button.png',
                   width: 24,
                   height: 24,
-                  color: Colors.black,
+                  color: Colors.red,
                 ),
                 title: const Text('Excluir Produto'),
                 onTap: () {
@@ -1725,20 +2060,17 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildProductCard(Map<String, dynamic> produto, {String? tipo}) {
     final imagens = produto['imagens'];
     final hasImage = imagens is List && imagens.isNotEmpty;
+    final isAvailable = _isProductAvailable(produto);
 
-    // Definir ícone e cor baseado no tipo
+    // Definir ícone baseado no tipo
     String badgeIcon = '';
-    Color badgeColor = Colors.grey;
 
     if (tipo == 'destaque') {
       badgeIcon = '⭐';
-      badgeColor = Colors.amber;
     } else if (tipo == 'vendidos') {
       badgeIcon = '🔥';
-      badgeColor = Colors.orange;
     } else if (tipo == 'novidades') {
       badgeIcon = '✨';
-      badgeColor = Colors.purple;
     }
 
     return GestureDetector(
@@ -1748,27 +2080,56 @@ class _HomeScreenState extends State<HomeScreen> {
       onLongPress: (!widget.isGuestMode && _isAdmin)
           ? () => _showAdminOptions(produto)
           : null,
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Imagem com badge
-            Stack(
+      child: ColorFiltered(
+        colorFilter: isAvailable
+            ? const ColorFilter.mode(Colors.transparent, BlendMode.dst)
+            : const ColorFilter.matrix(_grayscaleMatrix),
+        child: Opacity(
+          opacity: isAvailable ? 1 : 0.82,
+          child: Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(16),
-                  ),
-                  child: hasImage
-                      ? Image.network(
-                          imagens[0],
-                          height: 120,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
+                // Imagem com badge
+                Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(16),
+                      ),
+                      child: hasImage
+                          ? Image.network(
+                              imagens[0],
+                              height: 120,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  height: 120,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: [
+                                        Colors.orange[100]!,
+                                        Colors.pink[100]!,
+                                      ],
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: CategoryIconWidget(
+                                      icone: produto['categoria_icone'],
+                                      size: 50,
+                                    ),
+                                  ),
+                                );
+                              },
+                            )
+                          : Container(
                               height: 120,
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
@@ -1786,302 +2147,267 @@ class _HomeScreenState extends State<HomeScreen> {
                                   size: 50,
                                 ),
                               ),
+                            ),
+                    ),
+                    // Botão favorito
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: GestureDetector(
+                        onTap: () async {
+                          final productId = produto['id'].toString();
+                          final wasFavorite = _favoritesService.isFavorite(
+                            productId,
+                          );
+                          // Capture overlay before any async gaps
+                          final overlay = Overlay.of(context);
+
+                          // Feedback sonoro customizado
+                          try {
+                            debugPrint(
+                              '🔊 Tentando reproduzir som de feedback...',
                             );
-                          },
-                        )
-                      : Container(
-                          height: 120,
+                            if (wasFavorite) {
+                              await _audioPlayer.play(
+                                AssetSource('sounds/favorite_off.wav'),
+                                mode: PlayerMode.lowLatency,
+                              );
+                            } else {
+                              await _audioPlayer.play(
+                                AssetSource('sounds/favorite_on.wav'),
+                                mode: PlayerMode.lowLatency,
+                              );
+                            }
+                            debugPrint('✅ Comando de som enviado');
+                          } catch (e) {
+                            debugPrint('❌ Erro ao reproduzir som: $e');
+                          }
+
+                          await _favoritesService.toggleFavorite(productId);
+
+                          setState(() {});
+
+                          // Mostrar animação de coração
+                          if (mounted) {
+                            FavoriteHeartAnimation.showWithOverlay(
+                              overlay,
+                              isFavoriting: !wasFavorite,
+                            );
+                          }
+
+                          if (mounted) {
+                            AppSnackBar.showTop(
+                              context,
+                              toolbarHeight: 48,
+                              topSpacing: 36,
+                              duration: const Duration(seconds: 1),
+                              backgroundColor: wasFavorite
+                                  ? Colors.grey.shade700
+                                  : Colors.pink,
+                              content: Text(
+                                wasFavorite
+                                    ? 'Removido dos favoritos'
+                                    : 'Adicionado aos favoritos',
+                              ),
+                            );
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [Colors.orange[100]!, Colors.pink[100]!],
-                            ),
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.2),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
-                          child: Center(
-                            child: CategoryIconWidget(
-                              icone: produto['categoria_icone'],
-                              size: 50,
-                            ),
-                          ),
-                        ),
-                ),
-                // Botão favorito
-                Positioned(
-                  top: 8,
-                  left: 8,
-                  child: GestureDetector(
-                    onTap: () async {
-                      final productId = produto['id'].toString();
-                      final wasFavorite = _favoritesService.isFavorite(
-                        productId,
-                      );
-                      // Capture overlay before any async gaps
-                      final overlay = Overlay.of(context);
-
-                      // Feedback sonoro customizado
-                      try {
-                        debugPrint('🔊 Tentando reproduzir som de feedback...');
-                        if (wasFavorite) {
-                          await _audioPlayer.play(
-                            AssetSource('sounds/favorite_off.wav'),
-                            mode: PlayerMode.lowLatency,
-                          );
-                        } else {
-                          await _audioPlayer.play(
-                            AssetSource('sounds/favorite_on.wav'),
-                            mode: PlayerMode.lowLatency,
-                          );
-                        }
-                        debugPrint('✅ Comando de som enviado');
-                      } catch (e) {
-                        debugPrint('❌ Erro ao reproduzir som: $e');
-                      }
-
-                      await _favoritesService.toggleFavorite(productId);
-
-                      setState(() {});
-
-                      // Mostrar animação de coração
-                      if (mounted) {
-                        FavoriteHeartAnimation.showWithOverlay(
-                          overlay,
-                          isFavoriting: !wasFavorite,
-                        );
-                      }
-
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              wasFavorite
-                                  ? 'Removido dos favoritos'
-                                  : 'Adicionado aos favoritos',
-                            ),
-                            backgroundColor: wasFavorite
-                                ? Colors.grey
-                                : Colors.pink,
-                            behavior: SnackBarBehavior.floating,
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      }
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.2),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        _favoritesService.isFavorite(produto['id'].toString())
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color:
+                          child: Icon(
                             _favoritesService.isFavorite(
-                              produto['id'].toString(),
-                            )
-                            ? Colors.pink
-                            : Colors.grey,
-                        size: 18,
-                      ),
-                    ),
-                  ),
-                ),
-                // Badge indicador
-                if (tipo != null)
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: badgeColor,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.2),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        badgeIcon,
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            // Info
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(10.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Nome
-                    Text(
-                      produto['nome'] ?? '',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 3),
-                    // Descrição
-                    if (produto['descricao'] != null &&
-                        produto['descricao'].toString().isNotEmpty)
-                      Text(
-                        produto['descricao'],
-                        style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    const SizedBox(height: 4),
-                    // Preço
-                    _buildProductPrice(produto),
-                    const SizedBox(height: 6),
-                    // Botões
-                    Row(
-                      children: [
-                        // Botão Comprar (esquerda)
-                        Expanded(
-                          flex: 2,
-                          child: SizedBox(
-                            height: 32,
-                            child: ElevatedButton(
-                              onPressed: () {
-                                _onProductTap(produto);
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.shopping_bag, size: 14),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'Comprar',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                ],
-                              ),
-                            ),
+                                  produto['id'].toString(),
+                                )
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color:
+                                _favoritesService.isFavorite(
+                                  produto['id'].toString(),
+                                )
+                                ? Colors.pink
+                                : Colors.grey,
+                            size: 18,
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        // Botão Adicionar ao Carrinho (direita)
+                      ),
+                    ),
+                    // Badge indicador
+                    if (tipo != null)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Text(
+                          badgeIcon,
+                          style: const TextStyle(fontSize: 20),
+                        ),
+                      ),
+                  ],
+                ),
+                // Info
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(10.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Expanded(
-                          child: SizedBox(
-                            height: 32,
-                            child: OutlinedButton(
-                              onPressed: () async {
-                                try {
-                                  await _cartService.addItem(
-                                    produto,
-                                    quantidade: 1,
-                                  );
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Row(
-                                          children: [
-                                            const Icon(
-                                              Icons.shopping_cart,
-                                              color: Colors.white,
-                                              size: 20,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                '${produto['nome']} adicionado!',
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        backgroundColor: Colors.green,
-                                        behavior: SnackBarBehavior.floating,
-                                        duration: const Duration(seconds: 3),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            10,
-                                          ),
-                                        ),
-                                        action: SnackBarAction(
-                                          label: 'Ver Carrinho',
-                                          textColor: Colors.white,
-                                          onPressed: () {
-                                            final provider =
-                                                MainNavigationProvider.of(
-                                                  context,
-                                                );
-                                            if (provider
-                                                    ?.navigateToPageDirect !=
-                                                null) {
-                                              provider!.navigateToPageDirect!(
-                                                4,
-                                              );
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                } catch (e) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('Erro: $e'),
-                                        backgroundColor: Colors.red,
-                                        behavior: SnackBarBehavior.floating,
-                                      ),
-                                    );
-                                  }
-                                }
-                              },
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.orange,
-                                side: const BorderSide(color: Colors.orange),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Nome
+                              Text(
+                                produto['nome'] ?? '',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  decoration: isAvailable
+                                      ? TextDecoration.none
+                                      : TextDecoration.lineThrough,
                                 ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              child: const Icon(
-                                Icons.add_shopping_cart,
-                                size: 16,
+                              // Descrição
+                              if (produto['descricao'] != null &&
+                                  produto['descricao']
+                                      .toString()
+                                      .isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  produto['descricao'],
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey[600],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                              const Spacer(),
+                              _buildProductPrice(produto),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        // Botões
+                        Row(
+                          children: [
+                            // Botão Comprar (esquerda)
+                            Expanded(
+                              flex: 2,
+                              child: SizedBox(
+                                height: 32,
+                                child: ElevatedButton(
+                                  onPressed: () async {
+                                    if (!isAvailable) {
+                                      _showUnavailableProductMessage();
+                                      return;
+                                    }
+
+                                    await ProductActionHelper.buyNow(
+                                      context: context,
+                                      cartService: _cartService,
+                                      produto: produto,
+                                    );
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.shopping_bag, size: 14),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'Comprar',
+                                        style: TextStyle(fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
+                            const SizedBox(width: 6),
+                            // Botão Adicionar ao Carrinho (direita)
+                            Expanded(
+                              child: SizedBox(
+                                height: 32,
+                                child: OutlinedButton(
+                                  onPressed: () async {
+                                    if (!isAvailable) {
+                                      _showUnavailableProductMessage();
+                                      return;
+                                    }
+
+                                    try {
+                                      await ProductActionHelper.addToCart(
+                                        context: context,
+                                        cartService: _cartService,
+                                        produto: produto,
+                                        onViewCart: _openCartPage,
+                                        avoidAdminFab:
+                                            !widget.isGuestMode && _isAdmin,
+                                      );
+                                    } catch (e) {
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Erro: $e'),
+                                            backgroundColor: Colors.red,
+                                            behavior: SnackBarBehavior.floating,
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.orange,
+                                    side: const BorderSide(
+                                      color: Colors.orange,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.add_shopping_cart,
+                                    size: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -2704,63 +3030,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildProductPrice(Map<String, dynamic> produto) {
-    final tamanhos = produto['tamanhos'];
-    final preco = produto['preco'];
-    final precoAnterior = produto['preco_anterior'];
+    final priceInfo = _getProductDisplayPriceInfo(produto);
+    final currentPrice = priceInfo['currentPrice'] as double?;
+    final previousPrice = priceInfo['previousPrice'] as double?;
+    final hasDiscount = priceInfo['hasDiscount'] as bool;
+    final hasMultiplePrices = priceInfo['hasMultiplePrices'] as bool;
+    final discountPercentage = priceInfo['discountPercentage'] as int?;
 
-    // Se tem tamanhos, mostrar o menor preço
-    if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
-      final precos = <double>{};
-      for (var tamanho in tamanhos) {
-        final precoTamanho = tamanho['preco']?.toDouble() ?? 0.0;
-        if (precoTamanho > 0) precos.add(precoTamanho);
-      }
-
-      if (precos.isEmpty) {
-        return const Text(
-          'Sem preço',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
-        );
-      }
-
-      final menorPreco = precos.reduce((a, b) => a < b ? a : b);
-      final temMultiplosPrecos = precos.length > 1;
-
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            temMultiplosPrecos ? 'A partir de' : 'Preço',
-            style: const TextStyle(fontSize: 10, color: Colors.grey),
-          ),
-          Text(
-            CurrencyFormatter.format(menorPreco),
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.green,
-            ),
-          ),
-        ],
-      );
-    }
-
-    if (preco == null) {
+    if (currentPrice == null) {
       return const Text(
         'Sem preço',
         style: TextStyle(fontSize: 12, color: Colors.grey),
       );
     }
 
-    final precoAtual = preco.toDouble();
-    final hasDesconto = precoAnterior != null && precoAnterior > precoAtual;
-
-    if (hasDesconto) {
+    if (hasDiscount && previousPrice != null) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            CurrencyFormatter.format(precoAnterior),
+            CurrencyFormatter.format(previousPrice),
             style: TextStyle(
               fontSize: 12,
               color: Colors.grey[600],
@@ -2768,12 +3057,24 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           Text(
-            CurrencyFormatter.format(precoAtual),
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.orange,
-            ),
+            hasMultiplePrices ? 'A partir de' : 'Preço',
+            style: const TextStyle(fontSize: 10, color: Colors.grey),
+          ),
+          Row(
+            children: [
+              Text(
+                CurrencyFormatter.format(currentPrice),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.orange,
+                ),
+              ),
+              if (discountPercentage != null) ...[
+                const SizedBox(width: 8),
+                _buildDiscountChip(discountPercentage),
+              ],
+            ],
           ),
         ],
       );
@@ -2782,9 +3083,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Preço', style: TextStyle(fontSize: 10, color: Colors.grey)),
         Text(
-          CurrencyFormatter.format(precoAtual),
+          hasMultiplePrices ? 'A partir de' : 'Preço',
+          style: const TextStyle(fontSize: 10, color: Colors.grey),
+        ),
+        Text(
+          CurrencyFormatter.format(currentPrice),
           style: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
@@ -2792,6 +3096,90 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Map<String, dynamic> _getProductDisplayPriceInfo(
+    Map<String, dynamic> produto,
+  ) {
+    final tamanhos = produto['tamanhos'];
+    final precoAnterior = produto['preco_anterior'];
+    final precoAtual = produto['preco'];
+
+    if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
+      final precos = <double>{};
+      for (final tamanho in tamanhos) {
+        final precoTamanho = (tamanho['preco'] as num?)?.toDouble() ?? 0.0;
+        if (precoTamanho > 0) {
+          precos.add(precoTamanho);
+        }
+      }
+
+      if (precos.isEmpty) {
+        return {
+          'currentPrice': null,
+          'previousPrice': null,
+          'hasDiscount': false,
+          'hasMultiplePrices': false,
+          'discountPercentage': null,
+        };
+      }
+
+      final menorPreco = precos.reduce((a, b) => a < b ? a : b);
+      final previousPrice = (precoAnterior as num?)?.toDouble();
+      final hasDiscount = previousPrice != null && previousPrice > menorPreco;
+
+      return {
+        'currentPrice': menorPreco,
+        'previousPrice': hasDiscount ? previousPrice : null,
+        'hasDiscount': hasDiscount,
+        'hasMultiplePrices': tamanhos.length > 1 || precos.length > 1,
+        'discountPercentage': hasDiscount
+            ? (((previousPrice - menorPreco) / previousPrice) * 100).round()
+            : null,
+      };
+    }
+
+    final currentPrice = (precoAtual as num?)?.toDouble();
+    final previousPrice = (precoAnterior as num?)?.toDouble();
+    final hasDiscount =
+        previousPrice != null &&
+        currentPrice != null &&
+        previousPrice > currentPrice;
+
+    return {
+      'currentPrice': currentPrice,
+      'previousPrice': hasDiscount ? previousPrice : null,
+      'hasDiscount': hasDiscount,
+      'hasMultiplePrices': false,
+      'discountPercentage': hasDiscount
+          ? (((previousPrice - currentPrice) / previousPrice) * 100).round()
+          : null,
+    };
+  }
+
+  Widget _buildDiscountChip(int discountPercentage) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.orange,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.orange.withValues(alpha: 0.25),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Text(
+        '$discountPercentage% OFF',
+        style: const TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
     );
   }
 }

@@ -5,6 +5,7 @@ import '../widgets/base_screen.dart';
 import '../providers/admin_status_provider.dart';
 import '../widgets/app_menu.dart';
 import '../services/cart_service.dart';
+import '../services/main_navigation_service.dart';
 import '../widgets/main_navigation_provider.dart';
 
 class PedidosScreen extends StatefulWidget {
@@ -296,7 +297,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   String _formatDate(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
+      final date = DateTime.parse(dateStr).toLocal();
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
       final year = date.year;
@@ -311,7 +312,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   String _formatDateShort(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
+      final date = DateTime.parse(dateStr).toLocal();
       const diasSemana = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
@@ -567,9 +568,27 @@ class _PedidosScreenState extends State<PedidosScreen> {
         if (itensAdicionados > 0) {
           // Navegar direto para a tela de checkout
           final provider = MainNavigationProvider.of(context);
-          if (provider?.navigateToPageDirect != null) {
+          if (MainNavigationService.navigateToCart()) {
+            Future.delayed(const Duration(milliseconds: 300), () {
+              if (mounted) {
+                Navigator.pushNamed(context, '/checkout');
+
+                // Mostrar mensagem de sucesso
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '$itensAdicionados ${itensAdicionados == 1 ? 'item adicionado' : 'itens adicionados'} ao carrinho!',
+                    ),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            });
+          } else if (provider?.navigateToPageDirect != null) {
             // Primeiro vai para o carrinho
-            provider!.navigateToPageDirect!(2); // Índice 2 = Carrinho
+            provider!.navigateToPageDirect!(
+              MainNavigationService.cartPageIndex,
+            );
 
             // Depois navega para checkout
             Future.delayed(const Duration(milliseconds: 300), () {
@@ -1110,7 +1129,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
   String _formatDate(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
+      final date = DateTime.parse(dateStr).toLocal();
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
       final year = date.year;
@@ -1125,7 +1144,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
   String _formatDateShort(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
+      final date = DateTime.parse(dateStr).toLocal();
       const diasSemana = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
@@ -1681,10 +1700,19 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
           ),
         ),
       ),
+      actionsAlignment: MainAxisAlignment.center,
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Fechar'),
+        Center(
+          child: ElevatedButton.icon(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 18),
+            label: const Text('Fechar'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+          ),
         ),
       ],
     );

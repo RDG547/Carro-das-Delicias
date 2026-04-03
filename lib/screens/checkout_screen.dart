@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import '../services/cart_service.dart';
+import '../services/app_settings_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
 import 'abacatepay_payment_screen.dart';
@@ -43,6 +44,8 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   DateTime? _dataEntrega; // Data agendada para entrega (null = D+1 padrão)
   bool _isPedidoTeste = false; // Pedido de teste (somente admin)
   bool _isAdmin = false; // Se o usuário logado é admin
+  CashPaymentSettings _cashPaymentSettings =
+      const CashPaymentSettings.defaults();
 
   // Calcula a taxa de serviço baseada no método de pagamento
   double get _taxaServico {
@@ -61,12 +64,20 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   // Total do pedido com taxa de serviço incluída
   double get _totalComTaxa => _cartService.total + _taxaServico;
 
+  void _hideScrollIndicator() {
+    if (!_showScrollIndicator) return;
+
+    _scrollIndicatorController.stop();
+    setState(() => _showScrollIndicator = false);
+  }
+
   @override
   void initState() {
     super.initState();
     _cartService.addListener(_onCartChanged);
     _loadUserData();
     _loadReputacao();
+    _loadCashPaymentSettings();
 
     _scrollIndicatorController = AnimationController(
       vsync: this,
@@ -75,7 +86,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
     _scrollController.addListener(() {
       if (_scrollController.offset > 50 && _showScrollIndicator) {
-        setState(() => _showScrollIndicator = false);
+        _hideScrollIndicator();
       }
     });
 
@@ -189,11 +200,36 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         if (mounted) {
           setState(() {
             _pedidosConcluidos = (response as List).length;
+            _syncCashPaymentAvailability();
           });
         }
       }
     } catch (e) {
       debugPrint('Erro ao carregar reputação: $e');
+    }
+  }
+
+  Future<void> _loadCashPaymentSettings() async {
+    final settings = await AppSettingsService.getCashPaymentSettings();
+    if (!mounted) return;
+
+    setState(() {
+      _cashPaymentSettings = settings;
+      _syncCashPaymentAvailability();
+    });
+  }
+
+  void _syncCashPaymentAvailability() {
+    final isGuest = Supabase.instance.client.auth.currentUser == null;
+    final canUseCash = _cashPaymentSettings.canUse(
+      isGuest: isGuest,
+      completedOrders: _pedidosConcluidos,
+    );
+
+    if (!canUseCash && _metodoPagamento == 'dinheiro') {
+      _metodoPagamento = 'pix';
+      _troco = 0.0;
+      _trocoController.clear();
     }
   }
 
@@ -726,7 +762,14 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   Widget _buildPaymentMethodSection() {
     final user = Supabase.instance.client.auth.currentUser;
     final bool isGuest = user == null;
-    final bool podeUsarDinheiro = !isGuest && _pedidosConcluidos >= 5;
+    final int pedidosMinimosDinheiro =
+        _cashPaymentSettings.minimumCompletedOrders;
+    final bool dinheiroLiberadoParaTodos =
+        _cashPaymentSettings.enabledForAllUsers;
+    final bool podeUsarDinheiro = _cashPaymentSettings.canUse(
+      isGuest: isGuest,
+      completedOrders: _pedidosConcluidos,
+    );
     final bool isAdmin = _isAdmin;
 
     return Card(
@@ -920,7 +963,9 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                             content: Text(
                               isGuest
                                   ? '🔒 Visitantes não podem pagar em dinheiro. Faça login ou cadastre-se.'
-                                  : '🔒 Você precisa de 5 pedidos concluídos para pagar em dinheiro. Progresso: $_pedidosConcluidos/5',
+                                  : dinheiroLiberadoParaTodos
+                                  ? '🔒 O pagamento em dinheiro foi liberado apenas para clientes autenticados.'
+                                  : '🔒 Você precisa de $pedidosMinimosDinheiro pedidos concluídos para pagar em dinheiro. Progresso: $_pedidosConcluidos/$pedidosMinimosDinheiro',
                             ),
                             backgroundColor: Colors.orange,
                           ),
@@ -1003,7 +1048,9 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                                   ? 'Pagamento na entrega'
                                   : isGuest
                                   ? 'Indisponível para visitantes'
-                                  : 'Requer $_pedidosConcluidos/5 pedidos concluídos',
+                                  : dinheiroLiberadoParaTodos
+                                  ? 'Disponível para clientes autenticados'
+                                  : 'Requer $_pedidosConcluidos/$pedidosMinimosDinheiro pedidos concluídos',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: podeUsarDinheiro

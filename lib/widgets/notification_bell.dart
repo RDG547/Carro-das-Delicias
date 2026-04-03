@@ -312,7 +312,7 @@ class _NotificationBellState extends State<NotificationBell> {
             final isRead = notification['is_read'] ?? false;
             final createdAt = DateTime.tryParse(
               notification['created_at'] ?? '',
-            );
+            )?.toLocal();
             final timeAgo = createdAt != null ? _getTimeAgo(createdAt) : '';
 
             return PopupMenuItem<String>(
