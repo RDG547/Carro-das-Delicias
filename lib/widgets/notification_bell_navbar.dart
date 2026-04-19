@@ -20,6 +20,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar>
   ScaffoldMessengerState? _scaffoldMessenger;
   late final AnimationController _menuAnimationController;
   bool _isClosingOverlay = false;
+  bool _isDisposed = false;
 
   @override
   void initState() {
@@ -35,7 +36,10 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar>
 
   @override
   void dispose() {
-    _removeOverlay(immediate: true);
+    _isDisposed = true;
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    _isMenuOpen = false;
     _menuAnimationController.dispose();
     _updateChannel?.unsubscribe();
     super.dispose();
@@ -184,7 +188,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar>
 
   Future<void> _removeOverlay({bool immediate = false}) async {
     if (_overlayEntry == null) {
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         setState(() {
           _isMenuOpen = false;
         });
@@ -210,7 +214,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar>
     _overlayEntry?.remove();
     _overlayEntry = null;
     _isClosingOverlay = false;
-    if (mounted) {
+    if (mounted && !_isDisposed) {
       setState(() {
         _isMenuOpen = false;
       });
@@ -397,7 +401,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar>
                                   backgroundColor: Colors.red,
                                   foregroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,

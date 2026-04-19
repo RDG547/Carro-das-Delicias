@@ -11,6 +11,7 @@ import '../utils/constants.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/favorite_heart_animation.dart';
 import '../widgets/category_icon_widget.dart';
+import '../widgets/scroll_down_indicator.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Map<String, dynamic> produto;
@@ -31,6 +32,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   final ScrollController _scrollController = ScrollController();
   int _currentImageIndex = 0;
   bool _showScrollIndicator = true;
+  bool _isScrollIndicatorAnimating = false;
   late final AnimationController _scrollIndicatorController;
   RealtimeChannel? _productsChannel;
   Timer? _similarProductsRefreshDebounce;
@@ -71,7 +73,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     _scrollIndicatorController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
+    );
     _scrollController.addListener(() {
       if (_scrollController.offset > 50 && !_hasScrolledDown) {
         _hasScrolledDown = true;
@@ -186,10 +188,39 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   void _hideScrollIndicator() {
     if (!_showScrollIndicator) return;
 
-    _scrollIndicatorController.stop();
+    _scrollIndicatorController.stop(canceled: true);
+    _scrollIndicatorController.value = 0;
     setState(() {
       _showScrollIndicator = false;
     });
+  }
+
+  void _startScrollIndicatorHint() {
+    if (_isScrollIndicatorAnimating ||
+        !_showScrollIndicator ||
+        _hasScrolledDown) {
+      return;
+    }
+
+    _isScrollIndicatorAnimating = true;
+    unawaited(() async {
+      try {
+        while (mounted && _showScrollIndicator && !_hasScrolledDown) {
+          await _scrollIndicatorController.forward(from: 0).orCancel;
+          if (!mounted || !_showScrollIndicator || _hasScrolledDown) {
+            break;
+          }
+          await _scrollIndicatorController.reverse().orCancel;
+        }
+      } on TickerCanceled {
+        // Interrupcao esperada quando o indicador e ocultado.
+      } finally {
+        _isScrollIndicatorAnimating = false;
+        if (mounted) {
+          _scrollIndicatorController.value = 0;
+        }
+      }
+    }());
   }
 
   void _updateScrollIndicatorAvailability() {
@@ -198,11 +229,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       if (_hasScrolledDown) return;
 
       final canScroll = _scrollController.position.maxScrollExtent > 24;
-      if (canScroll && !_showScrollIndicator) {
-        _scrollIndicatorController.repeat(reverse: true);
-        setState(() {
-          _showScrollIndicator = true;
-        });
+      if (canScroll) {
+        if (!_showScrollIndicator) {
+          setState(() {
+            _showScrollIndicator = true;
+          });
+        }
+        _startScrollIndicatorHint();
       } else if (!canScroll && _showScrollIndicator) {
         _hideScrollIndicator();
       }
@@ -259,8 +292,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
   @override
   Widget build(BuildContext context) {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
+      resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
           CustomScrollView(
@@ -383,53 +419,20 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
               ),
             ],
           ),
-          if (_showScrollIndicator)
+          if (_showScrollIndicator && !keyboardVisible)
             Positioned(
               bottom: 16,
               left: 0,
               right: 0,
               child: IgnorePointer(
-                child: AnimatedBuilder(
+                child: ScrollDownIndicator(
                   animation: _scrollIndicatorController,
-                  builder: (context, child) {
-                    return Transform.translate(
-                      offset: Offset(0, -8 * _scrollIndicatorController.value),
-                      child: child,
-                    );
-                  },
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.6),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.keyboard_arrow_down,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                          SizedBox(width: 4),
-                          Text(
-                            'Role para baixo',
-                            style: TextStyle(color: Colors.white, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                 ),
               ),
             ),
         ],
       ),
-      bottomNavigationBar: _buildBottomBar(),
+      bottomNavigationBar: keyboardVisible ? null : _buildBottomBar(),
     );
   }
 

@@ -547,46 +547,94 @@ class _AdminScreenState extends State<AdminScreen>
                 ),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: IntrinsicHeight(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _buildStatCard(
-                        'Produtos',
-                        '${_produtos.length}',
-                        Icons.inventory,
-                        Colors.white,
-                      ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxWidth < 340) {
+                    return Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        SizedBox(
+                          width: (constraints.maxWidth - 12) / 2,
+                          child: _buildStatCard(
+                            'Produtos',
+                            '${_produtos.length}',
+                            Icons.inventory,
+                            Colors.white,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (constraints.maxWidth - 12) / 2,
+                          child: _buildStatCard(
+                            'Categorias',
+                            '${_categorias.length}',
+                            Icons.category,
+                            Colors.white,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (constraints.maxWidth - 12) / 2,
+                          child: _buildStatCard(
+                            'Pedidos',
+                            '${_pedidos.length}',
+                            Icons.receipt_long,
+                            Colors.white,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (constraints.maxWidth - 12) / 2,
+                          child: _buildStatCard(
+                            'Usuários',
+                            '${_usuarios.length}',
+                            Icons.people,
+                            Colors.white,
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                  return IntrinsicHeight(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _buildStatCard(
+                            'Produtos',
+                            '${_produtos.length}',
+                            Icons.inventory,
+                            Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildStatCard(
+                            'Categorias',
+                            '${_categorias.length}',
+                            Icons.category,
+                            Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildStatCard(
+                            'Pedidos',
+                            '${_pedidos.length}',
+                            Icons.receipt_long,
+                            Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildStatCard(
+                            'Usuários',
+                            '${_usuarios.length}',
+                            Icons.people,
+                            Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildStatCard(
-                        'Categorias',
-                        '${_categorias.length}',
-                        Icons.category,
-                        Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildStatCard(
-                        'Pedidos',
-                        '${_pedidos.length}',
-                        Icons.receipt_long,
-                        Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildStatCard(
-                        'Usuários',
-                        '${_usuarios.length}',
-                        Icons.people,
-                        Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
 
@@ -800,32 +848,29 @@ class _AdminScreenState extends State<AdminScreen>
     Color color,
   ) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Flexible(child: Icon(icon, color: color, size: 28)),
+        Icon(icon, color: color, size: 28),
         const SizedBox(height: 6),
-        Flexible(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: color,
             ),
           ),
         ),
         const SizedBox(height: 2),
-        Flexible(
-          child: Text(
-            title,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: color.withValues(alpha: 0.8)),
-          ),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 12, color: color.withValues(alpha: 0.8)),
         ),
       ],
     );
@@ -2944,91 +2989,113 @@ class _AdminScreenState extends State<AdminScreen>
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Configurações de Pagamento'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Defina quando o pagamento em dinheiro ficará disponível:',
-              ),
-              const SizedBox(height: 16),
-              _buildPaymentOptionTile(
-                title: 'Todos os clientes autenticados',
-                subtitle: 'Libera dinheiro para qualquer usuário logado.',
-                isSelected:
-                    selectedAvailability == CashPaymentAvailability.allUsers,
-                onTap: () {
-                  setDialogState(() {
-                    selectedAvailability = CashPaymentAvailability.allUsers;
-                  });
-                },
-              ),
-              const SizedBox(height: 8),
-              _buildPaymentOptionTile(
-                title: 'Mínimo de 5 pedidos concluídos',
-                subtitle:
-                    'Mantém o desbloqueio de dinheiro só após 5 entregas.',
-                isSelected:
-                    selectedAvailability ==
-                    CashPaymentAvailability.minimumCompletedOrders,
-                onTap: () {
-                  setDialogState(() {
-                    selectedAvailability =
-                        CashPaymentAvailability.minimumCompletedOrders;
-                  });
-                },
-              ),
-            ],
+          title: const Text(
+            'Configurações de Pagamento',
+            textAlign: TextAlign.center,
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset(
-                    'assets/icons/menu/cancel_button.png',
-                    width: 18,
-                    height: 18,
-                  ),
-                  const SizedBox(width: 4),
-                  const Text('Cancelar'),
-                ],
-              ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Defina quando o pagamento em dinheiro ficará disponível:',
+                ),
+                const SizedBox(height: 16),
+                _buildPaymentOptionTile(
+                  title: 'Todos os clientes autenticados',
+                  subtitle: 'Libera dinheiro para qualquer usuário logado.',
+                  isSelected:
+                      selectedAvailability == CashPaymentAvailability.allUsers,
+                  onTap: () {
+                    setDialogState(() {
+                      selectedAvailability = CashPaymentAvailability.allUsers;
+                    });
+                  },
+                ),
+                const SizedBox(height: 8),
+                _buildPaymentOptionTile(
+                  title: 'Mínimo de 5 pedidos concluídos',
+                  subtitle:
+                      'Mantém o desbloqueio de dinheiro só após 5 entregas.',
+                  isSelected:
+                      selectedAvailability ==
+                      CashPaymentAvailability.minimumCompletedOrders,
+                  onTap: () {
+                    setDialogState(() {
+                      selectedAvailability =
+                          CashPaymentAvailability.minimumCompletedOrders;
+                    });
+                  },
+                ),
+              ],
             ),
-            ElevatedButton.icon(
-              onPressed: () async {
-                final messenger = ScaffoldMessenger.of(context);
-                final navigator = Navigator.of(dialogContext);
-                final settings = CashPaymentSettings(
-                  availability: selectedAvailability,
-                  minimumCompletedOrders: 5,
-                );
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Flexible(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/icons/menu/cancel_button.png',
+                          width: 18,
+                          height: 18,
+                        ),
+                        const SizedBox(width: 4),
+                        const Text('Cancelar'),
+                      ],
+                    ),
+                  ),
+                ),
+                Flexible(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final navigator = Navigator.of(dialogContext);
+                      final settings = CashPaymentSettings(
+                        availability: selectedAvailability,
+                        minimumCompletedOrders: 5,
+                      );
 
-                try {
-                  await AppSettingsService.saveCashPaymentSettings(settings);
-                  if (!mounted) return;
-                  navigator.pop();
-                  messenger.showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Configuração do pagamento em dinheiro atualizada!',
-                      ),
-                      backgroundColor: Colors.green,
+                      try {
+                        await AppSettingsService.saveCashPaymentSettings(
+                          settings,
+                        );
+                        if (!mounted) return;
+                        navigator.pop();
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Configuração do pagamento em dinheiro atualizada!',
+                            ),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      } catch (error) {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Erro ao salvar configuração: $error',
+                            ),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.save, size: 18),
+                    label: const Text(
+                      'Salvar',
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  );
-                } catch (error) {
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: Text('Erro ao salvar configuração: $error'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              },
-              icon: const Icon(Icons.save, size: 18),
-              label: const Text('Salvar Alterações'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -3199,6 +3266,7 @@ class _AdminScreenState extends State<AdminScreen>
             runSpacing: 8,
             children: [
               _buildStatusFilter('Todos', null),
+              _buildStatusFilter('Pagto Pendente', 'pagamento_pendente'),
               _buildStatusFilter('Pendentes', 'pendente'),
               _buildStatusFilter('Confirmados', 'confirmado'),
               _buildStatusFilter('Em Preparo', 'em preparo'),
@@ -3546,6 +3614,8 @@ class _AdminScreenState extends State<AdminScreen>
 
   Color _getStatusColor(String status) {
     switch (status) {
+      case 'pagamento_pendente':
+        return Colors.amber[800]!;
       case 'pendente':
         return Colors.orange;
       case 'pago':
@@ -3569,6 +3639,8 @@ class _AdminScreenState extends State<AdminScreen>
 
   IconData _getStatusIcon(String status) {
     switch (status) {
+      case 'pagamento_pendente':
+        return Icons.payments_outlined;
       case 'pendente':
         return Icons.pending_actions;
       case 'pago':
@@ -3592,6 +3664,8 @@ class _AdminScreenState extends State<AdminScreen>
 
   String _getStatusLabel(String status) {
     switch (status) {
+      case 'pagamento_pendente':
+        return 'Pagamento Pendente';
       case 'pendente':
         return 'Pendente';
       case 'pago':
@@ -4296,18 +4370,21 @@ class _AdminScreenState extends State<AdminScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                TextButton(
+                TextButton.icon(
                   onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Não'),
+                  icon: const Icon(Icons.close),
+                  label: const Text('Não'),
                 ),
-                ElevatedButton(
+                ElevatedButton.icon(
                   onPressed: () => Navigator.of(context).pop(true),
+                  icon: Icon(Icons.check, color: Colors.white),
+                  label: const Text('Sim, Alterar'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: novoStatus == 'cancelado'
                         ? Colors.red
                         : Colors.green,
+                    foregroundColor: Colors.white,
                   ),
-                  child: const Text('Sim, Alterar'),
                 ),
               ],
             ),

@@ -55,19 +55,29 @@ class BaseScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasAppBar = showAppBar && title != null;
+    final resolvedPadding =
+        (padding ??
+                const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0))
+            .resolve(Directionality.of(context));
+    final effectivePadding = resolvedPadding.copyWith(
+      bottom: 0,
+      top: hasAppBar ? 0 : resolvedPadding.top,
+    );
+
     final Widget content = AnimatedSwitcher(
       duration: const Duration(milliseconds: 400),
-      child: Padding(
-        padding:
-            padding ??
-            const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-        child: child,
+      child: MediaQuery.removePadding(
+        context: context,
+        removeBottom: true,
+        child: Padding(padding: effectivePadding, child: child),
       ),
     );
 
     return Scaffold(
       backgroundColor: backgroundColor ?? Colors.white,
-      appBar: showAppBar && title != null
+      resizeToAvoidBottomInset: true,
+      appBar: hasAppBar
           ? PreferredSize(
               preferredSize: const Size.fromHeight(
                 48,
@@ -138,7 +148,9 @@ class BaseScreen extends StatelessWidget {
           : null,
       floatingActionButton: floatingActionButton,
       floatingActionButtonLocation: floatingActionButtonLocation,
-      body: useSafeArea ? SafeArea(child: content) : content,
+      body: useSafeArea
+          ? SafeArea(bottom: false, top: !hasAppBar, child: content)
+          : content,
     );
   }
 }

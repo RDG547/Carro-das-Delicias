@@ -11,6 +11,8 @@ import '../services/cart_service.dart';
 import '../services/catalog_sync_service.dart';
 import '../services/main_navigation_service.dart';
 import '../utils/product_action_helper.dart';
+import '../utils/scroll_indicator_layout.dart';
+import '../widgets/scroll_down_indicator.dart';
 import 'cart_screen.dart';
 import 'product_detail_screen.dart';
 
@@ -57,6 +59,7 @@ class _DescontosScreenState extends State<DescontosScreen>
   Timer? _realtimeDebounceTimer;
   bool _showScrollIndicator = true;
   bool _hasScrolledDown = false;
+  bool _isScrollIndicatorAnimating = false;
   late final VoidCallback _catalogSyncListener;
   DiscountSortOption _sortOption = DiscountSortOption.biggestDiscount;
   static const List<double> _grayscaleMatrix = [
@@ -88,7 +91,7 @@ class _DescontosScreenState extends State<DescontosScreen>
     _scrollIndicatorController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
+    );
     _scrollController.addListener(() {
       if (_scrollController.offset > 50 && !_hasScrolledDown) {
         _hasScrolledDown = true;
@@ -157,8 +160,7 @@ class _DescontosScreenState extends State<DescontosScreen>
   }
 
   double _scrollIndicatorBottomOffset(BuildContext context) {
-    final safeBottom = MediaQuery.of(context).padding.bottom;
-    return safeBottom + 88;
+    return scrollIndicatorBottomOffset(context);
   }
 
   Future<void> _loadProdutosComDesconto() async {
@@ -233,8 +235,37 @@ class _DescontosScreenState extends State<DescontosScreen>
   void _hideScrollIndicator() {
     if (!_showScrollIndicator) return;
 
-    _scrollIndicatorController.stop();
+    _scrollIndicatorController.stop(canceled: true);
+    _scrollIndicatorController.value = 0;
     setState(() => _showScrollIndicator = false);
+  }
+
+  void _startScrollIndicatorHint() {
+    if (_isScrollIndicatorAnimating ||
+        !_showScrollIndicator ||
+        _hasScrolledDown) {
+      return;
+    }
+
+    _isScrollIndicatorAnimating = true;
+    unawaited(() async {
+      try {
+        while (mounted && _showScrollIndicator && !_hasScrolledDown) {
+          await _scrollIndicatorController.forward(from: 0).orCancel;
+          if (!mounted || !_showScrollIndicator || _hasScrolledDown) {
+            break;
+          }
+          await _scrollIndicatorController.reverse().orCancel;
+        }
+      } on TickerCanceled {
+        // Interrupcao esperada quando o indicador e ocultado.
+      } finally {
+        _isScrollIndicatorAnimating = false;
+        if (mounted) {
+          _scrollIndicatorController.value = 0;
+        }
+      }
+    }());
   }
 
   void _updateScrollIndicatorAvailability() {
@@ -243,9 +274,11 @@ class _DescontosScreenState extends State<DescontosScreen>
       if (_hasScrolledDown) return;
 
       final canScroll = _scrollController.position.maxScrollExtent > 24;
-      if (canScroll && !_showScrollIndicator) {
-        _scrollIndicatorController.repeat(reverse: true);
-        setState(() => _showScrollIndicator = true);
+      if (canScroll) {
+        if (!_showScrollIndicator) {
+          setState(() => _showScrollIndicator = true);
+        }
+        _startScrollIndicatorHint();
       } else if (!canScroll && _showScrollIndicator) {
         _hideScrollIndicator();
       }
@@ -1040,47 +1073,8 @@ class _DescontosScreenState extends State<DescontosScreen>
                     left: 0,
                     right: 0,
                     child: IgnorePointer(
-                      child: AnimatedBuilder(
+                      child: ScrollDownIndicator(
                         animation: _scrollIndicatorController,
-                        builder: (context, child) {
-                          return Transform.translate(
-                            offset: Offset(
-                              0,
-                              -8 * _scrollIndicatorController.value,
-                            ),
-                            child: child,
-                          );
-                        },
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.6),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.keyboard_arrow_down,
-                                  color: Colors.white,
-                                  size: 18,
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Role para baixo',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                       ),
                     ),
                   ),

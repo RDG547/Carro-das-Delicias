@@ -113,8 +113,11 @@ class _CartScreenState extends State<CartScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return Scaffold(
       backgroundColor: Colors.white,
+      resizeToAvoidBottomInset: true,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(48),
         child: Container(
@@ -194,12 +197,13 @@ class _CartScreenState extends State<CartScreen> {
               children: [
                 _buildCartContent(),
                 // Botão de finalizar fixo - fica atrás da navbar
-                Positioned(
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  child: _buildCheckoutButton(),
-                ),
+                if (!keyboardVisible)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: _buildCheckoutButton(),
+                  ),
               ],
             ),
     );
@@ -259,6 +263,8 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Widget _buildCartContent() {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return Column(
       children: [
         // Header com resumo
@@ -289,12 +295,14 @@ class _CartScreenState extends State<CartScreen> {
         Expanded(
           child: ListView.builder(
             addRepaintBoundaries: true,
-            padding: const EdgeInsets.only(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.only(
               left: 16,
               right: 16,
               top: 16,
-              bottom:
-                  220, // Espaço para o botão de finalizar (120px) + navbar (80px) + margem (20px)
+              bottom: keyboardVisible
+                  ? 0
+                  : 220, // Espaço para o botão de finalizar (120px) + navbar (80px) + margem (20px)
             ),
             itemCount: _cartService.items.length,
             itemBuilder: (context, index) {

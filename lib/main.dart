@@ -41,6 +41,15 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Carro das Delícias',
       debugShowCheckedModeBanner: false,
+      builder: (context, child) {
+        final mediaQuery = MediaQuery.of(context);
+        final data = mediaQuery.copyWith(
+          padding: mediaQuery.padding.copyWith(bottom: 0),
+          viewPadding: mediaQuery.viewPadding.copyWith(bottom: 0),
+        );
+
+        return MediaQuery(data: data, child: child ?? const SizedBox.shrink());
+      },
       locale: const Locale('pt', 'BR'),
       supportedLocales: const [Locale('pt', 'BR')],
       localizationsDelegates: const [

@@ -684,8 +684,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildStatisticsTab() {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 0 : 100),
       child: Card(
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -694,9 +697,15 @@ class _ProfileScreenState extends State<ProfileScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Suas Estatísticas',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              const Row(
+                children: [
+                  Icon(Icons.bar_chart, size: 22),
+                  SizedBox(width: 8),
+                  Text(
+                    'Suas Estatísticas',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Row(
@@ -728,8 +737,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildPersonalInfoTab(User? user) {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 0 : 100),
       child: Card(
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -741,9 +753,18 @@ class _ProfileScreenState extends State<ProfileScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Informações Pessoais',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  const Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 22),
+                      SizedBox(width: 8),
+                      Text(
+                        'Informações Pessoais',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                   IconButton(
                     icon: Icon(_isEditing ? Icons.close : Icons.edit),
@@ -799,7 +820,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 child: AnimatedTextField(
                   controller: _neighborhoodController,
                   labelText: 'Bairro',
-                  prefixIcon: Icons.location_city,
+                  prefixIcon: Icons.holiday_village,
                 ),
               ),
               const SizedBox(height: 16),

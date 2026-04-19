@@ -1,15 +1,20 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:convert';
 import '../services/cart_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/main_navigation_service.dart';
 import '../services/notification_service.dart';
+import '../services/order_payment_service.dart';
 import '../utils/constants.dart';
 import 'abacatepay_payment_screen.dart';
 import 'stripe_payment_screen.dart';
 import '../widgets/d_plus_one_info_dialog.dart';
 import '../widgets/category_icon_widget.dart';
+import '../widgets/scroll_down_indicator.dart';
 
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({super.key});
@@ -25,6 +30,8 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   final _scrollController = ScrollController();
   late AnimationController _scrollIndicatorController;
   bool _showScrollIndicator = true;
+  bool _hasScrolledDown = false;
+  bool _isScrollIndicatorAnimating = false;
 
   // Controllers para os campos do formulário
   final _nomeController = TextEditingController();
@@ -67,8 +74,37 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   void _hideScrollIndicator() {
     if (!_showScrollIndicator) return;
 
-    _scrollIndicatorController.stop();
+    _scrollIndicatorController.stop(canceled: true);
+    _scrollIndicatorController.value = 0;
     setState(() => _showScrollIndicator = false);
+  }
+
+  void _startScrollIndicatorHint() {
+    if (_isScrollIndicatorAnimating ||
+        !_showScrollIndicator ||
+        _hasScrolledDown) {
+      return;
+    }
+
+    _isScrollIndicatorAnimating = true;
+    unawaited(() async {
+      try {
+        while (mounted && _showScrollIndicator && !_hasScrolledDown) {
+          await _scrollIndicatorController.forward(from: 0).orCancel;
+          if (!mounted || !_showScrollIndicator || _hasScrolledDown) {
+            break;
+          }
+          await _scrollIndicatorController.reverse().orCancel;
+        }
+      } on TickerCanceled {
+        // Interrupcao esperada quando o indicador e ocultado.
+      } finally {
+        _isScrollIndicatorAnimating = false;
+        if (mounted) {
+          _scrollIndicatorController.value = 0;
+        }
+      }
+    }());
   }
 
   @override
@@ -82,9 +118,12 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     _scrollIndicatorController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
+    );
 
     _scrollController.addListener(() {
+      if (_scrollController.offset > 50 && !_hasScrolledDown) {
+        _hasScrolledDown = true;
+      }
       if (_scrollController.offset > 50 && _showScrollIndicator) {
         _hideScrollIndicator();
       }
@@ -94,6 +133,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         DPlusOneInfoDialog.show(context);
+        _startScrollIndicatorHint();
       }
     });
   }
@@ -241,7 +281,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         'address': _enderecoController.text.trim(),
         'neighborhood': _bairroController.text.trim(),
         'city': _cidadeController.text.trim(),
-        'zip_code': _cepController.text.trim(),
+        'cep': _cepController.text.trim(),
         'updated_at': DateTime.now().toIso8601String(),
       };
 
@@ -252,8 +292,11 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
   @override
   Widget build(BuildContext context) {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return Scaffold(
       backgroundColor: Colors.white,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: const Text(
           'Finalizar Pedido',
@@ -276,58 +319,21 @@ class _CheckoutScreenState extends State<CheckoutScreen>
           ? _buildEmptyCart()
           : Stack(
               children: [
-                _buildCheckoutForm(),
-                if (_showScrollIndicator)
+                _buildCheckoutForm(keyboardVisible: keyboardVisible),
+                if (_showScrollIndicator && !keyboardVisible)
                   Positioned(
                     bottom: 16,
                     left: 0,
                     right: 0,
-                    child: AnimatedBuilder(
+                    child: ScrollDownIndicator(
                       animation: _scrollIndicatorController,
-                      builder: (context, child) {
-                        return Transform.translate(
-                          offset: Offset(
-                            0,
-                            -8 * _scrollIndicatorController.value,
-                          ),
-                          child: child,
-                        );
-                      },
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.keyboard_arrow_down,
-                                color: Colors.white,
-                                size: 18,
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                'Role para baixo',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
                     ),
                   ),
               ],
             ),
-      bottomNavigationBar: _cartService.isEmpty ? null : _buildBottomBar(),
+      bottomNavigationBar: _cartService.isEmpty || keyboardVisible
+          ? null
+          : _buildBottomBar(),
     );
   }
 
@@ -372,13 +378,14 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     );
   }
 
-  Widget _buildCheckoutForm() {
+  Widget _buildCheckoutForm({required bool keyboardVisible}) {
     return Form(
       key: _formKey,
       child: ListView(
         controller: _scrollController,
         addRepaintBoundaries: true,
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 0 : 16),
         children: [
           // Resumo do pedido
           RepaintBoundary(child: _buildOrderSummary()),
@@ -1668,161 +1675,67 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         throw Exception('Usuário não autenticado');
       }
 
-      // Para PIX e crédito, processar pagamento ANTES de criar pedido
-      // Pedidos de teste (admin) pulam o pagamento
-      if (_isPedidoTeste) {
-        debugPrint('🧪 Pedido de teste - pulando pagamento');
-      } else if (_metodoPagamento == 'pix') {
-        // Navegar para tela de pagamento PIX
-        final result = await Navigator.push<Map<String, dynamic>>(
-          context,
-          MaterialPageRoute(
-            builder: (context) => AbacatePayPaymentScreen(
-              pedidoId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
-              amount: _totalComTaxa,
-              description: 'Pedido - Carro das Delícias',
-            ),
-          ),
-        );
+      final totalPedido = _totalComTaxa;
+      final metodoPagamentoPedido = _isPedidoTeste ? 'teste' : _metodoPagamento;
+      final isOnlinePayment =
+          !_isPedidoTeste &&
+          OrderPaymentService.requiresOnlinePayment(_metodoPagamento);
 
-        // Se usuário cancelou ou pagamento falhou, retornar
-        if (result == null || result['success'] != true) {
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-            });
-          }
-          return;
-        }
+      final pedido = await OrderPaymentService.createOrderWithItems(
+        pedidoData: _buildPedidoData(
+          user: user,
+          metodoPagamentoPedido: metodoPagamentoPedido,
+          isOnlinePayment: isOnlinePayment,
+        ),
+        itens: _buildPedidoItensPayload(),
+      );
 
-        // Pagamento confirmado, continuar com criação do pedido
-        debugPrint('✅ Pagamento PIX confirmado!');
-      } else if (_metodoPagamento == 'credito') {
-        // Navegar para tela de pagamento Stripe
-        final result = await Navigator.push<Map<String, dynamic>>(
-          context,
-          MaterialPageRoute(
-            builder: (context) => StripePaymentScreen(
-              pedidoId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
-              amount: _totalComTaxa,
-              description: 'Pedido - Carro das Delícias',
-              customerEmail: user.email ?? '',
-            ),
-          ),
-        );
-
-        // Se usuário cancelou ou pagamento falhou, retornar
-        if (result == null || result['success'] != true) {
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-            });
-          }
-          return;
-        }
-
-        // Pagamento confirmado, continuar com criação do pedido
-        debugPrint('✅ Pagamento com cartão confirmado!');
-      }
-
-      // Dados do pedido
-      final pedidoData = {
-        'user_id': user.id, // ID do usuário autenticado
-        'cliente_nome': _nomeController.text.trim(),
-        'cliente_telefone': _telefoneController.text.trim(),
-        'endereco_completo': _enderecoController.text.trim(),
-        'bairro': _bairroController.text.trim(),
-        'cidade': _cidadeController.text.trim(),
-        'cep': _cepController.text.trim().isEmpty
-            ? null
-            : _cepController.text.trim(),
-        'metodo_pagamento': _isPedidoTeste ? 'teste' : _metodoPagamento,
-        'valor_troco': _metodoPagamento == 'dinheiro' && _troco > 0
-            ? _troco
-            : null,
-        'total': _totalComTaxa,
-        'status': _isPedidoTeste
-            ? 'teste'
-            : (_metodoPagamento == 'pix' || _metodoPagamento == 'credito')
-            ? 'pago'
-            : 'pendente',
-        'is_teste': _isPedidoTeste,
-        'observacoes': _observacoesController.text.trim().isEmpty
-            ? null
-            : _observacoesController.text.trim(),
-        'data_entrega':
-            _dataEntrega?.toIso8601String() ??
-            _calcularDataMinimaEntrega().toIso8601String(),
-        'created_at': DateTime.now().toIso8601String(),
-      };
-
-      // Inserir pedido no Supabase
-      debugPrint('📦 Criando pedido no Supabase...');
-      final response = await Supabase.instance.client
-          .from('pedidos')
-          .insert(pedidoData)
-          .select()
-          .single();
-
-      final pedidoId = response['id'];
-      debugPrint('✅ Pedido criado com sucesso! ID: $pedidoId');
-
-      // Inserir itens do pedido
-      final itens = _cartService.items.map((item) {
-        debugPrint('📦 Item para salvar: ${item.nome}');
-        debugPrint('   - Tamanho: ${item.tamanhoSelecionado}');
-        debugPrint('   - Preço: ${item.preco}');
-        debugPrint('   - Quantidade: ${item.quantidade}');
-        return {
-          'pedido_id': pedidoId,
-          'produto_id': int.parse(item.id),
-          'quantidade': item.quantidade,
-          'preco_unitario': item.preco,
-          'subtotal': item.subtotal,
-          'observacoes': item.observacoes,
-          'tamanho_selecionado': item.tamanhoSelecionado,
-        };
-      }).toList();
-
-      debugPrint('📦 Inserindo ${itens.length} itens do pedido...');
-      debugPrint('📦 Itens completos: $itens');
-      await Supabase.instance.client.from('pedido_itens').insert(itens);
-      debugPrint('✅ Itens do pedido inseridos com sucesso!');
-
-      // Notificar admins sobre novo pedido
-      try {
-        debugPrint('📢 Notificando admins sobre pedido #$pedidoId...');
-        await NotificationService.notifyAdminsNewOrder(
-          orderId: pedidoId,
-          customerName: _nomeController.text.trim(),
-          total: _totalComTaxa,
-        );
-        debugPrint('✅ Admins notificados sobre pedido #$pedidoId');
-      } catch (e) {
-        debugPrint('⚠️ Erro ao notificar admins: $e');
-        // Não falhar o pedido por causa disso
-      }
-
-      // Salvar dados do endereço no perfil para próximas compras
       try {
         await _saveUserAddress();
       } catch (e) {
         debugPrint('Erro ao salvar endereço: $e');
-        // Não falhar o pedido por causa disso
       }
 
-      if (mounted) {
-        // Salvar total antes de limpar o carrinho
-        final totalPedido = _totalComTaxa;
-
-        // Limpar carrinho após criar pedido
+      if (isOnlinePayment) {
         await _cartService.clearCart();
-
         if (!mounted) return;
 
-        // Mostrar mensagem de sucesso
-        _showSuccessDialog(response, totalPedido);
+        final paymentResult = await _openPendingPaymentFlow(
+          pedido: pedido,
+          user: user,
+        );
+
+        if (paymentResult?['success'] == true) {
+          final pedidoAtualizado =
+              await OrderPaymentService.fetchOrderById(pedido['id']) ?? pedido;
+          if (!mounted) return;
+          _showSuccessDialog(pedidoAtualizado, totalPedido);
+        } else {
+          final pedidoAtualizado =
+              await OrderPaymentService.fetchOrderById(pedido['id']) ?? pedido;
+          if (!mounted) return;
+          _showPendingPaymentDialog(pedidoAtualizado, totalPedido);
+        }
+        return;
       }
+
+      try {
+        final orderId = pedido['id'];
+        if (orderId is int) {
+          await NotificationService.notifyAdminsNewOrder(
+            orderId: orderId,
+            customerName: _nomeController.text.trim(),
+            total: totalPedido,
+          );
+        }
+      } catch (e) {
+        debugPrint('⚠️ Erro ao notificar admins: $e');
+      }
+
+      await _cartService.clearCart();
+      if (!mounted) return;
+
+      _showSuccessDialog(pedido, totalPedido);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1841,6 +1754,206 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     }
   }
 
+  Map<String, dynamic> _buildPedidoData({
+    required User user,
+    required String metodoPagamentoPedido,
+    required bool isOnlinePayment,
+  }) {
+    return {
+      'user_id': user.id,
+      'cliente_nome': _nomeController.text.trim(),
+      'cliente_telefone': _telefoneController.text.trim(),
+      'endereco_completo': _enderecoController.text.trim(),
+      'bairro': _bairroController.text.trim(),
+      'cidade': _cidadeController.text.trim(),
+      'cep': _cepController.text.trim().isEmpty
+          ? null
+          : _cepController.text.trim(),
+      'metodo_pagamento': metodoPagamentoPedido,
+      'valor_troco': _metodoPagamento == 'dinheiro' && _troco > 0
+          ? _troco
+          : null,
+      'total': _totalComTaxa,
+      'status': _isPedidoTeste
+          ? 'teste'
+          : isOnlinePayment
+          ? OrderPaymentService.statusPagamentoPendente
+          : OrderPaymentService.statusPendente,
+      'payment_status': isOnlinePayment
+          ? OrderPaymentService.paymentStatusPending
+          : null,
+      'payment_provider': isOnlinePayment
+          ? _paymentProviderForMethod(_metodoPagamento)
+          : null,
+      'payment_reference': null,
+      'payment_url': null,
+      'payment_payload': <String, dynamic>{},
+      'payment_expires_at': null,
+      'payment_confirmed_at': null,
+      'is_teste': _isPedidoTeste,
+      'observacoes': _observacoesController.text.trim().isEmpty
+          ? null
+          : _observacoesController.text.trim(),
+      'data_entrega':
+          _dataEntrega?.toIso8601String() ??
+          _calcularDataMinimaEntrega().toIso8601String(),
+      'created_at': DateTime.now().toIso8601String(),
+    };
+  }
+
+  List<Map<String, dynamic>> _buildPedidoItensPayload() {
+    return _cartService.items.map((item) {
+      return {
+        'produto_id': int.parse(item.id),
+        'quantidade': item.quantidade,
+        'preco_unitario': item.preco,
+        'subtotal': item.subtotal,
+        'observacoes': item.observacoes,
+        'tamanho_selecionado': item.tamanhoSelecionado,
+      };
+    }).toList();
+  }
+
+  String _paymentProviderForMethod(String metodo) {
+    switch (metodo) {
+      case 'pix':
+        return OrderPaymentService.providerPix;
+      case 'credito':
+        return OrderPaymentService.providerCard;
+      default:
+        return '';
+    }
+  }
+
+  Future<Map<String, dynamic>?> _openPendingPaymentFlow({
+    required Map<String, dynamic> pedido,
+    required User user,
+  }) async {
+    // Usar total do pedido já salvo no DB (o carrinho pode já estar limpo)
+    final amount = (pedido['total'] as num).toDouble();
+
+    if (_metodoPagamento == 'pix') {
+      return Navigator.push<Map<String, dynamic>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AbacatePayPaymentScreen(
+            pedidoId: pedido['id'].toString(),
+            amount: amount,
+            description: 'Pedido #${pedido['id']} - Carro das Delícias',
+            initialChargeId: pedido['payment_reference']?.toString(),
+            initialPaymentPayload: OrderPaymentService.parsePaymentPayload(
+              pedido['payment_payload'],
+            ),
+            initialExpiresAt: pedido['payment_expires_at']?.toString(),
+          ),
+        ),
+      );
+    }
+
+    if (_metodoPagamento == 'credito') {
+      return Navigator.push<Map<String, dynamic>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StripePaymentScreen(
+            pedidoId: pedido['id'].toString(),
+            amount: amount,
+            description: 'Pedido #${pedido['id']} - Carro das Delícias',
+            customerEmail: user.email ?? '',
+            initialSessionId: pedido['payment_reference']?.toString(),
+            initialCheckoutUrl: pedido['payment_url']?.toString(),
+            initialPaymentPayload: OrderPaymentService.parsePaymentPayload(
+              pedido['payment_payload'],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return null;
+  }
+
+  void _showPendingPaymentDialog(
+    Map<String, dynamic> pedido,
+    double totalPedido,
+  ) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.pending_actions, color: Colors.orange[700], size: 28),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Pagamento Pendente')),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Seu pedido #${pedido['id'].toString().padLeft(4, '0')} foi salvo com o pagamento pendente.',
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(Icons.attach_money, color: Colors.green[700], size: 20),
+                  const SizedBox(width: 4),
+                  Text('Total: ${CurrencyFormatter.format(totalPedido)}'),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  _getPaymentMethodIcon(_metodoPagamento),
+                  const SizedBox(width: 4),
+                  Text('Pagamento: ${_getPaymentMethodName(_metodoPagamento)}'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Você pode retomar esse pagamento a qualquer momento em "Meus Pedidos".',
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                },
+                icon: const Icon(Icons.schedule),
+                label: const Text('Depois'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    MainNavigationService.navigateToOrders();
+                  });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.receipt_long),
+                label: const Text('Ver Pedidos'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showSuccessDialog(Map<String, dynamic> pedido, double totalPedido) {
     final dataEntregaStr = pedido['data_entrega'] != null
         ? _formatDate(DateTime.parse(pedido['data_entrega']))
@@ -1857,39 +1970,56 @@ class _CheckoutScreenState extends State<CheckoutScreen>
             const Text('Pedido Confirmado!'),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Seu pedido #${pedido['id'].toString().padLeft(4, '0')} foi registrado com sucesso!',
-            ),
-            const SizedBox(height: 12),
-            Text('Total: ${CurrencyFormatter.format(totalPedido)}'),
-            Text('Pagamento: ${_getPaymentMethodName(_metodoPagamento)}'),
-            Text('📅 Entrega: $dataEntregaStr'),
-            const SizedBox(height: 12),
-            const Text(
-              'Se necessário, entraremos em contato para confirmar os detalhes da entrega.',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.red[50],
-                border: Border.all(color: Colors.red[300]!),
-                borderRadius: BorderRadius.circular(8),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Seu pedido #${pedido['id'].toString().padLeft(4, '0')} foi registrado com sucesso!',
               ),
-              child: const Text(
-                '⚠️ Importante: Caso os dados de contato ou endereço informados estejam incorretos e não seja possível localizar o cliente, não haverá devolução do valor pago.',
-                style: TextStyle(fontSize: 12, color: Colors.red),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(Icons.attach_money, color: Colors.green[700], size: 20),
+                  const SizedBox(width: 4),
+                  Text('Total: ${CurrencyFormatter.format(totalPedido)}'),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  _getPaymentMethodIcon(_metodoPagamento),
+                  const SizedBox(width: 4),
+                  Text('Pagamento: ${_getPaymentMethodName(_metodoPagamento)}'),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text('📅 Entrega: $dataEntregaStr'),
+              const SizedBox(height: 12),
+              const Text(
+                'Se necessário, entraremos em contato para confirmar os detalhes da entrega.',
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  border: Border.all(color: Colors.red[300]!),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  '⚠️ Importante: Caso os dados de contato ou endereço informados estejam incorretos e não seja possível localizar o cliente, não haverá devolução do valor pago.',
+                  style: TextStyle(fontSize: 12, color: Colors.red),
+                ),
+              ),
+            ],
+          ),
         ),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
-          ElevatedButton(
+          ElevatedButton.icon(
             onPressed: () {
               // Fechar diálogo
               Navigator.of(context).pop();
@@ -1898,11 +2028,12 @@ class _CheckoutScreenState extends State<CheckoutScreen>
               // Usar popUntil para remover todas as rotas até a primeira
               Navigator.of(context).popUntil((route) => route.isFirst);
             },
+            icon: const Icon(Icons.check_circle, color: Colors.white),
+            label: const Text('OK'),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green,
               foregroundColor: Colors.white,
             ),
-            child: const Text('OK'),
           ),
         ],
       ),
@@ -1921,6 +2052,34 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         return 'PIX';
       default:
         return method;
+    }
+  }
+
+  Widget _getPaymentMethodIcon(String method, {double size = 20}) {
+    switch (method) {
+      case 'pix':
+        return Image.network(
+          'https://img.icons8.com/color/48/pix.png',
+          width: size,
+          height: size,
+          errorBuilder: (context, error, stackTrace) =>
+              Icon(Icons.payment, size: size, color: Colors.purple[700]),
+        );
+      case 'credito':
+      case 'debito':
+        return Image.asset(
+          'assets/icons/menu/credit_card.png',
+          width: size,
+          height: size,
+        );
+      case 'dinheiro':
+        return Image.asset(
+          'assets/icons/menu/money.png',
+          width: size,
+          height: size,
+        );
+      default:
+        return Icon(Icons.payment, size: size, color: Colors.purple[700]);
     }
   }
 

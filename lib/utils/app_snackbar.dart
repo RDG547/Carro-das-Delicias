@@ -42,7 +42,7 @@ class AppSnackBar {
     required String message,
     required VoidCallback onViewCart,
     bool avoidAdminFab = false,
-    double bottomSpacing = 84,
+    double bottomSpacing = 110,
     Duration duration = const Duration(seconds: 3),
   }) {
     final mediaQuery = MediaQuery.of(context);

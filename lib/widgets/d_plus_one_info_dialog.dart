@@ -199,7 +199,7 @@ class _DPlusOneInfoDialogState extends State<DPlusOneInfoDialog> {
         ),
       ),
       actions: [
-        ElevatedButton(
+        ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.blue[700],
             foregroundColor: Colors.white,
@@ -215,7 +215,8 @@ class _DPlusOneInfoDialogState extends State<DPlusOneInfoDialog> {
               Navigator.of(context).pop();
             }
           },
-          child: const Text(
+          icon: const Icon(Icons.check_circle),
+          label: const Text(
             'Entendi',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),

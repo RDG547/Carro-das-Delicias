@@ -1,5 +1,6 @@
 class MainNavigationService {
   static const int cartPageIndex = 4;
+  static const int ordersPageIndex = 2;
 
   static void Function(int)? _navigateToPageDirect;
 
@@ -23,5 +24,9 @@ class MainNavigationService {
 
   static bool navigateToCart() {
     return navigateToPage(cartPageIndex);
+  }
+
+  static bool navigateToOrders() {
+    return navigateToPage(ordersPageIndex);
   }
 }
