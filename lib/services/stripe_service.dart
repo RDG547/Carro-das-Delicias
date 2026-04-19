@@ -160,6 +160,13 @@ class StripeService {
     Map<String, String>? metadata,
   }) async {
     try {
+      if (amount < 0.50) {
+        return {
+          'success': false,
+          'message': 'Valor mínimo para pagamento com cartão é R\$ 0,50',
+        };
+      }
+
       final amountInCents = (amount * 100).round();
 
       debugPrint('💳 Criando Checkout Session no Stripe...');

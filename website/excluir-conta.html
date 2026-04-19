@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excluir Conta — Carro das Delícias</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header>
+    <nav class="container">
+      <a href="index.html" class="logo" style="text-decoration:none;">
+        <span class="logo-icon">🚐</span>
+        <span class="logo-text">Carro das Delícias</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="politica-de-privacidade.html">Política de Privacidade</a></li>
+        <li><a href="excluir-conta.html">Excluir Conta</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="delete-page">
+    <div class="container">
+      <h1>Solicitar Exclusão de Conta</h1>
+      <p class="intro">Se você deseja excluir sua conta do <strong>Carro das Delícias</strong> e todos os dados pessoais associados, preencha o formulário abaixo. Processaremos sua solicitação em até <strong>30 dias úteis</strong>.</p>
+
+      <div class="delete-content">
+        <div class="warning-box">
+          <h3>⚠️ Atenção: esta ação é irreversível</h3>
+          <p>Ao solicitar a exclusão da sua conta, os seguintes dados serão permanentemente removidos:</p>
+          <ul>
+            <li>Dados de perfil (nome, e-mail, telefone, endereço, foto)</li>
+            <li>Histórico de pedidos</li>
+            <li>Lista de produtos favoritos</li>
+            <li>Notificações recebidas</li>
+            <li>Dados de autenticação (login e senha)</li>
+          </ul>
+          <p style="margin-top:12px;font-size:0.9rem;">Dados relacionados a obrigações fiscais ou legais podem ser retidos pelo período exigido por lei, de forma anonimizada quando possível.</p>
+        </div>
+
+        <form id="deleteForm" onsubmit="return handleSubmit(event)">
+          <div class="form-group">
+            <label for="name">Nome completo *</label>
+            <input type="text" id="name" name="name" required placeholder="Seu nome completo conforme cadastrado no app"
+              maxlength="200">
+          </div>
+
+          <div class="form-group">
+            <label for="email">E-mail da conta *</label>
+            <input type="email" id="email" name="email" required placeholder="email@exemplo.com"
+              maxlength="254">
+            <span class="hint">Use o mesmo e-mail cadastrado no aplicativo.</span>
+          </div>
+
+          <div class="form-group">
+            <label for="phone">Telefone cadastrado</label>
+            <input type="tel" id="phone" name="phone" placeholder="(00) 00000-0000"
+              maxlength="20">
+            <span class="hint">Opcional. Ajuda a identificar sua conta mais rapidamente.</span>
+          </div>
+
+          <div class="form-group">
+            <label for="reason">Motivo da exclusão</label>
+            <select id="reason" name="reason">
+              <option value="">Selecione um motivo (opcional)</option>
+              <option value="nao-uso-mais">Não uso mais o aplicativo</option>
+              <option value="privacidade">Preocupações com privacidade</option>
+              <option value="experiencia">Experiência insatisfatória</option>
+              <option value="outra-conta">Tenho outra conta</option>
+              <option value="outro">Outro motivo</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="comments">Comentários adicionais</label>
+            <textarea id="comments" name="comments" placeholder="Se quiser, conte-nos mais sobre o motivo da exclusão..."
+              maxlength="1000"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-weight:400;">
+              <input type="checkbox" id="confirm" required style="width:auto;margin-top:4px;">
+              <span>Confirmo que desejo excluir minha conta e entendo que esta ação é <strong>irreversível</strong> e que todos os meus dados serão permanentemente removidos.</span>
+            </label>
+          </div>
+
+          <button type="submit" class="submit-btn" id="submitBtn">Solicitar Exclusão da Conta</button>
+        </form>
+
+        <div class="success-message" id="successMessage">
+          <h3>✅ Solicitação enviada com sucesso!</h3>
+          <p>Recebemos sua solicitação de exclusão de conta. Ela será processada em até <strong>30 dias úteis</strong>. Você receberá uma confirmação no e-mail informado quando a exclusão for concluída.</p>
+          <p style="margin-top:12px;">Se tiver dúvidas, entre em contato pelo e-mail: <strong>contato@carrodasdelicias.com.br</strong></p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2026 Carro das Delícias. Todos os direitos reservados.</p>
+      <div class="footer-links">
+        <a href="politica-de-privacidade.html">Política de Privacidade</a>
+        <a href="excluir-conta.html">Excluir Conta</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Phone mask
+    document.getElementById('phone').addEventListener('input', function (e) {
+      let v = e.target.value.replace(/\D/g, '');
+      if (v.length > 11) v = v.slice(0, 11);
+      if (v.length > 6) {
+        v = '(' + v.slice(0, 2) + ') ' + v.slice(2, 7) + '-' + v.slice(7);
+      } else if (v.length > 2) {
+        v = '(' + v.slice(0, 2) + ') ' + v.slice(2);
+      } else if (v.length > 0) {
+        v = '(' + v;
+      }
+      e.target.value = v;
+    });
+
+    function handleSubmit(e) {
+      e.preventDefault();
+
+      const btn = document.getElementById('submitBtn');
+      const form = document.getElementById('deleteForm');
+      const success = document.getElementById('successMessage');
+
+      btn.disabled = true;
+      btn.textContent = 'Enviando...';
+
+      // Collect form data
+      const data = {
+        name: document.getElementById('name').value.trim(),
+        email: document.getElementById('email').value.trim(),
+        phone: document.getElementById('phone').value.trim(),
+        reason: document.getElementById('reason').value,
+        comments: document.getElementById('comments').value.trim(),
+        timestamp: new Date().toISOString()
+      };
+
+      // Build mailto link as fallback / primary method
+      const subject = encodeURIComponent('Solicitação de Exclusão de Conta — Carro das Delícias');
+      const body = encodeURIComponent(
+        'Solicitação de Exclusão de Conta\n' +
+        '================================\n\n' +
+        'Nome: ' + data.name + '\n' +
+        'E-mail: ' + data.email + '\n' +
+        'Telefone: ' + (data.phone || 'Não informado') + '\n' +
+        'Motivo: ' + (data.reason || 'Não informado') + '\n' +
+        'Comentários: ' + (data.comments || 'Nenhum') + '\n' +
+        'Data da solicitação: ' + data.timestamp + '\n'
+      );
+
+      // Open mailto
+      window.location.href = 'mailto:contato@carrodasdelicias.com.br?subject=' + subject + '&body=' + body;
+
+      // Show success
+      setTimeout(function () {
+        form.style.display = 'none';
+        success.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Solicitar Exclusão da Conta';
+      }, 1000);
+
+      return false;
+    }
+  </script>
+</body>
+</html>

@@ -3,17 +3,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../services/abacatepay_service.dart';
+import '../services/order_payment_service.dart';
 
 class AbacatePayPaymentScreen extends StatefulWidget {
   final String pedidoId;
   final double amount;
   final String description;
+  final String? initialChargeId;
+  final Map<String, dynamic>? initialPaymentPayload;
+  final String? initialExpiresAt;
 
   const AbacatePayPaymentScreen({
     super.key,
     required this.pedidoId,
     required this.amount,
     required this.description,
+    this.initialChargeId,
+    this.initialPaymentPayload,
+    this.initialExpiresAt,
   });
 
   @override
@@ -34,7 +41,22 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
   @override
   void initState() {
     super.initState();
-    _createPixCharge();
+    final initialPayload = widget.initialPaymentPayload ?? <String, dynamic>{};
+    final initialPixCode = initialPayload['pix_code']?.toString();
+    final initialQrCode = initialPayload['qr_code_url']?.toString();
+
+    if (widget.initialChargeId != null &&
+        widget.initialChargeId!.isNotEmpty &&
+        initialPixCode != null &&
+        initialPixCode.isNotEmpty) {
+      _chargeId = widget.initialChargeId;
+      _pixCode = initialPixCode;
+      _qrCode = initialQrCode;
+      _isLoading = false;
+      _startPolling();
+    } else {
+      _createPixCharge();
+    }
   }
 
   @override
@@ -68,6 +90,20 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
           _pixCode = result['pix_code'];
           _isLoading = false;
         });
+
+        await OrderPaymentService.savePendingPayment(
+          pedidoId: widget.pedidoId,
+          paymentProvider: OrderPaymentService.providerPix,
+          paymentReference: _chargeId,
+          paymentPayload: {
+            'qr_code_url': _qrCode,
+            'pix_code': _pixCode,
+            'expires_at': result['expires_at'],
+          },
+          paymentExpiresAt: DateTime.tryParse(
+            result['expires_at']?.toString() ?? widget.initialExpiresAt ?? '',
+          ),
+        );
 
         debugPrint(
           'Estado atualizado - _qrCode: $_qrCode, _pixCode: $_pixCode',
@@ -103,6 +139,7 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
 
         if (status['status'] == 'PAID' || status['status'] == 'CONFIRMED') {
           timer.cancel();
+          await OrderPaymentService.markOrderAsPaid(widget.pedidoId);
           setState(() {
             _isPaid = true;
           });
@@ -112,6 +149,29 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
 
           if (mounted) {
             Navigator.of(context).pop({'success': true, 'chargeId': _chargeId});
+          }
+        } else if (status['status'] == 'EXPIRED') {
+          timer.cancel();
+          await OrderPaymentService.markPaymentState(
+            pedidoId: widget.pedidoId,
+            paymentStatus: OrderPaymentService.paymentStatusExpired,
+          );
+          if (mounted) {
+            setState(() {
+              _error = 'O PIX expirou. Gere um novo codigo para continuar.';
+            });
+          }
+        } else if (status['status'] == 'CANCELLED') {
+          timer.cancel();
+          await OrderPaymentService.markPaymentState(
+            pedidoId: widget.pedidoId,
+            paymentStatus: OrderPaymentService.paymentStatusCancelled,
+          );
+          if (mounted) {
+            setState(() {
+              _error =
+                  'O pagamento foi cancelado. Gere um novo codigo para continuar.';
+            });
           }
         }
       } catch (e) {
@@ -140,7 +200,9 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
           _pollingTimer?.cancel();
-          Navigator.of(context).pop({'success': false});
+          Navigator.of(
+            context,
+          ).pop({'success': false, 'pending': true, 'chargeId': _chargeId});
         }
       },
       child: Scaffold(

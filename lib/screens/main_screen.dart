@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/main_navigation_service.dart';
 import '../widgets/main_navigation_provider.dart';
 import '../providers/admin_status_provider.dart';
 import 'home_screen.dart';
@@ -25,8 +26,6 @@ class _MainScreenState extends State<MainScreen> {
   late PageController _pageController;
   bool _isAdmin = false;
   bool _isLoadingAdminStatus = true;
-  bool _isNotificationMenuOpen =
-      false; // Controla se o menu de notificações está aberto
   bool _showNavbar = true; // Controla se a navbar deve ser exibida
   int _currentPageIndex = 0; // Rastreia o índice atual do PageView
   final GlobalKey<NotificationBellNavbarState> _notificationKey = GlobalKey();
@@ -35,11 +34,13 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _pageController = PageController();
+    MainNavigationService.attach(_navigateToPageDirect);
     _checkAdminStatus();
   }
 
   @override
   void dispose() {
+    MainNavigationService.detach();
     _pageController.dispose();
     super.dispose();
   }
@@ -91,14 +92,18 @@ class _MainScreenState extends State<MainScreen> {
     _onTabTapped(0);
   }
 
+  void _navigateToPageDirect(int pageIndex) {
+    _pageController.animateToPage(
+      pageIndex,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
   void _onTabTapped(int index) {
     // Abrir menu de notificações quando clicar (índice 2)
     if (index == 2) {
       _notificationKey.currentState?.toggleMenuFromOutside();
-      setState(() {
-        _isNotificationMenuOpen = true;
-        _currentIndex = 2; // Manter selecionado enquanto o menu está aberto
-      });
       return;
     }
 
@@ -134,12 +139,10 @@ class _MainScreenState extends State<MainScreen> {
         // Admin (6): oculta navbar e desativa seleção
         _currentIndex = -1;
         _showNavbar = false;
-        _isNotificationMenuOpen = false;
       } else if (index == 4 || index == 5) {
         // Carrinho (4) e Rastrear Kombi (5): mostra navbar mas sem seleção (não está na navbar)
         _currentIndex = -1;
         _showNavbar = true;
-        _isNotificationMenuOpen = false;
       } else {
         // Mapeamento dos índices do PageView para NavBar
         // PageView: 0=Início, 1=Descontos, 2=Pedidos, 3=Perfil
@@ -152,29 +155,17 @@ class _MainScreenState extends State<MainScreen> {
           _currentIndex = 4; // Perfil: PageView 3 -> NavBar 4
         }
         _showNavbar = true;
-        _isNotificationMenuOpen = false;
       }
     });
-  }
-
-  void _onNotificationMenuToggle(bool isOpen) {
-    setState(() {
-      _isNotificationMenuOpen = isOpen;
-    });
-
-    if (!isOpen && _currentIndex == 2) {
-      // Se o menu foi fechado e estávamos no índice 2 (Notificações), voltar para a página atual
-      // Verifica se o PageController está anexado antes de acessar .page
-      if (_pageController.hasClients) {
-        setState(() {
-          _currentIndex = _pageController.page?.round() ?? 0;
-        });
-      }
-    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final view = View.of(context);
+    final rawBottomInset = view.viewPadding.bottom / view.devicePixelRatio;
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+    final navbarBottomOffset = keyboardVisible ? 16.0 : 16.0 + rawBottomInset;
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: Stack(
@@ -208,11 +199,7 @@ class _MainScreenState extends State<MainScreen> {
               },
               navigateToPageDirect: (pageIndex) {
                 // Navega diretamente para o índice do PageView (usado para Carrinho)
-                _pageController.animateToPage(
-                  pageIndex,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
+                _navigateToPageDirect(pageIndex);
               },
               child: PageView(
                 controller: _pageController,
@@ -239,118 +226,114 @@ class _MainScreenState extends State<MainScreen> {
               bottom: 0,
               left: 0,
               right: 0,
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.25),
-                          blurRadius: 30,
-                          offset: const Offset(0, 10),
-                          spreadRadius: 4,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, navbarBottomOffset),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.25),
+                        blurRadius: 30,
+                        offset: const Offset(0, 10),
+                        spreadRadius: 4,
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 18,
+                        offset: const Offset(0, 6),
+                        spreadRadius: 1,
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                        spreadRadius: 0,
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BottomNavigationBar(
+                      currentIndex: _currentIndex < 0
+                          ? 0
+                          : _currentIndex, // Garante índice válido
+                      onTap: _onTabTapped,
+                      type: BottomNavigationBarType.fixed,
+                      backgroundColor: Colors.white,
+                      selectedItemColor: _currentIndex < 0
+                          ? Colors.grey[600]
+                          : Colors.black,
+                      unselectedItemColor: Colors.grey[600],
+                      selectedLabelStyle: TextStyle(
+                        fontWeight: _currentIndex < 0
+                            ? FontWeight.w400
+                            : FontWeight.w600,
+                        fontSize: _currentIndex < 0 ? 10 : 11,
+                        height: 1.2,
+                      ),
+                      unselectedLabelStyle: const TextStyle(
+                        fontWeight: FontWeight.w400,
+                        fontSize: 10,
+                        height: 1.2,
+                      ),
+                      elevation: 0,
+                      items: [
+                        BottomNavigationBarItem(
+                          icon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Icon(Icons.home_outlined),
+                          ),
+                          activeIcon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Icon(Icons.home),
+                          ),
+                          label: 'Início',
                         ),
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.15),
-                          blurRadius: 18,
-                          offset: const Offset(0, 6),
-                          spreadRadius: 1,
+                        BottomNavigationBarItem(
+                          icon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Icon(Icons.local_offer_outlined),
+                          ),
+                          activeIcon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Icon(Icons.local_offer),
+                          ),
+                          label: 'Descontos',
                         ),
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                          spreadRadius: 0,
+                        BottomNavigationBarItem(
+                          icon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: NotificationBellNavbar(
+                              key: _notificationKey,
+                            ),
+                          ),
+                          label: 'Notificações',
+                        ),
+                        BottomNavigationBarItem(
+                          icon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Icon(Icons.shopping_bag_outlined),
+                          ),
+                          activeIcon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Icon(Icons.shopping_bag),
+                          ),
+                          label: 'Pedidos',
+                        ),
+                        BottomNavigationBarItem(
+                          icon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Icon(Icons.person_outline),
+                          ),
+                          activeIcon: Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Icon(Icons.person),
+                          ),
+                          label: 'Perfil',
                         ),
                       ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: BottomNavigationBar(
-                        currentIndex: _currentIndex < 0
-                            ? 0
-                            : _currentIndex, // Garante índice válido
-                        onTap: _onTabTapped,
-                        type: BottomNavigationBarType.fixed,
-                        backgroundColor: Colors.white,
-                        selectedItemColor: _currentIndex < 0
-                            ? Colors.grey[600]
-                            : Colors.black,
-                        unselectedItemColor: Colors.grey[600],
-                        selectedLabelStyle: TextStyle(
-                          fontWeight: _currentIndex < 0
-                              ? FontWeight.w400
-                              : FontWeight.w600,
-                          fontSize: _currentIndex < 0 ? 10 : 11,
-                          height: 1.2,
-                        ),
-                        unselectedLabelStyle: const TextStyle(
-                          fontWeight: FontWeight.w400,
-                          fontSize: 10,
-                          height: 1.2,
-                        ),
-                        elevation: 0,
-                        items: [
-                          BottomNavigationBarItem(
-                            icon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Icon(Icons.home_outlined),
-                            ),
-                            activeIcon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Icon(Icons.home),
-                            ),
-                            label: 'Início',
-                          ),
-                          BottomNavigationBarItem(
-                            icon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Icon(Icons.local_offer_outlined),
-                            ),
-                            activeIcon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Icon(Icons.local_offer),
-                            ),
-                            label: 'Descontos',
-                          ),
-                          BottomNavigationBarItem(
-                            icon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: NotificationBellNavbar(
-                                key: _notificationKey,
-                                onMenuToggle: _onNotificationMenuToggle,
-                                isActive: _isNotificationMenuOpen,
-                              ),
-                            ),
-                            label: 'Notificações',
-                          ),
-                          BottomNavigationBarItem(
-                            icon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Icon(Icons.shopping_bag_outlined),
-                            ),
-                            activeIcon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Icon(Icons.shopping_bag),
-                            ),
-                            label: 'Pedidos',
-                          ),
-                          BottomNavigationBarItem(
-                            icon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Icon(Icons.person_outline),
-                            ),
-                            activeIcon: Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Icon(Icons.person),
-                            ),
-                            label: 'Perfil',
-                          ),
-                        ],
-                      ),
                     ),
                   ),
                 ),

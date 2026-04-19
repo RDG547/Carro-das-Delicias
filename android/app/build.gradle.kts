@@ -1,8 +1,17 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+}
+
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -35,8 +44,12 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // Mapbox Access Token
-        manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = "pk.eyJ1IjoicmRnNTQ3IiwiYSI6ImNtaHNmY21zdDFpbXcyanB6N2w0Y2NyeWYifQ.RAwJc13MPekGYnD6js9g2A"
+        // Mapbox Access Token (read from local.properties or CI environment)
+        val mapboxToken = System.getenv("MAPBOX_ACCESS_TOKEN")
+            ?: (rootProject.file("local.properties").takeIf { it.exists() }
+                ?.let { java.util.Properties().also { p -> p.load(it.inputStream()) }["MAPBOX_ACCESS_TOKEN"] as? String })
+            ?: ""
+        manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = mapboxToken
     }
 
     signingConfigs {
@@ -46,13 +59,18 @@ android {
                 storePassword = System.getenv("CM_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("CM_KEY_ALIAS")
                 keyPassword = System.getenv("CM_KEY_PASSWORD")
+            } else if (keystorePropertiesFile.exists()) {
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
             }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = if (System.getenv("CM_KEYSTORE_PATH") != null) {
+            signingConfig = if (System.getenv("CM_KEYSTORE_PATH") != null || keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
@@ -68,6 +86,8 @@ flutter {
 dependencies {
     // Desugaring para suportar APIs Java 8+ em versões antigas do Android
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    // Edge-to-edge support for Android 15+
+    implementation("androidx.activity:activity-ktx:1.9.3")
 }
 
 // Workaround: Copy APK and AAB to expected Flutter location

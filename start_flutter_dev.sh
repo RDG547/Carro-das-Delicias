@@ -163,17 +163,13 @@ echo ""
 if [ "$1" = "--flutter" ]; then
     echo "🚀 Iniciando Flutter automaticamente..."
     cd $PROJECT_PATH
-    # Carrega variáveis do .env se existir
-    DART_DEFINES=""
-    if [ -f "$PROJECT_PATH/.env" ]; then
-        while IFS='=' read -r key value; do
-            # Ignora comentários e linhas vazias
-            [[ "$key" =~ ^#.*$ ]] && continue
-            [[ -z "$key" ]] && continue
-            DART_DEFINES="$DART_DEFINES --dart-define=$key=$value"
-        done < "$PROJECT_PATH/.env"
+    if [ -f "$PROJECT_PATH/.env.json" ]; then
+        flutter run --dart-define-from-file="$PROJECT_PATH/.env.json"
+    elif [ -f "$PROJECT_PATH/.env" ]; then
+        flutter run --dart-define-from-file="$PROJECT_PATH/.env"
+    else
+        flutter run
     fi
-    flutter run $DART_DEFINES
 fi
 
 echo "🎯 Script concluído!"

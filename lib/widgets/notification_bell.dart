@@ -233,7 +233,7 @@ class _NotificationBellState extends State<NotificationBell> {
                                   backgroundColor: Colors.red,
                                   foregroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -312,7 +312,7 @@ class _NotificationBellState extends State<NotificationBell> {
             final isRead = notification['is_read'] ?? false;
             final createdAt = DateTime.tryParse(
               notification['created_at'] ?? '',
-            );
+            )?.toLocal();
             final timeAgo = createdAt != null ? _getTimeAgo(createdAt) : '';
 
             return PopupMenuItem<String>(

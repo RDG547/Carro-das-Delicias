@@ -4,8 +4,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../utils/constants.dart';
 import '../services/cart_service.dart';
 import '../services/favorites_service.dart';
+import '../services/main_navigation_service.dart';
+import '../screens/cart_screen.dart';
 import '../screens/product_detail_screen.dart';
 import '../screens/checkout_screen.dart';
+import '../utils/app_snackbar.dart';
 import 'size_selector_dialog.dart';
 import 'main_navigation_provider.dart';
 import 'category_icon_widget.dart';
@@ -304,6 +307,28 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
   late Animation<double> _scaleAnimation;
   final _cartService = CartService();
   final _favoritesService = FavoritesService();
+  static const List<double> _grayscaleMatrix = [
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ];
 
   @override
   void initState() {
@@ -322,6 +347,39 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  bool get _isProductAvailable => widget.produto['ativo'] != false;
+
+  void _showUnavailableProductMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Produto indisponível no momento. Aguarde a disponibilidade.',
+        ),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
+  void _openCartPage() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      if (MainNavigationService.navigateToCart()) {
+        return;
+      }
+
+      final provider = MainNavigationProvider.of(context);
+      if (provider?.navigateToPageDirect != null) {
+        provider!.navigateToPageDirect!(MainNavigationService.cartPageIndex);
+        return;
+      }
+
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (context) => const CartScreen()));
+    });
   }
 
   Widget _buildPriceWidget() {
@@ -359,11 +417,92 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         );
       }
 
+      final hasDesconto = precoAnterior != null && precoAnterior > menorPreco;
+      final temMultiplosPrecos = tamanhos.length > 1;
+
+      if (hasDesconto) {
+        final percentualDesconto =
+            ((precoAnterior - menorPreco) / precoAnterior * 100).toInt();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.orange,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$percentualDesconto% OFF',
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              CurrencyFormatter.format(precoAnterior),
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+                decoration: TextDecoration.lineThrough,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              temMultiplosPrecos ? 'A partir de' : 'Preço',
+              style: const TextStyle(
+                fontSize: 10,
+                color: Colors.grey,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Colors.orange, Colors.deepOrange],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.orange.withValues(alpha: 0.3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Text(
+                CurrencyFormatter.format(menorPreco),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.white,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black26,
+                      offset: Offset(0, 1),
+                      blurRadius: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+
       return Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Text(
-            'A partir de',
+          Text(
+            tamanhos.length > 1 ? 'A partir de' : 'Preço',
             style: TextStyle(
               fontSize: 10,
               color: Colors.grey,
@@ -597,6 +736,11 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
 
   Future<void> _buyNow() async {
     try {
+      if (!_isProductAvailable) {
+        _showUnavailableProductMessage();
+        return;
+      }
+
       final produto = widget.produto;
       final tamanhos = produto['tamanhos'];
 
@@ -719,6 +863,12 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
   }
 
   Future<void> _addToCart() async {
+    if (!_isProductAvailable) {
+      _showUnavailableProductMessage();
+      return;
+    }
+
+    final currentContext = context;
     final produto = widget.produto;
     final tamanhos = produto['tamanhos'];
 
@@ -744,34 +894,14 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
 
     await _cartService.addItem(produto);
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.check_circle, color: Colors.white),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text('${produto['nome']} adicionado ao carrinho!'),
-              ),
-            ],
-          ),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-          action: SnackBarAction(
-            label: 'Ver Carrinho',
-            textColor: Colors.white,
-            onPressed: () {
-              final provider = MainNavigationProvider.of(context);
-              if (provider?.navigateToPageDirect != null) {
-                provider!.navigateToPageDirect!(4);
-              }
-            },
-          ),
-        ),
-      );
-    }
+    if (!currentContext.mounted) return;
+
+    AppSnackBar.showCartAdded(
+      currentContext,
+      message: '${produto['nome']} adicionado ao carrinho!',
+      onViewCart: _openCartPage,
+      avoidAdminFab: widget.isAdmin == true,
+    );
   }
 
   Future<void> _showSizeSelectorAndAddToCart() async {
@@ -783,45 +913,22 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         produto: widget.produto,
         action: SizeSelectionAction.addToCart,
         onSizeSelected: (selectedSize) async {
+          final currentContext = context;
           // Criar produto com tamanho selecionado
           final produtoComTamanho = Map<String, dynamic>.from(widget.produto);
           produtoComTamanho['preco'] = selectedSize['preco'];
           produtoComTamanho['tamanho_selecionado'] = selectedSize['nome'];
 
-          // Capturar ScaffoldMessenger ANTES do await
-          final messenger = ScaffoldMessenger.of(context);
-
           await _cartService.addItem(produtoComTamanho);
 
-          if (!mounted) return;
+          if (!currentContext.mounted) return;
 
-          messenger.showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.check_circle, color: Colors.white),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '${widget.produto['nome']} (${selectedSize['nome']}) adicionado ao carrinho!',
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 2),
-              action: SnackBarAction(
-                label: 'Ver Carrinho',
-                textColor: Colors.white,
-                onPressed: () {
-                  final provider = MainNavigationProvider.of(context);
-                  if (provider?.navigateToPageDirect != null) {
-                    provider!.navigateToPageDirect!(4);
-                  }
-                },
-              ),
-            ),
+          AppSnackBar.showCartAdded(
+            currentContext,
+            message:
+                '${widget.produto['nome']} (${selectedSize['nome']}) adicionado ao carrinho!',
+            onViewCart: _openCartPage,
+            avoidAdminFab: widget.isAdmin == true,
           );
         },
       ),
@@ -830,6 +937,11 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
 
   void _goToProductDetail() async {
     try {
+      if (!_isProductAvailable) {
+        _showUnavailableProductMessage();
+        return;
+      }
+
       debugPrint(
         '🔗 Navegando para detalhes do produto: ${widget.produto['nome']}',
       );
@@ -840,8 +952,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         ),
       );
       if (result == 'go_to_cart' && mounted) {
-        final provider = MainNavigationProvider.of(context);
-        provider?.navigateToPageDirect?.call(4);
+        _openCartPage();
       }
     } catch (e) {
       debugPrint('❌ Erro ao navegar para detalhes: $e');
@@ -900,7 +1011,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                   'assets/icons/menu/delete_button.png',
                   width: 24,
                   height: 24,
-                  color: Colors.black,
+                  color: Colors.red,
                 ),
                 title: const Text('Excluir Produto'),
                 onTap: () {
@@ -1125,7 +1236,9 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
               onTap: () {
                 debugPrint('👆 Tap no card do produto - chamando navegação');
                 _controller.reverse();
-                if (widget.onTap != null) {
+                if (!_isProductAvailable) {
+                  _showUnavailableProductMessage();
+                } else if (widget.onTap != null) {
                   widget.onTap!();
                 } else {
                   _goToProductDetail();
@@ -1147,166 +1260,181 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                   _showAdminOptions();
                 }
               },
-              child: Column(
-                children: [
-                  // Tag de Promoção/Desconto no topo (se houver)
-                  if (widget.produto['preco_anterior'] != null &&
-                      widget.produto['preco_anterior'] >
-                          widget.produto['preco'])
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Colors.orange, Colors.deepOrange],
-                          begin: Alignment.centerLeft,
-                          end: Alignment.centerRight,
-                        ),
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(16),
-                          topRight: Radius.circular(16),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
-                            Icons.local_offer,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'PROMOÇÃO - ${((widget.produto['preco_anterior'] - widget.produto['preco']) / widget.produto['preco_anterior'] * 100).toInt()}% OFF',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              letterSpacing: 0.5,
+              child: ColorFiltered(
+                colorFilter: _isProductAvailable
+                    ? const ColorFilter.mode(Colors.transparent, BlendMode.dst)
+                    : const ColorFilter.matrix(_grayscaleMatrix),
+                child: Opacity(
+                  opacity: _isProductAvailable ? 1 : 0.82,
+                  child: Column(
+                    children: [
+                      // Tag de Promoção/Desconto no topo (se houver)
+                      if (widget.produto['preco_anterior'] != null &&
+                          widget.produto['preco_anterior'] >
+                              widget.produto['preco'])
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Colors.orange, Colors.deepOrange],
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                            ),
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(16),
+                              topRight: Radius.circular(16),
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-
-                  // Conteúdo principal do card
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        // Imagem ou Ícone da categoria
-                        Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            color: Colors.orange[100],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.orange[200]!),
-                          ),
-                          child:
-                              widget.produto['imagem_url'] != null &&
-                                  widget.produto['imagem_url']
-                                      .toString()
-                                      .isNotEmpty
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    widget.produto['imagem_url'],
-                                    fit: BoxFit.cover,
-                                    cacheWidth: 240,
-                                    cacheHeight: 240,
-                                    filterQuality: FilterQuality.medium,
-                                    errorBuilder:
-                                        (context, error, stackTrace) => Center(
-                                          child: CategoryIconWidget(
-                                            icone: widget
-                                                .produto['categoria_icone'],
-                                            size: 40,
-                                          ),
-                                        ),
-                                  ),
-                                )
-                              : Center(
-                                  child: CategoryIconWidget(
-                                    icone:
-                                        widget.produto['categoria_icone'] ??
-                                        '🍰',
-                                    size: 40,
-                                  ),
-                                ),
-                        ),
-                        const SizedBox(width: 16),
-
-                        // Informações do produto
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              // Nome do produto
-                              Text(
-                                widget.produto['nome'] ?? 'Produto sem nome',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Colors.black87,
-                                ),
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
+                              const Icon(
+                                Icons.local_offer,
+                                color: Colors.white,
+                                size: 16,
                               ),
-                              const SizedBox(height: 4),
-
-                              // Apenas descrição se disponível
-                              if (widget.produto['descricao'] != null &&
-                                  widget.produto['descricao']
-                                      .toString()
-                                      .isNotEmpty)
-                                Text(
-                                  widget.produto['descricao'],
-                                  style: TextStyle(
-                                    color: Colors.grey[600],
-                                    fontSize: 14,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
+                              const SizedBox(width: 6),
+                              Text(
+                                'PROMOÇÃO - ${((widget.produto['preco_anterior'] - widget.produto['preco']) / widget.produto['preco_anterior'] * 100).toInt()}% OFF',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  letterSpacing: 0.5,
                                 ),
+                              ),
                             ],
                           ),
                         ),
 
-                        // Preço com desconto ou normal
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
+                      // Conteúdo principal do card
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
                           children: [
-                            // Botão de favorito
-                            GestureDetector(
-                              onTap: () async {
-                                final productId = widget.produto['id']
-                                    .toString();
-                                final wasFavorite = _favoritesService
-                                    .isFavorite(productId);
-                                final scaffoldMessenger = ScaffoldMessenger.of(
-                                  context,
-                                );
-                                final productName = widget.produto['nome'];
-                                final overlay = Overlay.of(context);
+                            // Imagem ou Ícone da categoria
+                            Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                color: Colors.orange[100],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.orange[200]!),
+                              ),
+                              child:
+                                  widget.produto['imagem_url'] != null &&
+                                      widget.produto['imagem_url']
+                                          .toString()
+                                          .isNotEmpty
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.network(
+                                        widget.produto['imagem_url'],
+                                        fit: BoxFit.cover,
+                                        cacheWidth: 240,
+                                        cacheHeight: 240,
+                                        filterQuality: FilterQuality.medium,
+                                        errorBuilder:
+                                            (
+                                              context,
+                                              error,
+                                              stackTrace,
+                                            ) => Center(
+                                              child: CategoryIconWidget(
+                                                icone: widget
+                                                    .produto['categoria_icone'],
+                                                size: 40,
+                                              ),
+                                            ),
+                                      ),
+                                    )
+                                  : Center(
+                                      child: CategoryIconWidget(
+                                        icone:
+                                            widget.produto['categoria_icone'] ??
+                                            '🍰',
+                                        size: 40,
+                                      ),
+                                    ),
+                            ),
+                            const SizedBox(width: 16),
 
-                                await _favoritesService.toggleFavorite(
-                                  productId,
-                                );
-                                setState(() {}); // Atualizar UI
+                            // Informações do produto
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Nome do produto
+                                  Text(
+                                    widget.produto['nome'] ??
+                                        'Produto sem nome',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                      color: Colors.black87,
+                                      decoration: _isProductAvailable
+                                          ? TextDecoration.none
+                                          : TextDecoration.lineThrough,
+                                    ),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
 
-                                // Mostrar animação de coração
-                                if (mounted) {
-                                  FavoriteHeartAnimation.showWithOverlay(
-                                    overlay,
-                                    isFavoriting: !wasFavorite,
-                                  );
-                                }
+                                  // Apenas descrição se disponível
+                                  if (widget.produto['descricao'] != null &&
+                                      widget.produto['descricao']
+                                          .toString()
+                                          .isNotEmpty)
+                                    Text(
+                                      widget.produto['descricao'],
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 14,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                ],
+                              ),
+                            ),
 
-                                // Mostrar feedback visual
-                                if (mounted) {
-                                  scaffoldMessenger.showSnackBar(
-                                    SnackBar(
+                            // Preço com desconto ou normal
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Botão de favorito
+                                GestureDetector(
+                                  onTap: () async {
+                                    final productId = widget.produto['id']
+                                        .toString();
+                                    final wasFavorite = _favoritesService
+                                        .isFavorite(productId);
+                                    final productName = widget.produto['nome'];
+                                    final overlay = Overlay.of(context);
+
+                                    await _favoritesService.toggleFavorite(
+                                      productId,
+                                    );
+                                    if (!context.mounted) return;
+                                    setState(() {}); // Atualizar UI
+
+                                    // Mostrar animação de coração
+                                    FavoriteHeartAnimation.showWithOverlay(
+                                      overlay,
+                                      isFavoriting: !wasFavorite,
+                                    );
+
+                                    // Mostrar feedback visual
+                                    AppSnackBar.showTop(
+                                      context,
+                                      toolbarHeight: 48,
+                                      topSpacing: 36,
+                                      duration: const Duration(seconds: 2),
+                                      backgroundColor: wasFavorite
+                                          ? Colors.grey.shade700
+                                          : Colors.red,
                                       content: Row(
                                         children: [
                                           Icon(
@@ -1326,125 +1454,130 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                           ),
                                         ],
                                       ),
-                                      backgroundColor: wasFavorite
-                                          ? Colors.grey[700]
-                                          : Colors.red,
-                                      behavior: SnackBarBehavior.floating,
-                                      duration: const Duration(seconds: 2),
-                                    ),
-                                  );
-                                }
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                child: Icon(
-                                  _favoritesService.isFavorite(
-                                        widget.produto['id'].toString(),
-                                      )
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  color:
+                                    );
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    child: Icon(
                                       _favoritesService.isFavorite(
-                                        widget.produto['id'].toString(),
-                                      )
-                                      ? Colors.red
-                                      : Colors.grey,
-                                  size: 24,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            // Preço
-                            _buildPriceWidget(),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Botões de ação (se showAddToCart for true)
-                  // Envolvido com GestureDetector para não propagar tap para o InkWell
-                  if (widget.showAddToCart && widget.produto['preco'] != null)
-                    GestureDetector(
-                      onTap: () {
-                        // Absorver tap para não propagar para o InkWell
-                        debugPrint('🛑 Tap nos botões - não navega');
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        child: Row(
-                          children: [
-                            // Botão Comprar
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: _buyNow,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.black,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 8,
-                                  ),
-                                  minimumSize: const Size(0, 36),
-                                ),
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: const [
-                                      Icon(Icons.shopping_bag, size: 14),
-                                      SizedBox(width: 4),
-                                      Text(
-                                        'Comprar',
-                                        style: TextStyle(fontSize: 11),
-                                      ),
-                                    ],
+                                            widget.produto['id'].toString(),
+                                          )
+                                          ? Icons.favorite
+                                          : Icons.favorite_border,
+                                      color:
+                                          _favoritesService.isFavorite(
+                                            widget.produto['id'].toString(),
+                                          )
+                                          ? Colors.red
+                                          : Colors.grey,
+                                      size: 24,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-
-                            // Botão Adicionar ao Carrinho
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: _addToCart,
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.black,
-                                  side: const BorderSide(color: Colors.black),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 8,
-                                  ),
-                                  minimumSize: const Size(0, 36),
-                                ),
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: const [
-                                      Icon(Icons.add_shopping_cart, size: 14),
-                                      SizedBox(width: 4),
-                                      Text(
-                                        'Carrinho',
-                                        style: TextStyle(fontSize: 11),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
+                                const SizedBox(height: 4),
+                                // Preço
+                                _buildPriceWidget(),
+                              ],
                             ),
                           ],
                         ),
                       ),
-                    ),
-                ],
+
+                      // Botões de ação (se showAddToCart for true)
+                      // Envolvido com GestureDetector para não propagar tap para o InkWell
+                      if (widget.showAddToCart &&
+                          widget.produto['preco'] != null)
+                        GestureDetector(
+                          onTap: () {
+                            // Absorver tap para não propagar para o InkWell
+                            debugPrint('🛑 Tap nos botões - não navega');
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: Row(
+                              children: [
+                                // Botão Comprar
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: _isProductAvailable
+                                        ? _buyNow
+                                        : _showUnavailableProductMessage,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.black,
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                        vertical: 8,
+                                      ),
+                                      minimumSize: const Size(0, 36),
+                                    ),
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: const [
+                                          Icon(Icons.shopping_bag, size: 14),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Comprar',
+                                            style: TextStyle(fontSize: 11),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+
+                                // Botão Adicionar ao Carrinho
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: _isProductAvailable
+                                        ? _addToCart
+                                        : _showUnavailableProductMessage,
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.black,
+                                      side: const BorderSide(
+                                        color: Colors.black,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                        vertical: 8,
+                                      ),
+                                      minimumSize: const Size(0, 36),
+                                    ),
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: const [
+                                          Icon(
+                                            Icons.add_shopping_cart,
+                                            size: 14,
+                                          ),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Carrinho',
+                                            style: TextStyle(fontSize: 11),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),

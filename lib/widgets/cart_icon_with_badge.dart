@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/cart_service.dart';
+import '../services/main_navigation_service.dart';
 import 'main_navigation_provider.dart';
 
 class CartIconWithBadge extends StatefulWidget {
@@ -48,8 +49,13 @@ class _CartIconWithBadgeState extends State<CartIconWithBadge> {
           onPressed: () {
             // Navega para o carrinho usando o PageView do MainScreen
             final provider = MainNavigationProvider.of(context);
+            if (MainNavigationService.navigateToCart()) {
+              return;
+            }
             if (provider?.navigateToPageDirect != null) {
-              provider!.navigateToPageDirect!(2); // Índice 2 = Carrinho
+              provider!.navigateToPageDirect!(
+                MainNavigationService.cartPageIndex,
+              );
             }
           },
         ),

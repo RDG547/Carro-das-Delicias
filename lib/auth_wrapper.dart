@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
+import 'services/auth_profile_sync_service.dart';
 import 'services/notification_service.dart';
 import 'services/deep_link_service.dart';
+import 'services/order_payment_service.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
@@ -15,6 +19,7 @@ class AuthWrapper extends StatefulWidget {
 class _AuthWrapperState extends State<AuthWrapper> {
   bool _isLoading = true;
   User? _user;
+  StreamSubscription<AuthState>? _authSubscription;
 
   @override
   void initState() {
@@ -28,7 +33,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
     });
 
     // Escuta mudanças no estado de autenticação
-    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((
+      data,
+    ) {
       final newUser = data.session?.user;
 
       if (mounted) {
@@ -39,6 +46,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         // Gerenciar listener de notificações baseado no estado de autenticação
         if (newUser != null) {
+          unawaited(AuthProfileSyncService.syncCurrentUserProfile());
+          unawaited(OrderPaymentService.syncPendingPaymentsForCurrentUser());
           // Usuário fez login - iniciar escuta de notificações
           NotificationService.startListeningToNotifications();
           // Verificar notificações pendentes
@@ -62,6 +71,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         // Se já há um usuário logado, iniciar escuta de notificações
         if (_user != null) {
+          unawaited(AuthProfileSyncService.syncCurrentUserProfile());
+          unawaited(OrderPaymentService.syncPendingPaymentsForCurrentUser());
           NotificationService.startListeningToNotifications();
           // Verificar notificações pendentes ao abrir app
           NotificationService.checkPendingNotifications();
@@ -79,6 +90,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
     // Parar escuta ao destruir o widget
     NotificationService.stopListeningToNotifications();
     super.dispose();

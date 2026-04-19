@@ -1,39 +1,46 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:async';
 import '../services/notification_service.dart';
 
 class NotificationBellNavbar extends StatefulWidget {
-  final Function(bool)? onMenuToggle;
-  final bool isActive;
-
-  const NotificationBellNavbar({
-    super.key,
-    this.onMenuToggle,
-    this.isActive = false,
-  });
+  const NotificationBellNavbar({super.key});
 
   @override
   State<NotificationBellNavbar> createState() => NotificationBellNavbarState();
 }
 
-class NotificationBellNavbarState extends State<NotificationBellNavbar> {
+class NotificationBellNavbarState extends State<NotificationBellNavbar>
+    with SingleTickerProviderStateMixin {
   int _unreadCount = 0;
   List<Map<String, dynamic>> _notifications = [];
   OverlayEntry? _overlayEntry;
   bool _isMenuOpen = false;
   RealtimeChannel? _updateChannel;
   ScaffoldMessengerState? _scaffoldMessenger;
+  late final AnimationController _menuAnimationController;
+  bool _isClosingOverlay = false;
+  bool _isDisposed = false;
 
   @override
   void initState() {
     super.initState();
+    _menuAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+      reverseDuration: const Duration(milliseconds: 200),
+    );
     _loadNotifications();
     _startListeningToUpdates();
   }
 
   @override
   void dispose() {
-    _removeOverlay();
+    _isDisposed = true;
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    _isMenuOpen = false;
+    _menuAnimationController.dispose();
     _updateChannel?.unsubscribe();
     super.dispose();
   }
@@ -179,11 +186,41 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
     }
   }
 
-  void _removeOverlay() {
+  Future<void> _removeOverlay({bool immediate = false}) async {
+    if (_overlayEntry == null) {
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isMenuOpen = false;
+        });
+      } else {
+        _isMenuOpen = false;
+      }
+      return;
+    }
+
+    if (!immediate) {
+      if (_isClosingOverlay) return;
+      _isClosingOverlay = true;
+      try {
+        await _menuAnimationController.reverse();
+      } catch (_) {
+        // Ignora falhas de animação se o widget for desmontado no meio.
+      }
+    } else {
+      _menuAnimationController.stop();
+      _menuAnimationController.value = 0;
+    }
+
     _overlayEntry?.remove();
     _overlayEntry = null;
-    _isMenuOpen = false;
-    widget.onMenuToggle?.call(false);
+    _isClosingOverlay = false;
+    if (mounted && !_isDisposed) {
+      setState(() {
+        _isMenuOpen = false;
+      });
+    } else {
+      _isMenuOpen = false;
+    }
   }
 
   void _toggleMenu() {
@@ -234,15 +271,19 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
             left: menuLeft,
             bottom: menuBottom,
             width: menuWidth,
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0.0, end: 1.0),
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeOutCubic,
-              builder: (context, value, child) {
+            child: AnimatedBuilder(
+              animation: _menuAnimationController,
+              builder: (context, child) {
+                final animationValue = Curves.easeOutCubic.transform(
+                  _menuAnimationController.value,
+                );
                 return Transform.scale(
-                  scale: value,
+                  scale: 0.92 + (0.08 * animationValue),
                   alignment: Alignment.bottomCenter,
-                  child: Opacity(opacity: value, child: child),
+                  child: Transform.translate(
+                    offset: Offset(0, 20 * (1 - animationValue)),
+                    child: Opacity(opacity: animationValue, child: child),
+                  ),
                 );
               },
               child: Material(
@@ -264,8 +305,14 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
     );
 
     Overlay.of(context).insert(_overlayEntry!);
-    _isMenuOpen = true;
-    widget.onMenuToggle?.call(true);
+    _menuAnimationController.forward(from: 0);
+    if (mounted) {
+      setState(() {
+        _isMenuOpen = true;
+      });
+    } else {
+      _isMenuOpen = true;
+    }
   }
 
   Widget _buildMenuContent() {
@@ -354,7 +401,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
                                   backgroundColor: Colors.red,
                                   foregroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
@@ -448,7 +495,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
                     final isRead = notification['is_read'] ?? false;
                     final createdAt = DateTime.tryParse(
                       notification['created_at'] ?? '',
-                    );
+                    )?.toLocal();
                     final timeAgo = createdAt != null
                         ? _getTimeAgo(createdAt)
                         : '';
@@ -482,88 +529,101 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
                           bool undone = false;
                           final messenger = _scaffoldMessenger;
                           if (messenger == null) return;
+                          Timer? closeTimer;
+                          late final ScaffoldFeatureController<
+                            SnackBar,
+                            SnackBarClosedReason
+                          >
+                          controller;
 
                           messenger.clearSnackBars();
-                          messenger
-                              .showSnackBar(
-                                SnackBar(
-                                  duration: const Duration(seconds: 5),
-                                  content: TweenAnimationBuilder<double>(
-                                    tween: Tween(begin: 5.0, end: 0.0),
-                                    duration: const Duration(seconds: 5),
-                                    builder: (context, value, child) {
-                                      return Row(
-                                        children: [
-                                          SizedBox(
-                                            width: 22,
-                                            height: 22,
-                                            child: Stack(
-                                              alignment: Alignment.center,
-                                              children: [
-                                                CircularProgressIndicator(
-                                                  value: value / 5,
-                                                  strokeWidth: 2.5,
-                                                  valueColor:
-                                                      const AlwaysStoppedAnimation<
-                                                        Color
-                                                      >(Colors.white),
-                                                  backgroundColor:
-                                                      Colors.white24,
-                                                ),
-                                                Text(
-                                                  '${value.ceil()}',
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ],
+                          controller = messenger.showSnackBar(
+                            SnackBar(
+                              duration: const Duration(seconds: 5),
+                              content: TweenAnimationBuilder<double>(
+                                tween: Tween(begin: 5.0, end: 0.0),
+                                duration: const Duration(seconds: 5),
+                                builder: (context, value, child) {
+                                  return Row(
+                                    children: [
+                                      SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: Stack(
+                                          alignment: Alignment.center,
+                                          children: [
+                                            CircularProgressIndicator(
+                                              value: value / 5,
+                                              strokeWidth: 2.5,
+                                              valueColor:
+                                                  const AlwaysStoppedAnimation<
+                                                    Color
+                                                  >(Colors.white),
+                                              backgroundColor: Colors.white24,
                                             ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          const Text('Notificação excluída'),
-                                        ],
+                                            Text(
+                                              '${value.ceil()}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text('Notificação excluída'),
+                                    ],
+                                  );
+                                },
+                              ),
+                              action: SnackBarAction(
+                                label: 'Desfazer',
+                                textColor: Colors.yellow,
+                                onPressed: () {
+                                  undone = true;
+                                  closeTimer?.cancel();
+                                  controller.close();
+                                  if (mounted) {
+                                    setState(() {
+                                      final insertAt = notificationIndex.clamp(
+                                        0,
+                                        _notifications.length,
                                       );
-                                    },
-                                  ),
-                                  action: SnackBarAction(
-                                    label: 'Desfazer',
-                                    textColor: Colors.yellow,
-                                    onPressed: () {
-                                      undone = true;
-                                      if (mounted) {
-                                        setState(() {
-                                          final insertAt = notificationIndex
-                                              .clamp(0, _notifications.length);
-                                          _notifications.insert(
-                                            insertAt,
-                                            removedNotification,
-                                          );
-                                          if (wasUnread) {
-                                            _unreadCount++;
-                                          }
-                                        });
-                                        _overlayEntry?.markNeedsBuild();
+                                      _notifications.insert(
+                                        insertAt,
+                                        removedNotification,
+                                      );
+                                      if (wasUnread) {
+                                        _unreadCount++;
                                       }
-                                      debugPrint(
-                                        '↩️ Notificação $notificationId restaurada',
-                                      );
-                                    },
-                                  ),
-                                ),
-                              )
-                              .closed
-                              .then((reason) async {
-                                if (!undone) {
-                                  await NotificationService.deleteNotification(
-                                    notificationId,
-                                  );
+                                    });
+                                    _overlayEntry?.markNeedsBuild();
+                                  }
                                   debugPrint(
-                                    '✅ Notificação $notificationId deletada permanentemente',
+                                    '↩️ Notificação $notificationId restaurada',
                                   );
-                                }
-                              });
+                                },
+                              ),
+                            ),
+                          );
+
+                          closeTimer = Timer(const Duration(seconds: 5), () {
+                            controller.close();
+                          });
+
+                          controller.closed.then((reason) async {
+                            closeTimer?.cancel();
+                            if (!undone) {
+                              await NotificationService.deleteNotification(
+                                notificationId,
+                              );
+                              debugPrint(
+                                '✅ Notificação $notificationId deletada permanentemente',
+                              );
+                            }
+                          });
                         },
                         background: Container(
                           alignment: Alignment.centerRight,
@@ -695,9 +755,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar> {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Icon(
-          widget.isActive ? Icons.notifications : Icons.notifications_outlined,
-        ),
+        Icon(_isMenuOpen ? Icons.notifications : Icons.notifications_outlined),
         if (_unreadCount > 0)
           Positioned(
             right: -2,

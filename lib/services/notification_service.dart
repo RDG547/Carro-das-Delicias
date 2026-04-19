@@ -390,6 +390,7 @@ class NotificationService {
     required String newStatus,
   }) async {
     final statusLabels = {
+      'pagamento_pendente': 'Pagamento Pendente',
       'pendente': 'Pendente',
       'confirmado': 'Confirmado',
       'em preparo': 'Em Preparo',

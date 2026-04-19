@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../services/order_payment_service.dart';
 import '../services/stripe_service.dart';
 
 class StripePaymentScreen extends StatefulWidget {
@@ -8,6 +9,9 @@ class StripePaymentScreen extends StatefulWidget {
   final double amount;
   final String description;
   final String customerEmail;
+  final String? initialSessionId;
+  final String? initialCheckoutUrl;
+  final Map<String, dynamic>? initialPaymentPayload;
 
   const StripePaymentScreen({
     super.key,
@@ -15,6 +19,9 @@ class StripePaymentScreen extends StatefulWidget {
     required this.amount,
     required this.description,
     required this.customerEmail,
+    this.initialSessionId,
+    this.initialCheckoutUrl,
+    this.initialPaymentPayload,
   });
 
   @override
@@ -30,11 +37,34 @@ class _StripePaymentScreenState extends State<StripePaymentScreen> {
   String? _sessionId;
   String? _error;
   Timer? _pollingTimer;
+  int _consecutiveErrors = 0;
+  static const int _maxConsecutiveErrors = 3;
 
   @override
   void initState() {
     super.initState();
-    _createCheckoutSession();
+    final initialPayload = widget.initialPaymentPayload ?? <String, dynamic>{};
+    final initialUrlFromPayload = initialPayload['checkout_url']?.toString();
+    final initialSessionFromPayload = initialPayload['session_id']?.toString();
+
+    if (widget.initialSessionId != null &&
+        widget.initialSessionId!.isNotEmpty &&
+        ((widget.initialCheckoutUrl != null &&
+                widget.initialCheckoutUrl!.isNotEmpty) ||
+            (initialUrlFromPayload != null &&
+                initialUrlFromPayload.isNotEmpty))) {
+      _sessionId = widget.initialSessionId ?? initialSessionFromPayload;
+      _checkoutUrl = widget.initialCheckoutUrl ?? initialUrlFromPayload;
+      if (_sessionId == null || _checkoutUrl == null) {
+        _createCheckoutSession();
+        return;
+      }
+      _isLoading = false;
+      _initWebView();
+      _startPolling();
+    } else {
+      _createCheckoutSession();
+    }
   }
 
   @override
@@ -58,14 +88,26 @@ class _StripePaymentScreenState extends State<StripePaymentScreen> {
       );
 
       if (result['success'] == true) {
+        _sessionId = result['session_id'];
+        _checkoutUrl = result['url'];
+
+        await OrderPaymentService.savePendingPayment(
+          pedidoId: widget.pedidoId,
+          paymentProvider: OrderPaymentService.providerCard,
+          paymentReference: _sessionId,
+          paymentUrl: _checkoutUrl,
+          paymentPayload: {
+            'session_id': _sessionId,
+            'checkout_url': _checkoutUrl,
+          },
+        );
+
+        // Inicializar WebView ANTES de sinalizar loading = false
+        _initWebView();
+
         setState(() {
-          _sessionId = result['session_id'];
-          _checkoutUrl = result['url'];
           _isLoading = false;
         });
-
-        // Inicializar WebView
-        _initWebView();
 
         // Iniciar polling de status
         _startPolling();
@@ -120,12 +162,50 @@ class _StripePaymentScreenState extends State<StripePaymentScreen> {
       try {
         final status = await _stripeService.checkSessionStatus(_sessionId!);
 
-        if (status['status'] == 'complete') {
+        if (status['status'] == 'error') {
+          _consecutiveErrors++;
+          debugPrint(
+            'Erro ao verificar status do pagamento ($_consecutiveErrors/$_maxConsecutiveErrors)',
+          );
+          if (_consecutiveErrors >= _maxConsecutiveErrors) {
+            timer.cancel();
+            debugPrint(
+              'Polling interrompido após $_maxConsecutiveErrors erros consecutivos',
+            );
+          }
+          return;
+        }
+
+        _consecutiveErrors = 0;
+
+        if (status['status'] == OrderPaymentService.paymentStatusPaid) {
           timer.cancel();
           _handlePaymentSuccess();
+        } else if (status['status'] ==
+            OrderPaymentService.paymentStatusUnpaid) {
+          await OrderPaymentService.savePendingPayment(
+            pedidoId: widget.pedidoId,
+            paymentProvider: OrderPaymentService.providerCard,
+            paymentReference: _sessionId,
+            paymentUrl: _checkoutUrl,
+            paymentPayload: {
+              'session_id': _sessionId,
+              'checkout_url': _checkoutUrl,
+            },
+            paymentStatus: OrderPaymentService.paymentStatusUnpaid,
+          );
         }
       } catch (e) {
-        debugPrint('Erro ao verificar status do pagamento: $e');
+        _consecutiveErrors++;
+        debugPrint(
+          'Erro ao verificar status do pagamento ($_consecutiveErrors/$_maxConsecutiveErrors): $e',
+        );
+        if (_consecutiveErrors >= _maxConsecutiveErrors) {
+          timer.cancel();
+          debugPrint(
+            'Polling interrompido após $_maxConsecutiveErrors erros consecutivos',
+          );
+        }
       }
     });
   }
@@ -133,6 +213,7 @@ class _StripePaymentScreenState extends State<StripePaymentScreen> {
   void _handlePaymentSuccess() async {
     if (_isPaid) return;
 
+    await OrderPaymentService.markOrderAsPaid(widget.pedidoId);
     setState(() {
       _isPaid = true;
     });
@@ -147,7 +228,9 @@ class _StripePaymentScreenState extends State<StripePaymentScreen> {
 
   void _handlePaymentCancel() {
     _pollingTimer?.cancel();
-    Navigator.of(context).pop({'success': false});
+    Navigator.of(
+      context,
+    ).pop({'success': false, 'pending': true, 'sessionId': _sessionId});
   }
 
   @override
@@ -157,7 +240,9 @@ class _StripePaymentScreenState extends State<StripePaymentScreen> {
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
           _pollingTimer?.cancel();
-          Navigator.of(context).pop({'success': false});
+          Navigator.of(
+            context,
+          ).pop({'success': false, 'pending': true, 'sessionId': _sessionId});
         }
       },
       child: Scaffold(

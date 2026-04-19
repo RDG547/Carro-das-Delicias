@@ -307,6 +307,19 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  void _cancelEditing() {
+    setState(() {
+      _isEditing = false;
+      _nameController.text = _userProfile?['name'] ?? '';
+      _phoneController.text = _userProfile?['phone'] ?? '';
+      _addressController.text = _userProfile?['address'] ?? '';
+      _neighborhoodController.text = _userProfile?['neighborhood'] ?? '';
+      _cityController.text = _userProfile?['city'] ?? '';
+      final cepValue = _userProfile?['cep'] ?? '';
+      _cepController.text = cepValue.isNotEmpty ? _formatCEP(cepValue) : '';
+    });
+  }
+
   void _goToHome() {
     debugPrint('🔙 Botão de voltar pressionado na tela de perfil');
 
@@ -671,8 +684,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildStatisticsTab() {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 0 : 100),
       child: Card(
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -681,9 +697,15 @@ class _ProfileScreenState extends State<ProfileScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Suas Estatísticas',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              const Row(
+                children: [
+                  Icon(Icons.bar_chart, size: 22),
+                  SizedBox(width: 8),
+                  Text(
+                    'Suas Estatísticas',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Row(
@@ -715,8 +737,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildPersonalInfoTab(User? user) {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 0 : 100),
       child: Card(
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -728,30 +753,29 @@ class _ProfileScreenState extends State<ProfileScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Informações Pessoais',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  const Row(
+                    children: [
+                      Icon(Icons.info_outline, size: 22),
+                      SizedBox(width: 8),
+                      Text(
+                        'Informações Pessoais',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                   IconButton(
                     icon: Icon(_isEditing ? Icons.close : Icons.edit),
                     onPressed: () {
+                      if (_isEditing) {
+                        _cancelEditing();
+                        return;
+                      }
+
                       setState(() {
-                        _isEditing = !_isEditing;
-                        if (!_isEditing) {
-                          // Restaurar valores originais ao cancelar
-                          _nameController.text = _userProfile?['name'] ?? '';
-                          _phoneController.text = _userProfile?['phone'] ?? '';
-                          _addressController.text =
-                              _userProfile?['address'] ?? '';
-                          _neighborhoodController.text =
-                              _userProfile?['neighborhood'] ?? '';
-                          _cityController.text = _userProfile?['city'] ?? '';
-                          // Formatar CEP ao restaurar valores
-                          final cepValue = _userProfile?['cep'] ?? '';
-                          _cepController.text = cepValue.isNotEmpty
-                              ? _formatCEP(cepValue)
-                              : '';
-                        }
+                        _isEditing = true;
                       });
                     },
                   ),
@@ -796,7 +820,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 child: AnimatedTextField(
                   controller: _neighborhoodController,
                   labelText: 'Bairro',
-                  prefixIcon: Icons.location_city,
+                  prefixIcon: Icons.holiday_village,
                 ),
               ),
               const SizedBox(height: 16),
@@ -844,6 +868,37 @@ class _ProfileScreenState extends State<ProfileScreen>
                     onPressed: _updateProfile,
                     backgroundColor: Colors.green,
                     textColor: Colors.white,
+                    icon: Icons.save,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: _cancelEditing,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.black87,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/icons/menu/cancel_button.png',
+                          width: 18,
+                          height: 18,
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Cancelar',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],

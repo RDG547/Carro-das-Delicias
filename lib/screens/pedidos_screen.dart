@@ -4,8 +4,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/base_screen.dart';
 import '../providers/admin_status_provider.dart';
 import '../widgets/app_menu.dart';
+import '../services/order_payment_service.dart';
 import '../services/cart_service.dart';
+import '../services/main_navigation_service.dart';
 import '../widgets/main_navigation_provider.dart';
+import 'abacatepay_payment_screen.dart';
+import 'stripe_payment_screen.dart';
 
 class PedidosScreen extends StatefulWidget {
   const PedidosScreen({super.key});
@@ -21,6 +25,10 @@ class _PedidosScreenState extends State<PedidosScreen> {
   int _realtimeRetryCount = 0;
   static const int _maxRealtimeRetries = 5;
   Timer? _retryTimer;
+
+  // Conjuntos para controle otimista de cancelamento/exclusão
+  final Set<int> _recentlyCancelledIds = {};
+  final Set<int> _recentlyDeletedIds = {};
 
   @override
   void initState() {
@@ -51,9 +59,6 @@ class _PedidosScreenState extends State<PedidosScreen> {
         .order('created_at', ascending: false)
         .listen(
           (List<Map<String, dynamic>> data) {
-            debugPrint(
-              '🔔 Pedidos atualizados em tempo real: ${data.length} pedidos',
-            );
             _realtimeRetryCount = 0; // Reset retry count on success
             _processarPedidosRealtime(data);
           },
@@ -87,14 +92,61 @@ class _PedidosScreenState extends State<PedidosScreen> {
       // Para cada pedido, buscar os itens relacionados
       List<Map<String, dynamic>> pedidosProcessados = [];
 
-      // Filtrar pedidos de teste
+      // Filtrar pedidos de teste e excluídos recentemente
       pedidosData = pedidosData
           .where((p) => p['status'] != 'teste' && p['is_teste'] != true)
           .toList();
 
+      // Remover pedidos que foram excluídos localmente
+      pedidosData = pedidosData.where((p) {
+        final id = p['id'] is int
+            ? p['id'] as int
+            : int.tryParse(p['id'].toString()) ?? 0;
+        return !_recentlyDeletedIds.contains(id);
+      }).toList();
+
       for (var pedido in pedidosData) {
-        // Buscar itens do pedido
-        final itensResponse = await Supabase.instance.client
+        final pedidoId = pedido['id'] is int
+            ? pedido['id'] as int
+            : int.tryParse(pedido['id'].toString()) ?? 0;
+
+        // Para pedidos cancelados recentemente, forçar status cancelado
+        // independente do que o realtime entregou
+        final isCancelledLocally = _recentlyCancelledIds.contains(pedidoId);
+        final status = pedido['status']?.toString() ?? '';
+
+        Map<String, dynamic> pedidoAtualizado;
+        if (isCancelledLocally) {
+          pedidoAtualizado = Map<String, dynamic>.from(pedido);
+          pedidoAtualizado['status'] = 'cancelado';
+          if (OrderPaymentService.requiresOnlinePayment(
+            pedido['metodo_pagamento']?.toString(),
+          )) {
+            pedidoAtualizado['payment_status'] =
+                OrderPaymentService.paymentStatusCancelled;
+          }
+          // Se o realtime já confirmou o cancelamento, remover do set
+          if (status == 'cancelado') {
+            _recentlyCancelledIds.remove(pedidoId);
+          }
+        } else if (status == 'cancelado' || status == 'rejeitado') {
+          pedidoAtualizado = Map<String, dynamic>.from(pedido);
+        } else {
+          pedidoAtualizado =
+              await OrderPaymentService.syncPaymentStatus(
+                Map<String, dynamic>.from(pedido),
+              ) ??
+              pedido;
+        }
+
+        pedidosProcessados.add(pedidoAtualizado);
+      }
+
+      // Buscar itens de TODOS os pedidos em uma única query
+      final allPedidoIds = pedidosProcessados.map((p) => p['id']).toList();
+      List<Map<String, dynamic>> allItensResponse = [];
+      if (allPedidoIds.isNotEmpty) {
+        final resp = await Supabase.instance.client
             .from('pedido_itens')
             .select('''
               *,
@@ -105,9 +157,22 @@ class _PedidosScreenState extends State<PedidosScreen> {
                 imagem_url
               )
             ''')
-            .eq('pedido_id', pedido['id']);
+            .inFilter('pedido_id', allPedidoIds);
+        allItensResponse = List<Map<String, dynamic>>.from(resp);
+      }
 
-        final itens = (itensResponse as List).map<Map<String, dynamic>>((item) {
+      // Agrupar itens por pedido_id
+      final itensPorPedido = <dynamic, List<Map<String, dynamic>>>{};
+      for (final item in allItensResponse) {
+        final pedidoId = item['pedido_id'];
+        itensPorPedido.putIfAbsent(pedidoId, () => []).add(item);
+      }
+
+      // Montar lista final com itens processados
+      final pedidosFinais = <Map<String, dynamic>>[];
+      for (final pedidoAtualizado in pedidosProcessados) {
+        final rawItens = itensPorPedido[pedidoAtualizado['id']] ?? [];
+        final itens = rawItens.map<Map<String, dynamic>>((item) {
           final produto = item['produtos'];
           final tamanhoRaw = item['tamanho_selecionado'];
           String? tamanhoFormatado;
@@ -138,25 +203,33 @@ class _PedidosScreenState extends State<PedidosScreen> {
           };
         }).toList();
 
-        pedidosProcessados.add({
-          'id': pedido['id'],
-          'data': pedido['created_at'],
-          'data_entrega': pedido['data_entrega'],
-          'status': pedido['status'],
-          'total': pedido['total'],
-          'cliente_nome': pedido['cliente_nome'],
-          'cliente_telefone': pedido['cliente_telefone'],
-          'endereco_completo': pedido['endereco_completo'],
-          'metodo_pagamento': pedido['metodo_pagamento'],
-          'valor_troco': pedido['valor_troco'],
-          'observacoes': pedido['observacoes'],
+        pedidosFinais.add({
+          'id': pedidoAtualizado['id'],
+          'data': pedidoAtualizado['created_at'],
+          'data_entrega': pedidoAtualizado['data_entrega'],
+          'status': pedidoAtualizado['status'],
+          'payment_status': pedidoAtualizado['payment_status'],
+          'payment_reference': pedidoAtualizado['payment_reference'],
+          'payment_url': pedidoAtualizado['payment_url'],
+          'payment_payload': pedidoAtualizado['payment_payload'],
+          'payment_expires_at': pedidoAtualizado['payment_expires_at'],
+          'total': pedidoAtualizado['total'],
+          'cliente_nome': pedidoAtualizado['cliente_nome'],
+          'cliente_telefone': pedidoAtualizado['cliente_telefone'],
+          'endereco_completo': pedidoAtualizado['endereco_completo'],
+          'bairro': pedidoAtualizado['bairro'],
+          'cidade': pedidoAtualizado['cidade'],
+          'cep': pedidoAtualizado['cep'],
+          'metodo_pagamento': pedidoAtualizado['metodo_pagamento'],
+          'valor_troco': pedidoAtualizado['valor_troco'],
+          'observacoes': pedidoAtualizado['observacoes'],
           'itens': itens,
         });
       }
 
       if (mounted) {
         setState(() {
-          _pedidos = pedidosProcessados;
+          _pedidos = pedidosFinais;
           _isLoading = false;
         });
       }
@@ -198,56 +271,98 @@ class _PedidosScreenState extends State<PedidosScreen> {
           .order('created_at', ascending: false);
 
       // Processar os dados dos pedidos
-      final pedidosProcessados = response.map<Map<String, dynamic>>((pedido) {
-        final itens = (pedido['pedido_itens'] as List)
-            .map<Map<String, dynamic>>((item) {
-              final produto = item['produtos'];
-              final tamanhoRaw = item['tamanho_selecionado'];
-              String? tamanhoFormatado;
+      final pedidosBrutos = List<Map<String, dynamic>>.from(response);
+      final pedidosSincronizados = <Map<String, dynamic>>[];
 
-              if (tamanhoRaw != null) {
-                try {
-                  // Se for um Map, extrair o nome
-                  if (tamanhoRaw is Map) {
-                    tamanhoFormatado = tamanhoRaw['nome']?.toString();
-                  } else {
-                    // Se for String, usar direto
-                    tamanhoFormatado = tamanhoRaw.toString();
+      for (final pedido in pedidosBrutos) {
+        final pedidoId = pedido['id'] is int
+            ? pedido['id'] as int
+            : int.tryParse(pedido['id'].toString()) ?? 0;
+
+        // Ignorar pedidos excluídos localmente
+        if (_recentlyDeletedIds.contains(pedidoId)) continue;
+
+        // Para pedidos cancelados localmente, forçar status sem sincronizar
+        if (_recentlyCancelledIds.contains(pedidoId)) {
+          final p = Map<String, dynamic>.from(pedido);
+          p['status'] = 'cancelado';
+          if (OrderPaymentService.requiresOnlinePayment(
+            pedido['metodo_pagamento']?.toString(),
+          )) {
+            p['payment_status'] = OrderPaymentService.paymentStatusCancelled;
+          }
+          pedidosSincronizados.add(p);
+          continue;
+        }
+
+        final pedidoAtualizado =
+            await OrderPaymentService.syncPaymentStatus(
+              Map<String, dynamic>.from(pedido),
+            ) ??
+            pedido;
+        pedidosSincronizados.add(Map<String, dynamic>.from(pedidoAtualizado));
+      }
+
+      final pedidosProcessados = pedidosSincronizados.map<Map<String, dynamic>>(
+        (pedido) {
+          final itens = ((pedido['pedido_itens'] as List?) ?? [])
+              .map<Map<String, dynamic>>((item) {
+                final produto = item['produtos'];
+                final tamanhoRaw = item['tamanho_selecionado'];
+                String? tamanhoFormatado;
+
+                if (tamanhoRaw != null) {
+                  try {
+                    // Se for um Map, extrair o nome
+                    if (tamanhoRaw is Map) {
+                      tamanhoFormatado = tamanhoRaw['nome']?.toString();
+                    } else {
+                      // Se for String, usar direto
+                      tamanhoFormatado = tamanhoRaw.toString();
+                    }
+                  } catch (e) {
+                    debugPrint('Erro ao processar tamanho: $e');
                   }
-                } catch (e) {
-                  debugPrint('Erro ao processar tamanho: $e');
                 }
-              }
 
-              return {
-                'produto_id':
-                    item['produto_id'], // IMPORTANTE: incluir produto_id
-                'nome': produto?['nome'] ?? 'Produto não encontrado',
-                'quantidade': item['quantidade'],
-                'preco': item['preco_unitario'],
-                'subtotal': item['subtotal'],
-                'observacoes': item['observacoes'],
-                'tamanho': tamanhoFormatado,
-                'imagem_url': produto?['imagem_url'],
-              };
-            })
-            .toList();
+                return {
+                  'produto_id':
+                      item['produto_id'], // IMPORTANTE: incluir produto_id
+                  'nome': produto?['nome'] ?? 'Produto não encontrado',
+                  'quantidade': item['quantidade'],
+                  'preco': item['preco_unitario'],
+                  'subtotal': item['subtotal'],
+                  'observacoes': item['observacoes'],
+                  'tamanho': tamanhoFormatado,
+                  'imagem_url': produto?['imagem_url'],
+                };
+              })
+              .toList();
 
-        return {
-          'id': pedido['id'],
-          'data': pedido['created_at'],
-          'data_entrega': pedido['data_entrega'],
-          'status': pedido['status'],
-          'total': pedido['total'],
-          'cliente_nome': pedido['cliente_nome'],
-          'cliente_telefone': pedido['cliente_telefone'],
-          'endereco_completo': pedido['endereco_completo'],
-          'metodo_pagamento': pedido['metodo_pagamento'],
-          'valor_troco': pedido['valor_troco'],
-          'observacoes': pedido['observacoes'],
-          'itens': itens,
-        };
-      }).toList();
+          return {
+            'id': pedido['id'],
+            'data': pedido['created_at'],
+            'data_entrega': pedido['data_entrega'],
+            'status': pedido['status'],
+            'payment_status': pedido['payment_status'],
+            'payment_reference': pedido['payment_reference'],
+            'payment_url': pedido['payment_url'],
+            'payment_payload': pedido['payment_payload'],
+            'payment_expires_at': pedido['payment_expires_at'],
+            'total': pedido['total'],
+            'cliente_nome': pedido['cliente_nome'],
+            'cliente_telefone': pedido['cliente_telefone'],
+            'endereco_completo': pedido['endereco_completo'],
+            'bairro': pedido['bairro'],
+            'cidade': pedido['cidade'],
+            'cep': pedido['cep'],
+            'metodo_pagamento': pedido['metodo_pagamento'],
+            'valor_troco': pedido['valor_troco'],
+            'observacoes': pedido['observacoes'],
+            'itens': itens,
+          };
+        },
+      ).toList();
 
       setState(() {
         _pedidos = pedidosProcessados;
@@ -296,7 +411,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   String _formatDate(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
+      final date = DateTime.parse(dateStr).toLocal();
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
       final year = date.year;
@@ -311,7 +426,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   String _formatDateShort(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
+      final date = DateTime.parse(dateStr).toLocal();
       const diasSemana = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
@@ -321,8 +436,24 @@ class _PedidosScreenState extends State<PedidosScreen> {
     }
   }
 
+  String _getDisplayStatusKey(Map<String, dynamic> pedido) {
+    final status = pedido['status']?.toString().toLowerCase() ?? '';
+    if (status == OrderPaymentService.statusPagamentoPendente) {
+      final paymentStatus = OrderPaymentService.resolvedPaymentStatus(pedido);
+      if (paymentStatus == OrderPaymentService.paymentStatusExpired) {
+        return 'pagamento_expirado';
+      }
+      return OrderPaymentService.statusPagamentoPendente;
+    }
+    return status;
+  }
+
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
+      case 'pagamento_pendente':
+        return Colors.amber[800]!;
+      case 'pagamento_expirado':
+        return Colors.deepOrange;
       case 'pendente':
         return Colors.orange;
       case 'pago':
@@ -346,6 +477,10 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   IconData _getStatusIcon(String status) {
     switch (status.toLowerCase()) {
+      case 'pagamento_pendente':
+        return Icons.payments_outlined;
+      case 'pagamento_expirado':
+        return Icons.qr_code_2_outlined;
       case 'pendente':
         return Icons.pending_actions;
       case 'pago':
@@ -369,6 +504,10 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   String _getStatusLabel(String status) {
     switch (status.toLowerCase()) {
+      case 'pagamento_pendente':
+        return 'Pagamento Pendente';
+      case 'pagamento_expirado':
+        return 'Pagamento Expirado';
       case 'pendente':
         return 'Pendente';
       case 'pago':
@@ -386,6 +525,85 @@ class _PedidosScreenState extends State<PedidosScreen> {
       default:
         return status;
     }
+  }
+
+  Future<void> _retomarPagamento(Map<String, dynamic> pedido) async {
+    final pedidoAtualizado =
+        await OrderPaymentService.syncPaymentStatus(
+          Map<String, dynamic>.from(pedido),
+        ) ??
+        pedido;
+
+    if (!mounted) return;
+
+    final statusAtual = _getDisplayStatusKey(pedidoAtualizado);
+    if (statusAtual == 'pago') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('O pagamento deste pedido ja foi confirmado.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      _loadPedidos();
+      return;
+    }
+
+    final metodoPagamento = pedidoAtualizado['metodo_pagamento']
+        ?.toString()
+        .toLowerCase();
+    Map<String, dynamic>? result;
+
+    if (metodoPagamento == 'pix') {
+      result = await Navigator.push<Map<String, dynamic>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AbacatePayPaymentScreen(
+            pedidoId: pedidoAtualizado['id'].toString(),
+            amount: (pedidoAtualizado['total'] as num?)?.toDouble() ?? 0,
+            description:
+                'Pedido #${pedidoAtualizado['id']} - Carro das Delícias',
+            initialChargeId: pedidoAtualizado['payment_reference']?.toString(),
+            initialPaymentPayload: OrderPaymentService.parsePaymentPayload(
+              pedidoAtualizado['payment_payload'],
+            ),
+            initialExpiresAt: pedidoAtualizado['payment_expires_at']
+                ?.toString(),
+          ),
+        ),
+      );
+    } else if (metodoPagamento == 'credito') {
+      result = await Navigator.push<Map<String, dynamic>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StripePaymentScreen(
+            pedidoId: pedidoAtualizado['id'].toString(),
+            amount: (pedidoAtualizado['total'] as num?)?.toDouble() ?? 0,
+            description:
+                'Pedido #${pedidoAtualizado['id']} - Carro das Delícias',
+            customerEmail:
+                Supabase.instance.client.auth.currentUser?.email ?? '',
+            initialSessionId: pedidoAtualizado['payment_reference']?.toString(),
+            initialCheckoutUrl: pedidoAtualizado['payment_url']?.toString(),
+            initialPaymentPayload: OrderPaymentService.parsePaymentPayload(
+              pedidoAtualizado['payment_payload'],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (!mounted) return;
+
+    if (result?['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pagamento confirmado com sucesso!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+
+    _loadPedidos();
   }
 
   void _goToHome() {
@@ -416,14 +634,16 @@ class _PedidosScreenState extends State<PedidosScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              TextButton(
+              TextButton.icon(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Não'),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Não'),
               ),
-              ElevatedButton(
+              ElevatedButton.icon(
                 onPressed: () => Navigator.of(context).pop(true),
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: const Text('Sim, Cancelar'),
+                icon: const Icon(Icons.cancel, color: Colors.white),
+                label: const Text('Sim, Cancelar'),
               ),
             ],
           ),
@@ -433,9 +653,44 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
     if (confirmed == true) {
       try {
+        final pedidoId = pedido['id'] is int
+            ? pedido['id'] as int
+            : int.parse(pedido['id'].toString());
+
+        // Atualização otimista: marcar como cancelado localmente ANTES do DB
+        _recentlyCancelledIds.add(pedidoId);
+        if (mounted) {
+          setState(() {
+            for (int i = 0; i < _pedidos.length; i++) {
+              final pid = _pedidos[i]['id'] is int
+                  ? _pedidos[i]['id'] as int
+                  : int.tryParse(_pedidos[i]['id'].toString()) ?? 0;
+              if (pid == pedidoId) {
+                _pedidos[i] = Map<String, dynamic>.from(_pedidos[i]);
+                _pedidos[i]['status'] = 'cancelado';
+                if (OrderPaymentService.requiresOnlinePayment(
+                  pedido['metodo_pagamento']?.toString(),
+                )) {
+                  _pedidos[i]['payment_status'] =
+                      OrderPaymentService.paymentStatusCancelled;
+                }
+                break;
+              }
+            }
+          });
+        }
+
+        final updateData = <String, dynamic>{'status': 'cancelado'};
+        if (OrderPaymentService.requiresOnlinePayment(
+          pedido['metodo_pagamento']?.toString(),
+        )) {
+          updateData['payment_status'] =
+              OrderPaymentService.paymentStatusCancelled;
+        }
+
         await Supabase.instance.client
             .from('pedidos')
-            .update({'status': 'cancelado'})
+            .update(updateData)
             .eq('id', pedido['id']);
 
         if (mounted) {
@@ -448,10 +703,13 @@ class _PedidosScreenState extends State<PedidosScreen> {
             ),
           );
         }
-
-        // Recarregar a lista de pedidos
-        _loadPedidos();
       } catch (e) {
+        // Reverter otimismo em caso de erro
+        final pedidoId = pedido['id'] is int
+            ? pedido['id'] as int
+            : int.tryParse(pedido['id'].toString()) ?? 0;
+        _recentlyCancelledIds.remove(pedidoId);
+        _loadPedidos();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -469,6 +727,91 @@ class _PedidosScreenState extends State<PedidosScreen> {
       context: context,
       builder: (context) => _DetalhesDialog(pedido: pedido),
     );
+  }
+
+  Future<void> _excluirPedido(Map<String, dynamic> pedido) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir Pedido', textAlign: TextAlign.center),
+        content: Text(
+          'Tem certeza que deseja excluir permanentemente o pedido #${pedido['id'].toString().padLeft(4, '0')}?\n\nEsta ação não pode ser desfeita.',
+          textAlign: TextAlign.center,
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              TextButton.icon(
+                onPressed: () => Navigator.of(context).pop(false),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('Não'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                icon: const Icon(Icons.delete_forever, color: Colors.white),
+                label: const Text('Sim, Excluir'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final pedidoId = pedido['id'] is int
+            ? pedido['id'] as int
+            : int.parse(pedido['id'].toString());
+
+        // Atualização otimista: remover da lista local ANTES do DB
+        _recentlyDeletedIds.add(pedidoId);
+        if (mounted) {
+          setState(() {
+            _pedidos.removeWhere((p) {
+              final pid = p['id'] is int
+                  ? p['id'] as int
+                  : int.tryParse(p['id'].toString()) ?? 0;
+              return pid == pedidoId;
+            });
+          });
+        }
+
+        // Usar RPC admin para deletar (bypassa RLS)
+        await Supabase.instance.client.rpc(
+          'delete_pedido_teste_admin',
+          params: {'p_pedido_id': pedidoId},
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Pedido #${pedido['id'].toString().padLeft(4, '0')} excluído com sucesso!',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        // Reverter otimismo em caso de erro
+        final pedidoId = pedido['id'] is int
+            ? pedido['id'] as int
+            : int.tryParse(pedido['id'].toString()) ?? 0;
+        _recentlyDeletedIds.remove(pedidoId);
+        _loadPedidos();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao excluir pedido: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   Future<void> _refazerPedido(Map<String, dynamic> pedido) async {
@@ -567,9 +910,27 @@ class _PedidosScreenState extends State<PedidosScreen> {
         if (itensAdicionados > 0) {
           // Navegar direto para a tela de checkout
           final provider = MainNavigationProvider.of(context);
-          if (provider?.navigateToPageDirect != null) {
+          if (MainNavigationService.navigateToCart()) {
+            Future.delayed(const Duration(milliseconds: 300), () {
+              if (mounted) {
+                Navigator.pushNamed(context, '/checkout');
+
+                // Mostrar mensagem de sucesso
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '$itensAdicionados ${itensAdicionados == 1 ? 'item adicionado' : 'itens adicionados'} ao carrinho!',
+                    ),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            });
+          } else if (provider?.navigateToPageDirect != null) {
             // Primeiro vai para o carrinho
-            provider!.navigateToPageDirect!(2); // Índice 2 = Carrinho
+            provider!.navigateToPageDirect!(
+              MainNavigationService.cartPageIndex,
+            );
 
             // Depois navega para checkout
             Future.delayed(const Duration(milliseconds: 300), () {
@@ -680,8 +1041,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
                 itemCount: _pedidos.length,
                 itemBuilder: (context, index) {
                   final pedido = _pedidos[index];
-                  final statusColor = _getStatusColor(pedido['status']);
-                  final statusIcon = _getStatusIcon(pedido['status']);
+                  final displayStatus = _getDisplayStatusKey(pedido);
+                  final statusColor = _getStatusColor(displayStatus);
+                  final statusIcon = _getStatusIcon(displayStatus);
 
                   return Card(
                     margin: const EdgeInsets.only(bottom: 16),
@@ -759,7 +1121,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
-                                  _getStatusLabel(pedido['status']),
+                                  _getStatusLabel(displayStatus),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,
@@ -964,8 +1326,46 @@ class _PedidosScreenState extends State<PedidosScreen> {
                               ],
                             ),
 
+                            if (OrderPaymentService.canResumePayment(
+                              pedido,
+                            )) ...[
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _retomarPagamento(pedido),
+                                  icon: const Icon(
+                                    Icons.payments_outlined,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    OrderPaymentService.resolvedPaymentStatus(
+                                              pedido,
+                                            ) ==
+                                            OrderPaymentService
+                                                .paymentStatusExpired
+                                        ? 'Gerar Novo Pagamento'
+                                        : 'Retomar Pagamento',
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+
                             // Botão de cancelar (apenas para pendentes/confirmados/pago)
                             if (pedido['status'] == 'pendente' ||
+                                pedido['status'] ==
+                                    OrderPaymentService
+                                        .statusPagamentoPendente ||
                                 pedido['status'] == 'confirmado' ||
                                 pedido['status'] == 'pago') ...[
                               const SizedBox(height: 8),
@@ -978,6 +1378,33 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.red,
                                     foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+
+                            // Botão de excluir (apenas para admin)
+                            if (isAdmin) ...[
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () => _excluirPedido(pedido),
+                                  icon: const Icon(
+                                    Icons.delete_forever,
+                                    size: 18,
+                                    color: Colors.red,
+                                  ),
+                                  label: const Text('Excluir Pedido'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.red,
+                                    side: const BorderSide(color: Colors.red),
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 12,
                                     ),
@@ -1066,7 +1493,11 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
           (List<Map<String, dynamic>> data) {
             if (data.isNotEmpty && mounted) {
               setState(() {
-                _pedidoAtual = {..._pedidoAtual, 'status': data[0]['status']};
+                _pedidoAtual = {
+                  ..._pedidoAtual,
+                  'status': data[0]['status'],
+                  'payment_status': data[0]['payment_status'],
+                };
               });
             }
           },
@@ -1110,7 +1541,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
   String _formatDate(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
+      final date = DateTime.parse(dateStr).toLocal();
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
       final year = date.year;
@@ -1125,7 +1556,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
   String _formatDateShort(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
+      final date = DateTime.parse(dateStr).toLocal();
       const diasSemana = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
       final day = date.day.toString().padLeft(2, '0');
       final month = date.month.toString().padLeft(2, '0');
@@ -1142,8 +1573,24 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     return 'R\$ 0,00';
   }
 
+  String _resolveStatusKey(Map<String, dynamic> pedido) {
+    final status = pedido['status']?.toString().toLowerCase() ?? '';
+    if (status == OrderPaymentService.statusPagamentoPendente) {
+      final paymentStatus = OrderPaymentService.resolvedPaymentStatus(pedido);
+      if (paymentStatus == OrderPaymentService.paymentStatusExpired) {
+        return 'pagamento_expirado';
+      }
+      return OrderPaymentService.statusPagamentoPendente;
+    }
+    return status;
+  }
+
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
+      case 'pagamento_pendente':
+        return Colors.amber[800]!;
+      case 'pagamento_expirado':
+        return Colors.deepOrange;
       case 'pendente':
         return Colors.orange;
       case 'pago':
@@ -1165,6 +1612,10 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
   IconData _getStatusIcon(String status) {
     switch (status.toLowerCase()) {
+      case 'pagamento_pendente':
+        return Icons.payments_outlined;
+      case 'pagamento_expirado':
+        return Icons.qr_code_2_outlined;
       case 'pendente':
         return Icons.pending_actions;
       case 'pago':
@@ -1186,6 +1637,10 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
   String _getStatusLabel(String status) {
     switch (status.toLowerCase()) {
+      case 'pagamento_pendente':
+        return 'Pagamento Pendente';
+      case 'pagamento_expirado':
+        return 'Pagamento Expirado';
       case 'pendente':
         return 'Pendente';
       case 'pago':
@@ -1211,6 +1666,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     String value,
     Color color, {
     String? imageUrl,
+    Widget? iconWidget,
   }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1221,15 +1677,17 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
             color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: imageUrl != null
-              ? Image.network(
-                  imageUrl,
-                  width: 20,
-                  height: 20,
-                  errorBuilder: (context, error, stackTrace) =>
-                      Icon(icon, color: color, size: 20),
-                )
-              : Icon(icon, color: color, size: 20),
+          child:
+              iconWidget ??
+              (imageUrl != null
+                  ? Image.network(
+                      imageUrl,
+                      width: 20,
+                      height: 20,
+                      errorBuilder: (context, error, stackTrace) =>
+                          Icon(icon, color: color, size: 20),
+                    )
+                  : Icon(icon, color: color, size: 20)),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -1275,16 +1733,30 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     }
   }
 
-  String? _getMetodoPagamentoIconUrl(String metodo) {
+  Widget? _getPaymentMethodIconWidget(String metodo, {double size = 20}) {
     switch (metodo.toLowerCase()) {
       case 'pix':
-        return 'https://img.icons8.com/color/48/pix.png';
+        return Image.network(
+          'https://img.icons8.com/color/48/pix.png',
+          width: size,
+          height: size,
+          errorBuilder: (context, error, stackTrace) =>
+              Icon(Icons.payment, size: size),
+        );
       case 'credito':
       case 'cartao_credito':
       case 'cartao_debito':
-        return 'https://img.icons8.com/color/48/bank-card-back-side.png';
+        return Image.asset(
+          'assets/icons/menu/credit_card.png',
+          width: size,
+          height: size,
+        );
       case 'dinheiro':
-        return 'https://img.icons8.com/material/24/wallet--v1.png';
+        return Image.asset(
+          'assets/icons/menu/money.png',
+          width: size,
+          height: size,
+        );
       default:
         return null;
     }
@@ -1292,12 +1764,14 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final displayStatus = _resolveStatusKey(_pedidoAtual);
+
     return AlertDialog(
       title: Row(
         children: [
           Icon(
-            _getStatusIcon(_pedidoAtual['status']),
-            color: _getStatusColor(_pedidoAtual['status']),
+            _getStatusIcon(displayStatus),
+            color: _getStatusColor(displayStatus),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1335,10 +1809,10 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
               // Status atual (atualizado em tempo real)
               _buildDetailRow(
-                _getStatusIcon(_pedidoAtual['status']),
+                _getStatusIcon(displayStatus),
                 'Status Atual',
-                _getStatusLabel(_pedidoAtual['status']),
-                _getStatusColor(_pedidoAtual['status']),
+                _getStatusLabel(displayStatus),
+                _getStatusColor(displayStatus),
               ),
               const SizedBox(height: 12),
 
@@ -1377,7 +1851,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                   widget.pedido['metodo_pagamento'] ?? 'dinheiro',
                 ),
                 Colors.teal,
-                imageUrl: _getMetodoPagamentoIconUrl(
+                iconWidget: _getPaymentMethodIconWidget(
                   widget.pedido['metodo_pagamento'] ?? 'dinheiro',
                 ),
               ),
@@ -1681,10 +2155,19 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
           ),
         ),
       ),
+      actionsAlignment: MainAxisAlignment.center,
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Fechar'),
+        Center(
+          child: ElevatedButton.icon(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close, size: 18),
+            label: const Text('Fechar'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+          ),
         ),
       ],
     );
