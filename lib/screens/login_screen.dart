@@ -15,18 +15,42 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _emailOrPhoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _loadingManager = LoadingManager();
+  bool _keyboardVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _keyboardVisible = _isKeyboardVisibleFromWindow();
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _emailOrPhoneController.dispose();
     _passwordController.dispose();
     _loadingManager.dispose();
     super.dispose();
+  }
+
+  bool _isKeyboardVisibleFromWindow() {
+    return WidgetsBinding.instance.platformDispatcher.views.any(
+      (view) => view.viewInsets.bottom > 0,
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    final keyboardVisible = _isKeyboardVisibleFromWindow();
+    if (keyboardVisible == _keyboardVisible || !mounted) return;
+    setState(() {
+      _keyboardVisible = keyboardVisible;
+    });
   }
 
   bool _isValidEmail(String value) {
@@ -201,9 +225,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenWidth = mediaQuery.size.width;
-    final keyboardVisible = mediaQuery.viewInsets.bottom > 0;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final keyboardVisible = _keyboardVisible;
     final isCompact = screenWidth < 380;
     final horizontalPadding = screenWidth < 360 ? 16.0 : 24.0;
 

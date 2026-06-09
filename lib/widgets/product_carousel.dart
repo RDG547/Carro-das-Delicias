@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import '../utils/product_variant_utils.dart';
+import 'flavor_count_badge.dart';
 
 /// Constrói o widget do ícone de categoria (suporta SVG asset, PNG asset, URL de imagem e emoji)
 Widget _buildCategoryIconWidget(String? icone, {double size = 24}) {
@@ -7,17 +9,9 @@ Widget _buildCategoryIconWidget(String? icone, {double size = 24}) {
   if (icone.startsWith('asset:')) {
     final assetPath = icone.replaceFirst('asset:', '');
     if (assetPath.endsWith('.svg')) {
-      return SvgPicture.asset(
-        assetPath,
-        width: size,
-        height: size,
-      );
+      return SvgPicture.asset(assetPath, width: size, height: size);
     } else {
-      return Image.asset(
-        assetPath,
-        width: size,
-        height: size,
-      );
+      return Image.asset(assetPath, width: size, height: size);
     }
   } else if (icone.startsWith('http')) {
     return Image.network(
@@ -101,6 +95,10 @@ class _ProductCarouselState extends State<ProductCarousel> {
               itemCount: widget.items.length,
               itemBuilder: (context, index) {
                 final item = widget.items[index];
+                final itemImages = ProductVariantUtils.productImages(item);
+                final flavorCount = ProductVariantUtils.extractFlavors(
+                  item['sabores'],
+                ).length;
                 return RepaintBoundary(
                   child: InkWell(
                     borderRadius: BorderRadius.circular(16),
@@ -151,17 +149,13 @@ class _ProductCarouselState extends State<ProductCarousel> {
                                         color: Colors.orange[200]!,
                                       ),
                                     ),
-                                    child:
-                                        item['imagem_url'] != null &&
-                                            item['imagem_url']
-                                                .toString()
-                                                .isNotEmpty
+                                    child: itemImages.isNotEmpty
                                         ? ClipRRect(
                                             borderRadius: BorderRadius.circular(
                                               12,
                                             ),
                                             child: Image.network(
-                                              item['imagem_url'],
+                                              itemImages.first,
                                               fit: BoxFit.cover,
                                               cacheWidth: 100,
                                               cacheHeight: 100,
@@ -220,8 +214,22 @@ class _ProductCarouselState extends State<ProductCarousel> {
 
                                   // Nome do produto
                                   Expanded(
-                                    child: Text(
-                                      item['nome'] ?? 'Produto sem nome',
+                                    child: Text.rich(
+                                      TextSpan(
+                                        children: [
+                                          TextSpan(
+                                            text:
+                                                item['nome'] ??
+                                                'Produto sem nome',
+                                          ),
+                                          if (flavorCount > 1)
+                                            flavorCountBadgeSpan(
+                                              flavorCount,
+                                              fontSize: 10,
+                                              iconSize: 12,
+                                            ),
+                                        ],
+                                      ),
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 16,

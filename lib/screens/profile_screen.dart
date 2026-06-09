@@ -20,7 +20,7 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
@@ -50,6 +50,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _isEditing = false;
   Map<String, dynamic>? _userProfile;
   bool _isAdmin = false;
+  bool _keyboardVisible = false;
 
   // Campos para upload de foto
   File? _selectedImage;
@@ -67,6 +68,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _keyboardVisible = _isKeyboardVisibleFromWindow();
     _tabController = TabController(length: 2, vsync: this);
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 300),
@@ -123,6 +126,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     _fadeController.dispose();
     _nameController.dispose();
@@ -132,6 +136,21 @@ class _ProfileScreenState extends State<ProfileScreen>
     _cityController.dispose();
     _cepController.dispose();
     super.dispose();
+  }
+
+  bool _isKeyboardVisibleFromWindow() {
+    return WidgetsBinding.instance.platformDispatcher.views.any(
+      (view) => view.viewInsets.bottom > 0,
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    final keyboardVisible = _isKeyboardVisibleFromWindow();
+    if (keyboardVisible == _keyboardVisible || !mounted) return;
+    setState(() {
+      _keyboardVisible = keyboardVisible;
+    });
   }
 
   Future<void> _loadUserProfile() async {
@@ -684,7 +703,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildStatisticsTab() {
-    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+    final keyboardVisible = _keyboardVisible;
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -737,7 +756,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildPersonalInfoTab(User? user) {
-    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+    final keyboardVisible = _keyboardVisible;
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,

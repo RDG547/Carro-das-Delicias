@@ -14,14 +14,17 @@ class CartScreen extends StatefulWidget {
   State<CartScreen> createState() => _CartScreenState();
 }
 
-class _CartScreenState extends State<CartScreen> {
+class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
   final _cartService = CartService();
   final Map<String, TextEditingController> _observationControllers = {};
   bool _isAdmin = false;
+  bool _keyboardVisible = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _keyboardVisible = _isKeyboardVisibleFromWindow();
     _cartService.addListener(_onCartChanged);
     _initializeControllers();
     // Atrasa a verificação para depois do primeiro build
@@ -66,14 +69,30 @@ class _CartScreenState extends State<CartScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _cartService.removeListener(_onCartChanged);
     _disposeControllers();
     super.dispose();
   }
 
+  bool _isKeyboardVisibleFromWindow() {
+    return WidgetsBinding.instance.platformDispatcher.views.any(
+      (view) => view.viewInsets.bottom > 0,
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    final keyboardVisible = _isKeyboardVisibleFromWindow();
+    if (keyboardVisible == _keyboardVisible || !mounted) return;
+    setState(() {
+      _keyboardVisible = keyboardVisible;
+    });
+  }
+
   void _initializeControllers() {
     for (final item in _cartService.items) {
-      _observationControllers[item.id] = TextEditingController(
+      _observationControllers[item.cartKey] = TextEditingController(
         text: item.observacoes ?? '',
       );
     }
@@ -90,9 +109,11 @@ class _CartScreenState extends State<CartScreen> {
     if (mounted) {
       setState(() {
         // Remover controladores de itens que não existem mais
-        final currentIds = _cartService.items.map((item) => item.id).toSet();
-        _observationControllers.removeWhere((id, controller) {
-          if (!currentIds.contains(id)) {
+        final currentKeys = _cartService.items
+            .map((item) => item.cartKey)
+            .toSet();
+        _observationControllers.removeWhere((key, controller) {
+          if (!currentKeys.contains(key)) {
             controller.dispose();
             return true;
           }
@@ -101,8 +122,8 @@ class _CartScreenState extends State<CartScreen> {
 
         // Adicionar controladores para novos itens
         for (final item in _cartService.items) {
-          if (!_observationControllers.containsKey(item.id)) {
-            _observationControllers[item.id] = TextEditingController(
+          if (!_observationControllers.containsKey(item.cartKey)) {
+            _observationControllers[item.cartKey] = TextEditingController(
               text: item.observacoes ?? '',
             );
           }
@@ -113,11 +134,9 @@ class _CartScreenState extends State<CartScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
-
     return Scaffold(
       backgroundColor: Colors.white,
-      resizeToAvoidBottomInset: true,
+      resizeToAvoidBottomInset: false,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(48),
         child: Container(
@@ -197,7 +216,7 @@ class _CartScreenState extends State<CartScreen> {
               children: [
                 _buildCartContent(),
                 // Botão de finalizar fixo - fica atrás da navbar
-                if (!keyboardVisible)
+                if (!_keyboardVisible)
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -263,8 +282,6 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Widget _buildCartContent() {
-    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
-
     return Column(
       children: [
         // Header com resumo
@@ -300,7 +317,7 @@ class _CartScreenState extends State<CartScreen> {
               left: 16,
               right: 16,
               top: 16,
-              bottom: keyboardVisible
+              bottom: _keyboardVisible
                   ? 0
                   : 220, // Espaço para o botão de finalizar (120px) + navbar (80px) + margem (20px)
             ),
@@ -316,7 +333,7 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Widget _buildCartItem(CartItem item, int index) {
-    final controller = _observationControllers[item.id];
+    final controller = _observationControllers[item.cartKey];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -389,22 +406,15 @@ class _CartScreenState extends State<CartScreen> {
                       ],
                       if (item.tamanhoSelecionado != null) ...[
                         const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'Tamanho: ${_formatTamanho(item.tamanhoSelecionado!)}',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                        _buildOptionChip(
+                          'Tamanho: ${_formatOption(item.tamanhoSelecionado!)}',
+                        ),
+                      ],
+                      if (item.saborSelecionado != null) ...[
+                        const SizedBox(height: 4),
+                        _buildOptionChip(
+                          'Sabor: ${_formatOption(item.saborSelecionado!)}',
+                          color: Colors.orange,
                         ),
                       ],
                       const SizedBox(height: 8),
@@ -483,8 +493,10 @@ class _CartScreenState extends State<CartScreen> {
             children: [
               _buildQuantityButton(
                 icon: Icons.remove,
-                onPressed: () =>
-                    _cartService.updateQuantity(item.id, item.quantidade - 1),
+                onPressed: () => _cartService.updateQuantity(
+                  item.cartKey,
+                  item.quantidade - 1,
+                ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -501,8 +513,10 @@ class _CartScreenState extends State<CartScreen> {
               ),
               _buildQuantityButton(
                 icon: Icons.add,
-                onPressed: () =>
-                    _cartService.updateQuantity(item.id, item.quantidade + 1),
+                onPressed: () => _cartService.updateQuantity(
+                  item.cartKey,
+                  item.quantidade + 1,
+                ),
               ),
             ],
           ),
@@ -571,7 +585,7 @@ class _CartScreenState extends State<CartScreen> {
             maxLines: 2,
             onChanged: (value) {
               _cartService.updateObservations(
-                item.id,
+                item.cartKey,
                 value.trim().isEmpty ? null : value.trim(),
               );
             },
@@ -715,15 +729,33 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  String _formatTamanho(String tamanhoJson) {
+  Widget _buildOptionChip(String text, {Color color = Colors.black}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color == Colors.black ? Colors.black87 : color,
+        ),
+      ),
+    );
+  }
+
+  String _formatOption(String optionJson) {
     try {
-      final tamanho = json.decode(tamanhoJson);
-      if (tamanho is Map<String, dynamic>) {
-        return tamanho['nome'] ?? tamanhoJson;
+      final option = json.decode(optionJson);
+      if (option is Map<String, dynamic>) {
+        return option['nome'] ?? option['name'] ?? optionJson;
       }
-      return tamanhoJson;
+      return optionJson;
     } catch (e) {
-      return tamanhoJson;
+      return optionJson;
     }
   }
 }

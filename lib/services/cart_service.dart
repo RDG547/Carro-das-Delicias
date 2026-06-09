@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
+import '../utils/product_variant_utils.dart';
+
 class CartItem {
   final String id;
   final String nome;
@@ -13,6 +15,7 @@ class CartItem {
   String? observacoes;
   final bool isBuyNow; // Identifica se foi adicionado via "Comprar"
   final String? tamanhoSelecionado; // Tamanho selecionado (ex: "P", "M", "G")
+  final String? saborSelecionado; // Sabor selecionado (ex: "Chocolate")
 
   CartItem({
     required this.id,
@@ -25,9 +28,31 @@ class CartItem {
     this.observacoes,
     this.isBuyNow = false,
     this.tamanhoSelecionado,
+    this.saborSelecionado,
   });
 
   double get subtotal => preco * quantidade;
+
+  String get cartKey => buildCartKey(
+    id,
+    tamanhoSelecionado: tamanhoSelecionado,
+    saborSelecionado: saborSelecionado,
+    isBuyNow: isBuyNow,
+  );
+
+  static String buildCartKey(
+    String productId, {
+    String? tamanhoSelecionado,
+    String? saborSelecionado,
+    bool isBuyNow = false,
+  }) {
+    return [
+      productId,
+      tamanhoSelecionado ?? '',
+      saborSelecionado ?? '',
+      isBuyNow ? 'buyNow' : 'cart',
+    ].join('|');
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -41,6 +66,7 @@ class CartItem {
       'observacoes': observacoes,
       'isBuyNow': isBuyNow,
       'tamanhoSelecionado': tamanhoSelecionado,
+      'saborSelecionado': saborSelecionado,
     };
   }
 
@@ -48,7 +74,7 @@ class CartItem {
     return CartItem(
       id: json['id'],
       nome: json['nome'],
-      preco: json['preco']?.toDouble() ?? 0.0,
+      preco: ProductVariantUtils.toDouble(json['preco']) ?? 0.0,
       imagemUrl: json['imagemUrl'],
       categoriaId: json['categoriaId'],
       categoriaNome: json['categoriaNome'],
@@ -56,6 +82,7 @@ class CartItem {
       observacoes: json['observacoes'],
       isBuyNow: json['isBuyNow'] ?? false,
       tamanhoSelecionado: json['tamanhoSelecionado'],
+      saborSelecionado: json['saborSelecionado'],
     );
   }
 }
@@ -130,16 +157,26 @@ class CartService extends ChangeNotifier {
       }
     }
 
+    String? saborSelecionadoString;
+    if (produto['sabor_selecionado'] != null) {
+      if (produto['sabor_selecionado'] is Map) {
+        saborSelecionadoString = json.encode(produto['sabor_selecionado']);
+      } else {
+        saborSelecionadoString = produto['sabor_selecionado'].toString();
+      }
+    }
+
     // Se for "Comprar Agora", remover itens anteriores marcados como buyNow
     if (isBuyNow) {
       _items.removeWhere((item) => item.isBuyNow);
     }
 
-    // Verificar se o produto já existe no carrinho (considerando tamanho e não sendo buyNow)
+    // Verificar se o produto já existe no carrinho (considerando tamanho/sabor e não sendo buyNow)
     final existingIndex = _items.indexWhere(
       (item) =>
           item.id == productId &&
           item.tamanhoSelecionado == tamanhoSelecionadoString &&
+          item.saborSelecionado == saborSelecionadoString &&
           !item.isBuyNow,
     );
 
@@ -155,7 +192,7 @@ class CartService extends ChangeNotifier {
       final cartItem = CartItem(
         id: productId,
         nome: produto['nome'] ?? 'Produto sem nome',
-        preco: (produto['preco'] ?? 0.0).toDouble(),
+        preco: ProductVariantUtils.toDouble(produto['preco']) ?? 0.0,
         imagemUrl:
             produto['imagem_url'] ??
             (produto['imagens'] is List &&
@@ -168,6 +205,7 @@ class CartService extends ChangeNotifier {
         observacoes: observacoes,
         isBuyNow: isBuyNow,
         tamanhoSelecionado: tamanhoSelecionadoString,
+        saborSelecionado: saborSelecionadoString,
       );
       _items.add(cartItem);
     }
@@ -177,20 +215,20 @@ class CartService extends ChangeNotifier {
   }
 
   // Remover item do carrinho
-  Future<void> removeItem(String productId) async {
-    _items.removeWhere((item) => item.id == productId);
+  Future<void> removeItem(String itemKey) async {
+    _items.removeWhere((item) => item.cartKey == itemKey);
     await _saveCart();
     notifyListeners();
   }
 
   // Atualizar quantidade de um item
-  Future<void> updateQuantity(String productId, int newQuantity) async {
+  Future<void> updateQuantity(String itemKey, int newQuantity) async {
     if (newQuantity <= 0) {
-      await removeItem(productId);
+      await removeItem(itemKey);
       return;
     }
 
-    final index = _items.indexWhere((item) => item.id == productId);
+    final index = _items.indexWhere((item) => item.cartKey == itemKey);
     if (index >= 0) {
       _items[index].quantidade = newQuantity;
       await _saveCart();
@@ -199,8 +237,8 @@ class CartService extends ChangeNotifier {
   }
 
   // Atualizar observações de um item
-  Future<void> updateObservations(String productId, String? observacoes) async {
-    final index = _items.indexWhere((item) => item.id == productId);
+  Future<void> updateObservations(String itemKey, String? observacoes) async {
+    final index = _items.indexWhere((item) => item.cartKey == itemKey);
     if (index >= 0) {
       _items[index].observacoes = observacoes;
       await _saveCart();

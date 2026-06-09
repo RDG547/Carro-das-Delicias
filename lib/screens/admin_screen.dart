@@ -1,17 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:async';
-import '../widgets/base_screen.dart';
-import '../widgets/form_dialogs.dart';
-import '../widgets/edit_product_dialog.dart';
-import '../widgets/app_menu.dart';
-import '../widgets/main_navigation_provider.dart';
-import '../utils/constants.dart';
-import '../services/notification_service.dart';
+
 import '../services/app_settings_service.dart';
 import '../services/catalog_sync_service.dart';
+import '../services/image_service.dart';
 import '../services/location_tracking_service.dart';
+import '../services/notification_service.dart';
+import '../utils/constants.dart';
+import '../utils/realtime_auth_utils.dart';
+import '../widgets/app_menu.dart';
+import '../widgets/base_screen.dart';
 import '../widgets/category_icon_widget.dart';
+import '../widgets/edit_product_dialog.dart';
+import '../widgets/form_dialogs.dart';
+import '../widgets/main_navigation_provider.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -33,18 +37,16 @@ class _AdminScreenState extends State<AdminScreen>
   bool _isLoading = false;
   final ValueNotifier<String> _userFilterNotifier = ValueNotifier('todos');
 
-  // Subscription para escutar pedidos em tempo real
   StreamSubscription<List<Map<String, dynamic>>>? _pedidosSubscription;
   RealtimeChannel? _catalogChannel;
   Timer? _catalogRefreshDebounce;
   late final VoidCallback _catalogSyncListener;
+  bool _isRecoveringPedidosRealtimeAuth = false;
 
-  // Controladores de busca
   final TextEditingController _searchCategoryController =
       TextEditingController();
   List<Map<String, dynamic>> _filteredCategorias = [];
 
-  // Rastreamento de localização
   final LocationTrackingService _locationService = LocationTrackingService();
   final ValueNotifier<bool> _isTrackingLocationNotifier = ValueNotifier(false);
 
@@ -67,12 +69,11 @@ class _AdminScreenState extends State<AdminScreen>
       _scheduleCatalogRefresh();
     };
     CatalogSyncService.instance.addListener(_catalogSyncListener);
-    _setupRealtimeSubscription(); // Adicionar listener em tempo real
-    _checkTrackingStatus(); // Verificar estado do rastreamento
+    _setupRealtimeSubscription();
+    _checkTrackingStatus();
     _fadeController.forward();
   }
 
-  // Verifica o estado atual do rastreamento ao iniciar
   Future<void> _checkTrackingStatus() async {
     try {
       final userId = Supabase.instance.client.auth.currentUser?.id;
@@ -102,13 +103,10 @@ class _AdminScreenState extends State<AdminScreen>
             '🔄 _checkTrackingStatus: was=$wasTracking, now=$isOnline, service=${_locationService.isTracking}',
           );
 
-          // Se estava online e o serviço não está rastreando, reinicia
           if (isOnline && !_locationService.isTracking) {
             debugPrint('▶️ _checkTrackingStatus: Iniciando rastreamento...');
             await _locationService.startTracking();
-          }
-          // Se estava offline mas o serviço está rastreando, para
-          else if (!isOnline && _locationService.isTracking) {
+          } else if (!isOnline && _locationService.isTracking) {
             debugPrint('⏸️ _checkTrackingStatus: Parando rastreamento...');
             await _locationService.stopTracking();
           }
@@ -127,20 +125,17 @@ class _AdminScreenState extends State<AdminScreen>
     _tabController.dispose();
     _fadeController.dispose();
     _searchCategoryController.dispose();
-    _pedidosSubscription?.cancel(); // Cancelar subscription ao sair
+    _pedidosSubscription?.cancel();
     _catalogRefreshDebounce?.cancel();
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
     if (_catalogChannel != null) {
       Supabase.instance.client.removeChannel(_catalogChannel!);
     }
-    // NÃO chamar _locationService.dispose() pois o serviço deve continuar rodando
-    // O rastreamento só deve parar quando o admin desativar manualmente via toggle
-    _isTrackingLocationNotifier.dispose(); // Limpar notifier
+    _isTrackingLocationNotifier.dispose();
     _userFilterNotifier.dispose();
     super.dispose();
   }
 
-  // Toggle para rastreamento de localização
   Future<void> _toggleLocationTracking() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     try {
@@ -189,20 +184,16 @@ class _AdminScreenState extends State<AdminScreen>
     setState(() => _isLoading = true);
 
     try {
-      // Carregar produtos
       final produtosResponse = await Supabase.instance.client
           .from('produtos')
-          .select('*, categorias!categoria_id(nome)')
+          .select('*, categorias!categoria_id(nome, icone)')
           .order('created_at', ascending: false);
 
-      // Carregar categorias
       final categoriasResponse = await Supabase.instance.client
           .from('categorias')
           .select()
           .order('ordem', ascending: true);
 
-      // Carregar usuários
-      // Tentar via RPC primeiro (bypass RLS), senão fallback para select normal
       List<dynamic> usuariosResponse = [];
       try {
         debugPrint('👥 Tentando carregar usuários via RPC get_all_users...');
@@ -215,13 +206,13 @@ class _AdminScreenState extends State<AdminScreen>
         debugPrint('⚠️ RPC get_all_users falhou: $rpcError');
         final rpcErrorStr = rpcError.toString().toLowerCase();
 
-        // Se a função não existe, não tentar outros métodos que também vão falhar
         if (rpcErrorStr.contains('function') &&
             rpcErrorStr.contains('does not exist')) {
-          debugPrint('⚠️ Função get_all_users não existe no Supabase');
+          debugPrint(
+            '⚠️ Função get_all_users não existe, tentando auth.admin.listUsers...',
+          );
         }
 
-        // Fallback: tentar carregar via auth admin (apenas se for admin)
         try {
           debugPrint('👥 Tentando carregar via auth.admin.listUsers...');
           final authUsers = await Supabase.instance.client.auth.admin
@@ -294,8 +285,16 @@ class _AdminScreenState extends State<AdminScreen>
               usuarioMap['name'] ??
               'Usuário',
           'email': usuarioMap['email'] ?? profile?['email'] ?? '',
+          'phone': usuarioMap['phone'] ?? profile?['phone'] ?? '',
           'role': usuarioMap['role'] ?? profile?['role'] ?? 'client',
           'avatar_url': usuarioMap['avatar_url'] ?? profile?['avatar_url'],
+          'is_banned':
+              usuarioMap['is_banned'] ??
+              usuarioMap['banned'] ??
+              profile?['is_banned'] ??
+              false,
+          'banned_until':
+              usuarioMap['banned_until'] ?? profile?['banned_until'],
         };
       }).toList();
 
@@ -341,7 +340,14 @@ class _AdminScreenState extends State<AdminScreen>
       }).toList();
 
       setState(() {
-        _produtos = List<Map<String, dynamic>>.from(produtosResponse);
+        _produtos = produtosResponse.map<Map<String, dynamic>>((produto) {
+          final categoria = produto['categorias'] as Map<String, dynamic>?;
+          return {
+            ...produto,
+            'categoria_nome': categoria?['nome'] ?? 'Sem categoria',
+            'categoria_icone': categoria?['icone'],
+          };
+        }).toList();
         _categorias = List<Map<String, dynamic>>.from(categoriasResponse);
         // Respeitar a ordem do banco de dados (campo 'ordem')
         // As categorias já vêm ordenadas pela query .order('ordem', ascending: true)
@@ -370,6 +376,8 @@ class _AdminScreenState extends State<AdminScreen>
 
   /// Configurar listener em tempo real para pedidos
   void _setupRealtimeSubscription() {
+    _pedidosSubscription?.cancel();
+
     // Escutar mudanças em tempo real na tabela de pedidos
     _pedidosSubscription = Supabase.instance.client
         .from('pedidos')
@@ -384,6 +392,7 @@ class _AdminScreenState extends State<AdminScreen>
           },
           onError: (error) {
             debugPrint('❌ [ADMIN] Erro no stream de pedidos: $error');
+            unawaited(_handleAdminPedidosRealtimeError(error));
           },
         );
 
@@ -402,6 +411,33 @@ class _AdminScreenState extends State<AdminScreen>
           callback: (_) => _scheduleCatalogRefresh(),
         )
         .subscribe();
+  }
+
+  Future<void> _handleAdminPedidosRealtimeError(Object? error) async {
+    if (_isRecoveringPedidosRealtimeAuth || !mounted) {
+      return;
+    }
+
+    _isRecoveringPedidosRealtimeAuth = true;
+    try {
+      final recovered = await RealtimeAuthUtils.recoverFromAuthError(
+        error: error,
+        source: 'admin_pedidos_stream',
+        onRecovered: () async {
+          if (!mounted) return;
+          _setupRealtimeSubscription();
+          await _loadData();
+        },
+      );
+
+      if (!recovered && RealtimeAuthUtils.isExpiredJwtError(error)) {
+        debugPrint(
+          '⚠️ [ADMIN] Não foi possível recuperar o realtime de pedidos após expiração do token',
+        );
+      }
+    } finally {
+      _isRecoveringPedidosRealtimeAuth = false;
+    }
   }
 
   void _scheduleCatalogRefresh() {
@@ -882,13 +918,25 @@ class _AdminScreenState extends State<AdminScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Center(
-            child: Text(
-              'Resumo do Sistema',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.dashboard_customize,
+                color: Colors.blue[700],
+                size: 28,
+              ),
+              const SizedBox(width: 10),
+              const Flexible(
+                child: Text(
+                  'Resumo do Sistema',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
 
           // Cards de métricas
           LayoutBuilder(
@@ -1181,46 +1229,96 @@ class _AdminScreenState extends State<AdminScreen>
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(
-                        leading:
-                            produto['imagem_url'] != null &&
-                                produto['imagem_url'].toString().isNotEmpty
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.network(
-                                  produto['imagem_url'],
-                                  width: 56,
-                                  height: 56,
-                                  fit: BoxFit.cover,
-                                  cacheWidth: 112,
-                                  cacheHeight: 112,
-                                  filterQuality: FilterQuality.medium,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      CircleAvatar(
-                                        backgroundColor: Colors.grey[200],
-                                        child: Text(
-                                          produto['nome']
-                                                  ?.substring(0, 1)
-                                                  .toUpperCase() ??
-                                              'P',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
+                        leading: Tooltip(
+                          message: 'Toque para alterar a foto do produto',
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () => _changeProductImage(produto),
+                              customBorder: const CircleBorder(),
+                              child: SizedBox(
+                                width: 56,
+                                height: 56,
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Positioned.fill(
+                                      child:
+                                          produto['imagem_url'] != null &&
+                                              produto['imagem_url']
+                                                  .toString()
+                                                  .isNotEmpty
+                                          ? ClipOval(
+                                              child: Image.network(
+                                                produto['imagem_url'],
+                                                fit: BoxFit.cover,
+                                                cacheWidth: 112,
+                                                cacheHeight: 112,
+                                                filterQuality:
+                                                    FilterQuality.medium,
+                                                errorBuilder:
+                                                    (
+                                                      context,
+                                                      error,
+                                                      stackTrace,
+                                                    ) => CircleAvatar(
+                                                      backgroundColor:
+                                                          Colors.grey[200],
+                                                      child: Text(
+                                                        produto['nome']
+                                                                ?.substring(
+                                                                  0,
+                                                                  1,
+                                                                )
+                                                                .toUpperCase() ??
+                                                            'P',
+                                                        style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ),
+                                              ),
+                                            )
+                                          : CircleAvatar(
+                                              backgroundColor: Colors.grey[200],
+                                              child: Text(
+                                                produto['nome']
+                                                        ?.substring(0, 1)
+                                                        .toUpperCase() ??
+                                                    'P',
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                    ),
+                                    Positioned(
+                                      right: -2,
+                                      bottom: -2,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(5),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black,
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: Colors.white,
+                                            width: 2,
                                           ),
                                         ),
+                                        child: const Icon(
+                                          Icons.camera_alt,
+                                          size: 12,
+                                          color: Colors.white,
+                                        ),
                                       ),
-                                ),
-                              )
-                            : CircleAvatar(
-                                backgroundColor: Colors.grey[200],
-                                child: Text(
-                                  produto['nome']
-                                          ?.substring(0, 1)
-                                          .toUpperCase() ??
-                                      'P',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               ),
+                            ),
+                          ),
+                        ),
                         title: Text(produto['nome'] ?? 'Produto'),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1358,8 +1456,7 @@ class _AdminScreenState extends State<AdminScreen>
                       ),
                     );
                   },
-                  onReorder: (oldIndex, newIndex) async {
-                    if (oldIndex < newIndex) newIndex--;
+                  onReorderItem: (oldIndex, newIndex) async {
                     setState(() {
                       final item = _filteredCategorias.removeAt(oldIndex);
                       _filteredCategorias.insert(newIndex, item);
@@ -1543,6 +1640,7 @@ class _AdminScreenState extends State<AdminScreen>
                         itemBuilder: (context, index) {
                           final usuario = filteredUsuarios[index];
                           final isAdmin = usuario['role'] == 'admin';
+                          final isBanned = usuario['is_banned'] == true;
 
                           return Card(
                             margin: const EdgeInsets.only(bottom: 12),
@@ -1560,33 +1658,84 @@ class _AdminScreenState extends State<AdminScreen>
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
+                                  if ((usuario['phone'] ?? '')
+                                      .toString()
+                                      .isNotEmpty)
+                                    Text(
+                                      usuario['phone'].toString(),
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  Text(
+                                    isBanned ? 'Banido' : 'Ativo',
+                                    style: TextStyle(
+                                      color: isBanned
+                                          ? Colors.red
+                                          : Colors.green,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
+                                  ),
                                 ],
                               ),
                               trailing: PopupMenuButton(
                                 itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'edit_profile',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.edit, size: 20),
+                                        SizedBox(width: 8),
+                                        Text('Editar dados'),
+                                      ],
+                                    ),
+                                  ),
                                   PopupMenuItem(
-                                    value: 'toggle_role',
+                                    value: 'toggle_ban',
                                     child: Row(
                                       children: [
                                         Icon(
-                                          isAdmin
-                                              ? Icons.person
-                                              : Icons.admin_panel_settings,
+                                          isBanned
+                                              ? Icons.verified_user
+                                              : Icons.block,
                                           size: 20,
+                                          color: isBanned
+                                              ? Colors.green
+                                              : Colors.orange,
                                         ),
                                         const SizedBox(width: 8),
-                                        Text(
-                                          isAdmin
-                                              ? 'Tornar Usuário'
-                                              : 'Tornar Admin',
+                                        Text(isBanned ? 'Desbanir' : 'Banir'),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete_user',
+                                    child: Row(
+                                      children: [
+                                        Image.asset(
+                                          'assets/icons/menu/delete_button.png',
+                                          width: 20,
+                                          height: 20,
+                                          color: Colors.red,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        const Text(
+                                          'Excluir',
+                                          style: TextStyle(color: Colors.red),
                                         ),
                                       ],
                                     ),
                                   ),
                                 ],
                                 onSelected: (value) {
-                                  if (value == 'toggle_role') {
-                                    _toggleUserRole(usuario);
+                                  if (value == 'edit_profile') {
+                                    _showEditUserDialog(usuario);
+                                  } else if (value == 'toggle_ban') {
+                                    _toggleUserBan(usuario);
+                                  } else if (value == 'delete_user') {
+                                    _deleteUser(usuario);
                                   }
                                 },
                               ),
@@ -1852,6 +2001,62 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
+  Future<void> _changeProductImage(Map<String, dynamic> produto) async {
+    final image = await ImageService.showImagePickerDialog(context);
+    if (image == null || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final productId = produto['id'] is int
+          ? produto['id'] as int
+          : int.parse(produto['id'].toString());
+      final oldImageUrl = produto['imagem_url']?.toString();
+      final newImageUrl = await ImageService.uploadProductImage(
+        imageFile: image,
+        productId: productId,
+        oldImageUrl: oldImageUrl,
+      );
+
+      if (newImageUrl == null) {
+        throw Exception('Não foi possível enviar a nova imagem.');
+      }
+
+      final currentImages = (produto['imagens'] as List<dynamic>? ?? [])
+          .map((item) => item.toString())
+          .where((item) => item.isNotEmpty)
+          .toList();
+      final updatedImages = <String>[
+        newImageUrl,
+        ...currentImages.where(
+          (item) => item != newImageUrl && item != oldImageUrl,
+        ),
+      ];
+
+      await Supabase.instance.client
+          .from('produtos')
+          .update({'imagem_url': newImageUrl, 'imagens': updatedImages})
+          .eq('id', productId);
+
+      if (!mounted) return;
+
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Foto do produto atualizada com sucesso!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      await _loadData();
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Erro ao atualizar foto do produto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _showReorderCategoriesDialog() async {
     // Criar cópia dos dados atuais
     List<Map<String, dynamic>> tempCategorias = List.from(_categorias);
@@ -1870,8 +2075,7 @@ class _AdminScreenState extends State<AdminScreen>
               height: 400,
               child: ReorderableListView.builder(
                 itemCount: tempCategorias.length,
-                onReorder: (oldIndex, newIndex) {
-                  if (oldIndex < newIndex) newIndex--;
+                onReorderItem: (oldIndex, newIndex) {
                   setDialogState(() {
                     final item = tempCategorias.removeAt(oldIndex);
                     tempCategorias.insert(newIndex, item);
@@ -1920,72 +2124,82 @@ class _AdminScreenState extends State<AdminScreen>
               ),
             ),
             actionsAlignment: MainAxisAlignment.center,
+            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
+              SizedBox(
+                width: double.infinity,
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Image.asset(
-                      'assets/icons/menu/cancel_button.png',
-                      width: 18,
-                      height: 18,
+                    Expanded(
+                      child: TextButton.icon(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close, color: Colors.red),
+                        label: const Text(
+                          'Cancelar',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 4),
-                    const Text('Cancelar'),
-                  ],
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  final scaffoldMessenger = ScaffoldMessenger.of(context);
-                  final navigator = Navigator.of(context);
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          final scaffoldMessenger = ScaffoldMessenger.of(
+                            context,
+                          );
+                          final navigator = Navigator.of(context);
 
-                  try {
-                    // Atualizar a ordem de cada categoria no banco de dados
-                    for (int i = 0; i < tempCategorias.length; i++) {
-                      final categoria = tempCategorias[i];
-                      await Supabase.instance.client
-                          .from('categorias')
-                          .update({'ordem': i})
-                          .eq('id', categoria['id']);
-                    }
+                          try {
+                            // Atualizar a ordem de cada categoria no banco de dados
+                            for (int i = 0; i < tempCategorias.length; i++) {
+                              final categoria = tempCategorias[i];
+                              await Supabase.instance.client
+                                  .from('categorias')
+                                  .update({'ordem': i})
+                                  .eq('id', categoria['id']);
+                            }
 
-                    // Atualizar o estado local imediatamente
-                    if (mounted) {
-                      setState(() {
-                        _categorias = List.from(tempCategorias);
-                        _filteredCategorias = List.from(tempCategorias);
-                      });
+                            // Atualizar o estado local imediatamente
+                            if (mounted) {
+                              setState(() {
+                                _categorias = List.from(tempCategorias);
+                                _filteredCategorias = List.from(tempCategorias);
+                              });
 
-                      scaffoldMessenger.showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Ordem das categorias atualizada com sucesso!',
-                          ),
+                              scaffoldMessenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Ordem das categorias atualizada com sucesso!',
+                                  ),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                              navigator.pop();
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              scaffoldMessenger.showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Erro ao reordenar categorias: $e',
+                                  ),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
                         ),
-                      );
-                      navigator.pop();
-                    }
-                  } catch (e) {
-                    if (mounted) {
-                      scaffoldMessenger.showSnackBar(
-                        SnackBar(
-                          content: Text('Erro ao reordenar categorias: $e'),
-                          backgroundColor: Colors.red,
+                        icon: const Icon(Icons.save, size: 18),
+                        label: const Text(
+                          'Salvar Ordem',
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      );
-                    }
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.save, size: 18),
-                    SizedBox(width: 6),
-                    Text('Salvar Ordem'),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -2233,140 +2447,119 @@ class _AdminScreenState extends State<AdminScreen>
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset(
-                    'assets/icons/menu/cancel_button.png',
-                    width: 18,
-                    height: 18,
-                  ),
-                  const SizedBox(width: 4),
-                  const Text('Cancelar'),
-                ],
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (nomeController.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('O nome da categoria é obrigatório'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                  return;
-                }
-
-                final navigator = Navigator.of(context);
-                final messenger = ScaffoldMessenger.of(context);
-
-                try {
-                  final iconeValue = iconeController.text.trim();
-                  final updateData = {
-                    'nome': nomeController.text.trim(),
-                    'icone': iconeValue.isEmpty
-                        ? (iconeOriginal.startsWith('asset:')
-                              ? iconeOriginal
-                              : '')
-                        : iconeValue,
-                    'ativo': isAtivo,
-                  };
-
-                  // Garantir que o ID seja int
-                  final catId = categoria['id'];
-                  final catIdInt = catId is int
-                      ? catId
-                      : int.parse(catId.toString());
-
-                  debugPrint(
-                    '📝 Atualizando categoria ID: $catIdInt com dados: $updateData',
-                  );
-
-                  bool updated = false;
-                  try {
-                    // Tentar update direto primeiro, com .select() para verificar se realmente atualizou
-                    final result = await Supabase.instance.client
-                        .from('categorias')
-                        .update(updateData)
-                        .eq('id', catIdInt)
-                        .select();
-                    debugPrint('📝 Resultado update direto: $result');
-                    updated = (result as List).isNotEmpty;
-                  } catch (updateError) {
-                    debugPrint('❌ Update direto falhou: $updateError');
-                  }
-
-                  if (!updated) {
-                    debugPrint(
-                      '⚠️ Update direto não atualizou - tentando RPC...',
-                    );
-                    // Fallback: tentar via RPC que bypassa RLS
-                    try {
-                      await Supabase.instance.client.rpc(
-                        'update_categoria_admin',
-                        params: {
-                          'categoria_id': catIdInt,
-                          'novo_nome': updateData['nome'],
-                          'novo_icone': updateData['icone'],
-                          'novo_ativo': updateData['ativo'],
-                        },
+            SizedBox(
+              width: MediaQuery.of(context).size.width * 0.78,
+              child: _buildResponsiveDialogActions(
+                secondaryAction: _buildDialogSecondaryButton(
+                  label: 'Cancelar',
+                  onPressed: () => Navigator.pop(context),
+                ),
+                primaryAction: _buildDialogPrimaryButton(
+                  label: 'Salvar alterações',
+                  icon: Icons.save,
+                  backgroundColor: Colors.purple,
+                  onPressed: () async {
+                    if (nomeController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('O nome da categoria é obrigatório'),
+                          backgroundColor: Colors.red,
+                        ),
                       );
-                      debugPrint('✅ Update via RPC bem-sucedido');
-                    } catch (rpcError) {
-                      debugPrint('❌ RPC update também falhou: $rpcError');
-                      final rpcErrorMsg = rpcError.toString().toLowerCase();
-                      if (rpcErrorMsg.contains('function') &&
-                          rpcErrorMsg.contains('does not exist')) {
+                      return;
+                    }
+
+                    final navigator = Navigator.of(context);
+                    final messenger = ScaffoldMessenger.of(context);
+
+                    try {
+                      final iconeValue = iconeController.text.trim();
+                      final updateData = {
+                        'nome': nomeController.text.trim(),
+                        'icone': iconeValue.isEmpty
+                            ? (iconeOriginal.startsWith('asset:')
+                                  ? iconeOriginal
+                                  : '')
+                            : iconeValue,
+                        'ativo': isAtivo,
+                      };
+
+                      final catId = categoria['id'];
+                      final catIdInt = catId is int
+                          ? catId
+                          : int.parse(catId.toString());
+
+                      debugPrint(
+                        '📝 Atualizando categoria ID: $catIdInt com dados: $updateData',
+                      );
+
+                      bool updated = false;
+                      try {
+                        final result = await Supabase.instance.client
+                            .from('categorias')
+                            .update(updateData)
+                            .eq('id', catIdInt)
+                            .select();
+                        debugPrint('📝 Resultado update direto: $result');
+                        updated = (result as List).isNotEmpty;
+                      } catch (updateError) {
+                        debugPrint('❌ Update direto falhou: $updateError');
+                      }
+
+                      if (!updated) {
                         debugPrint(
-                          '⚠️ Função update_categoria_admin não existe no Supabase!',
+                          '⚠️ Update direto não atualizou - tentando RPC...',
                         );
-                        throw Exception(
-                          'Função de atualização não encontrada no servidor. '
-                          'Execute o SQL update_categoria_admin.sql no Supabase.',
+                        try {
+                          await Supabase.instance.client.rpc(
+                            'update_categoria_admin',
+                            params: {
+                              'categoria_id': catIdInt,
+                              'novo_nome': updateData['nome'],
+                              'novo_icone': updateData['icone'],
+                              'novo_ativo': updateData['ativo'],
+                            },
+                          );
+                          debugPrint('✅ Update via RPC bem-sucedido');
+                        } catch (rpcError) {
+                          debugPrint('❌ RPC update também falhou: $rpcError');
+                          final rpcErrorMsg = rpcError.toString().toLowerCase();
+                          if (rpcErrorMsg.contains('function') &&
+                              rpcErrorMsg.contains('does not exist')) {
+                            debugPrint(
+                              '⚠️ Função update_categoria_admin não existe no Supabase!',
+                            );
+                            throw Exception(
+                              'Função de atualização não encontrada no servidor. '
+                              'Execute o SQL update_categoria_admin.sql no Supabase.',
+                            );
+                          }
+                          rethrow;
+                        }
+                      }
+
+                      if (mounted) {
+                        navigator.pop();
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Categoria atualizada com sucesso!'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                        _loadData();
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('Erro ao atualizar categoria: $e'),
+                            backgroundColor: Colors.red,
+                          ),
                         );
                       }
-                      rethrow;
                     }
-                  }
-
-                  if (mounted) {
-                    navigator.pop();
-                    messenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('Categoria atualizada com sucesso!'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                    _loadData();
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text('Erro ao atualizar categoria: $e'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.purple,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  },
                 ),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.save, size: 18),
-                  SizedBox(width: 6),
-                  Text('Salvar Alterações'),
-                ],
               ),
             ),
           ],
@@ -2549,10 +2742,16 @@ class _AdminScreenState extends State<AdminScreen>
       // Produtos por categoria
       Map<String, int> produtosPorCategoria = {};
       for (var produto in _produtos) {
-        String categoria = produto['categoria_nome'] ?? 'Sem categoria';
+        final categoria =
+            produto['categoria_nome']?.toString() ??
+            produto['categorias']?['nome']?.toString() ??
+            'Sem categoria';
         produtosPorCategoria[categoria] =
             (produtosPorCategoria[categoria] ?? 0) + 1;
       }
+      final produtosPorCategoriaOrdenados =
+          produtosPorCategoria.entries.toList()
+            ..sort((a, b) => b.value.compareTo(a.value));
 
       // Média de preços
       double mediaPrecos = 0;
@@ -2570,94 +2769,121 @@ class _AdminScreenState extends State<AdminScreen>
 
       showDialog(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('📊 Relatórios Administrativos'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Estatísticas gerais
-                  Card(
+        builder: (dialogContext) => _buildAdminDialog(
+          dialogContext,
+          icon: Icons.assessment,
+          iconColor: Colors.purple,
+          title: 'Relatórios Administrativos',
+          maxWidth: 460,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Align(
+                alignment: Alignment.center,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 320),
+                  child: Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           const Text(
                             'Estatísticas Gerais',
+                            textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Text('Total de Produtos: $totalProdutos'),
-                          Text('  • Ativos: $produtosAtivos'),
-                          Text('  • Inativos: $produtosInativos'),
+                          Text(
+                            'Total de Produtos: $totalProdutos',
+                            textAlign: TextAlign.center,
+                          ),
+                          Text(
+                            '• Ativos: $produtosAtivos',
+                            textAlign: TextAlign.center,
+                          ),
+                          Text(
+                            '• Inativos: $produtosInativos',
+                            textAlign: TextAlign.center,
+                          ),
                           const SizedBox(height: 4),
-                          Text('Total de Categorias: $totalCategorias'),
-                          Text('Total de Usuários: $totalUsuarios'),
+                          Text(
+                            'Total de Categorias: $totalCategorias',
+                            textAlign: TextAlign.center,
+                          ),
+                          Text(
+                            'Total de Usuários: $totalUsuarios',
+                            textAlign: TextAlign.center,
+                          ),
                           Text(
                             'Preço Médio: ${CurrencyFormatter.format(mediaPrecos)}',
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-
-                  // Produtos por categoria
-                  if (produtosPorCategoria.isNotEmpty) ...[
-                    const Text(
-                      'Produtos por Categoria',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ...produtosPorCategoria.entries.map(
-                      (entry) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(child: Text(entry.key)),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '${entry.value}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
+                ),
               ),
+              const SizedBox(height: 16),
+              if (produtosPorCategoriaOrdenados.isNotEmpty) ...[
+                const Text(
+                  'Produtos por Categoria',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                ...produtosPorCategoriaOrdenados.map(
+                  (entry) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(entry.key, textAlign: TextAlign.center),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${entry.value}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: _buildResponsiveDialogActions(
+            secondaryAction: _buildDialogSecondaryButton(
+              label: 'Fechar',
+              onPressed: () => Navigator.of(dialogContext).pop(),
+            ),
+            primaryAction: _buildDialogPrimaryButton(
+              label: 'Atualizar dados',
+              icon: Icons.refresh,
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _loadData();
+              },
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fechar'),
-            ),
-          ],
         ),
       );
     } catch (e) {
@@ -2675,12 +2901,14 @@ class _AdminScreenState extends State<AdminScreen>
       context: context,
       builder: (context) => AlertDialog(
         title: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.settings, color: Colors.grey),
             SizedBox(width: 8),
             Expanded(
               child: Text(
-                '⚙️ Configurações do Sistema',
+                'Configurações do Sistema',
+                textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -2753,10 +2981,12 @@ class _AdminScreenState extends State<AdminScreen>
             ),
           ),
         ),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
-          TextButton(
+          TextButton.icon(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fechar'),
+            icon: const Icon(Icons.close),
+            label: const Text('Fechar'),
           ),
         ],
       ),
@@ -2850,48 +3080,42 @@ class _AdminScreenState extends State<AdminScreen>
     Navigator.of(context).pop(); // Fechar configurações
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('💾 Backup dos Dados'),
+      builder: (dialogContext) => _buildAdminDialog(
+        dialogContext,
+        icon: Icons.backup,
+        iconColor: Colors.blueGrey,
+        title: 'Backup dos Dados',
         content: const Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text('Tipos de backup disponíveis:'),
+            Text('Tipos de backup disponíveis:', textAlign: TextAlign.center),
             SizedBox(height: 12),
-            Text('• Produtos e Categorias'),
-            Text('• Dados de Usuários'),
-            Text('• Configurações do Sistema'),
+            Text('• Produtos e Categorias', textAlign: TextAlign.center),
+            Text('• Dados de Usuários', textAlign: TextAlign.center),
+            Text('• Configurações do Sistema', textAlign: TextAlign.center),
             SizedBox(height: 16),
             Text(
               'O backup será gerado em formato JSON e pode ser usado para restaurar dados em caso de necessidade.',
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset(
-                  'assets/icons/menu/cancel_button.png',
-                  width: 18,
-                  height: 18,
-                ),
-                const SizedBox(width: 4),
-                const Text('Cancelar'),
-              ],
-            ),
+        actions: _buildResponsiveDialogActions(
+          secondaryAction: _buildDialogSecondaryButton(
+            label: 'Cancelar',
+            onPressed: () => Navigator.of(dialogContext).pop(),
           ),
-          ElevatedButton(
+          primaryAction: _buildDialogPrimaryButton(
+            label: 'Gerar Backup',
+            icon: Icons.backup,
             onPressed: () {
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
               _performBackup();
             },
-            child: const Text('Gerar Backup'),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -2949,28 +3173,56 @@ class _AdminScreenState extends State<AdminScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('🔔 Configurações de Notificação'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Tipos de notificação:'),
+            const Icon(Icons.notifications_outlined, color: Colors.orange),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Configurações de Notificação',
+                textAlign: TextAlign.center,
+                softWrap: true,
+                maxLines: 2,
+              ),
+            ),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text('Tipos de notificação:', textAlign: TextAlign.center),
             SizedBox(height: 12),
-            Text('• Novos usuários registrados'),
-            Text('• Produtos adicionados'),
-            Text('• Erros do sistema'),
-            Text('• Backup automático'),
+            Text('• Novos usuários registrados', textAlign: TextAlign.center),
+            Text('• Produtos adicionados', textAlign: TextAlign.center),
+            Text('• Erros do sistema', textAlign: TextAlign.center),
+            Text('• Backup automático', textAlign: TextAlign.center),
             SizedBox(height: 16),
             Text(
               'As notificações podem ser configuradas para alertar sobre eventos importantes do sistema.',
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
         ),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fechar'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Fechar'),
+              ],
+            ),
           ),
         ],
       ),
@@ -3162,38 +3414,46 @@ class _AdminScreenState extends State<AdminScreen>
     Navigator.of(context).pop(); // Fechar configurações
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('🔧 Manutenção do Sistema'),
+      builder: (dialogContext) => _buildAdminDialog(
+        dialogContext,
+        icon: Icons.build,
+        iconColor: Colors.blueGrey,
+        title: 'Manutenção do Sistema',
         content: const Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text('Ferramentas de manutenção disponíveis:'),
+            Text(
+              'Ferramentas de manutenção disponíveis:',
+              textAlign: TextAlign.center,
+            ),
             SizedBox(height: 12),
-            Text('• Otimização do banco de dados'),
-            Text('• Limpeza de dados órfãos'),
-            Text('• Verificação de integridade'),
-            Text('• Atualização de índices'),
+            Text('• Otimização do banco de dados', textAlign: TextAlign.center),
+            Text('• Limpeza de dados órfãos', textAlign: TextAlign.center),
+            Text('• Verificação de integridade', textAlign: TextAlign.center),
+            Text('• Atualização de índices', textAlign: TextAlign.center),
             SizedBox(height: 16),
             Text(
               'Execute essas ferramentas periodicamente para manter o sistema otimizado.',
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fechar'),
+        actions: _buildResponsiveDialogActions(
+          secondaryAction: _buildDialogSecondaryButton(
+            label: 'Fechar',
+            onPressed: () => Navigator.of(dialogContext).pop(),
           ),
-          ElevatedButton(
+          primaryAction: _buildDialogPrimaryButton(
+            label: 'Executar manutenção',
+            icon: Icons.build,
             onPressed: () {
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
               _runMaintenance();
             },
-            child: const Text('Executar Manutenção'),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -3238,132 +3498,326 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
-  Widget _buildPedidosTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.receipt_long, color: Colors.blue[700], size: 28),
-              const SizedBox(width: 12),
-              Text(
-                'Gerenciar Pedidos',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue[700],
-                ),
-              ),
-            ],
+  List<Map<String, dynamic>> get _statusFilterOptions => [
+    {
+      'label': 'Todos',
+      'value': 'todos',
+      'icon': Icons.all_inbox,
+      'color': Colors.blueGrey,
+    },
+    {
+      'label': 'Pagamento Pendente',
+      'value': 'pagamento_pendente',
+      'icon': Icons.payments_outlined,
+      'color': Colors.amber[800]!,
+    },
+    {
+      'label': 'Pendentes',
+      'value': 'pendente',
+      'icon': Icons.pending_actions,
+      'color': Colors.orange,
+    },
+    {
+      'label': 'Confirmados',
+      'value': 'confirmado',
+      'icon': Icons.check_circle_outline,
+      'color': Colors.blue,
+    },
+    {
+      'label': 'Em Preparo',
+      'value': 'em preparo',
+      'icon': Icons.kitchen,
+      'color': Colors.orange,
+    },
+    {
+      'label': 'Saiu para Entrega',
+      'value': 'saiu para entrega',
+      'icon': Icons.delivery_dining,
+      'color': Colors.purple,
+    },
+    {
+      'label': 'Entregues',
+      'value': 'entregue',
+      'icon': Icons.check_circle,
+      'color': Colors.green,
+    },
+    {
+      'label': 'Testes',
+      'value': 'teste',
+      'icon': Icons.science,
+      'color': Colors.deepPurple,
+    },
+    {
+      'label': 'Cancelados',
+      'value': 'cancelado',
+      'icon': Icons.cancel,
+      'color': Colors.red,
+    },
+  ];
+
+  Future<void> _showPedidosFilterDialog() async {
+    final selectedValue = _selectedStatusFilter ?? 'todos';
+    final selectedOption = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final maxHeight = MediaQuery.of(dialogContext).size.height * 0.72;
+
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
           ),
-          const SizedBox(height: 20),
-
-          // Filtros de status
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _buildStatusFilter('Todos', null),
-              _buildStatusFilter('Pagto Pendente', 'pagamento_pendente'),
-              _buildStatusFilter('Pendentes', 'pendente'),
-              _buildStatusFilter('Confirmados', 'confirmado'),
-              _buildStatusFilter('Em Preparo', 'em preparo'),
-              _buildStatusFilter('Saiu Entrega', 'saiu para entrega'),
-              _buildStatusFilter('Entregues', 'entregue'),
-              _buildStatusFilter('Testes', 'teste'),
-              _buildStatusFilter('Cancelados', 'cancelado'),
-            ],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
           ),
-          const SizedBox(height: 20),
-
-          // Lista de pedidos filtrados
-          Builder(
-            builder: (context) {
-              final pedidosFiltrados = _selectedStatusFilter == null
-                  ? _pedidos
-                  : _pedidos
-                        .where((p) => p['status'] == _selectedStatusFilter)
-                        .toList();
-
-              if (pedidosFiltrados.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: 320, maxHeight: maxHeight),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
                     children: [
-                      const SizedBox(height: 60),
-                      Icon(
-                        Icons.receipt_long,
-                        size: 80,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        _selectedStatusFilter == null
-                            ? 'Nenhum pedido encontrado'
-                            : 'Nenhum pedido com status "${_getStatusLabel(_selectedStatusFilter!)}" encontrado',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
+                      const Icon(Icons.filter_list, color: Colors.blueGrey),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Filtrar pedidos',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _selectedStatusFilter == null
-                            ? 'Os pedidos aparecerão aqui quando forem criados'
-                            : 'Tente selecionar outro filtro ou aguarde novos pedidos',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                      IconButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: Image.asset(
+                          'assets/icons/menu/cancel_button.png',
+                          width: 20,
+                          height: 20,
+                        ),
+                        tooltip: 'Fechar',
                       ),
-                      const SizedBox(height: 60),
                     ],
                   ),
-                );
-              }
+                  const SizedBox(height: 12),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _statusFilterOptions.length,
+                      separatorBuilder: (_, index) => const SizedBox(height: 6),
+                      itemBuilder: (context, index) {
+                        final option = _statusFilterOptions[index];
+                        final value = option['value'] as String;
+                        final isSelected = value == selectedValue;
 
-              return ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: pedidosFiltrados.length,
-                itemBuilder: (context, index) {
-                  final pedido = pedidosFiltrados[index];
-                  return _buildPedidoCard(pedido);
-                },
-              );
-            },
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => Navigator.of(dialogContext).pop(value),
+                            child: Ink(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? Colors.grey.shade100
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? Colors.black
+                                      : Colors.grey.shade200,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    option['icon'] as IconData,
+                                    size: 20,
+                                    color: option['color'] as Color,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      option['label'] as String,
+                                      style: TextStyle(
+                                        fontWeight: isSelected
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(
+                                      Icons.check_circle,
+                                      size: 18,
+                                      color: Colors.black,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ],
-      ),
+        );
+      },
     );
+
+    if (selectedOption == null || !mounted) return;
+
+    setState(() {
+      _selectedStatusFilter = selectedOption == 'todos' ? null : selectedOption;
+    });
   }
 
-  Widget _buildStatusFilter(String label, String? status) {
-    final isSelected = _selectedStatusFilter == status;
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedStatusFilter = status;
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.blue[700] : Colors.grey[200],
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black87,
-            fontWeight: FontWeight.w600,
-            fontSize: 12,
+  Widget _buildPedidosTab() {
+    final selectedFilterValue = _selectedStatusFilter ?? 'todos';
+    final selectedOption = _statusFilterOptions.firstWhere(
+      (option) => option['value'] == selectedFilterValue,
+      orElse: () => _statusFilterOptions.first,
+    );
+
+    final pedidosFiltrados = _selectedStatusFilter == null
+        ? _pedidos
+        : _pedidos.where((p) => p['status'] == _selectedStatusFilter).toList();
+
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.receipt_long, color: Colors.blue[700], size: 28),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Gerenciar Pedidos',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: _showPedidosFilterDialog,
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: 'Filtrar pedidos',
+                            prefixIcon: const Icon(Icons.filter_list),
+                            suffixIcon: const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              borderSide: BorderSide(color: Colors.grey[300]!),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                selectedOption['icon'] as IconData,
+                                size: 18,
+                                color: selectedOption['color'] as Color,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  selectedOption['label'] as String,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
+        if (pedidosFiltrados.isEmpty)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.receipt_long, size: 80, color: Colors.grey[400]),
+                    const SizedBox(height: 24),
+                    Text(
+                      _selectedStatusFilter == null
+                          ? 'Nenhum pedido encontrado'
+                          : 'Nenhum pedido com status "${_getStatusLabel(_selectedStatusFilter!)}" encontrado',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 18,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _selectedStatusFilter == null
+                          ? 'Os pedidos aparecerão aqui quando forem criados'
+                          : 'Tente selecionar outro filtro ou aguarde novos pedidos',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final pedido = pedidosFiltrados[index];
+                return _buildPedidoCard(pedido);
+              }, childCount: pedidosFiltrados.length),
+            ),
+          ),
+      ],
     );
   }
 
@@ -4152,6 +4606,7 @@ class _AdminScreenState extends State<AdminScreen>
               ...itens.map<Widget>((item) {
                 final produto = item['produtos'];
                 final tamanho = item['tamanho_selecionado'];
+                final sabor = item['sabor_selecionado'];
                 debugPrint('🔍 Admin - Item completo: $item');
                 debugPrint('🔍 Admin - Tamanho do item: $tamanho');
                 debugPrint(
@@ -4170,6 +4625,37 @@ class _AdminScreenState extends State<AdminScreen>
                     children: [
                       Row(
                         children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: SizedBox(
+                              width: 42,
+                              height: 42,
+                              child:
+                                  item['imagem_url'] != null &&
+                                      item['imagem_url'].toString().isNotEmpty
+                                  ? Image.network(
+                                      item['imagem_url'],
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, _, _) => Container(
+                                        color: Colors.orange[50],
+                                        child: const Icon(
+                                          Icons.fastfood,
+                                          size: 22,
+                                          color: Colors.orange,
+                                        ),
+                                      ),
+                                    )
+                                  : Container(
+                                      color: Colors.orange[50],
+                                      child: const Icon(
+                                        Icons.fastfood,
+                                        size: 22,
+                                        color: Colors.orange,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               produto?['nome'] ?? 'Produto não encontrado',
@@ -4178,26 +4664,23 @@ class _AdminScreenState extends State<AdminScreen>
                               ),
                             ),
                           ),
-                          if (tamanho != null && tamanho.toString().isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.purple[100],
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.purple[300]!),
-                              ),
-                              child: Text(
-                                tamanho.toString(),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.purple[700],
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: [
+                              if (tamanho != null &&
+                                  tamanho.toString().isNotEmpty)
+                                _buildOrderOptionChip(
+                                  tamanho.toString(),
+                                  Colors.purple,
                                 ),
-                              ),
-                            ),
+                              if (sabor != null && sabor.toString().isNotEmpty)
+                                _buildOrderOptionChip(
+                                  sabor.toString(),
+                                  Colors.orange,
+                                ),
+                            ],
+                          ),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -4328,6 +4811,25 @@ class _AdminScreenState extends State<AdminScreen>
           ),
           Expanded(child: Text(value)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildOrderOptionChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
       ),
     );
   }
@@ -4585,8 +5087,597 @@ class _AdminScreenState extends State<AdminScreen>
     }
   }
 
+  bool _isCurrentUser(Map<String, dynamic> usuario) {
+    return usuario['id']?.toString() ==
+        Supabase.instance.client.auth.currentUser?.id;
+  }
+
+  Future<void> _showEditUserDialog(Map<String, dynamic> usuario) async {
+    final nameController = TextEditingController(
+      text: usuario['full_name']?.toString() ?? '',
+    );
+    final emailController = TextEditingController(
+      text: usuario['email']?.toString() ?? '',
+    );
+    final phoneController = TextEditingController(
+      text: usuario['phone']?.toString() ?? '',
+    );
+    final isAdmin = usuario['role'] == 'admin';
+
+    InputDecoration buildUserInputDecoration(String label, IconData icon) {
+      return InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => _buildAdminDialog(
+        dialogContext,
+        icon: Icons.manage_accounts,
+        iconColor: Colors.blue,
+        title: 'Editar Usuário',
+        maxWidth: 460,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildUserAvatar(usuario, isAdmin),
+            const SizedBox(height: 10),
+            Text(
+              isAdmin ? 'Administrador' : 'Cliente',
+              style: TextStyle(
+                color: isAdmin ? Colors.red : Colors.blue,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      unawaited(_changeUserPhoto(usuario));
+                    });
+                  },
+                  icon: const Icon(Icons.photo_camera),
+                  label: const Text('Alterar foto'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      unawaited(_showResetPasswordDialog(usuario));
+                    });
+                  },
+                  icon: const Icon(Icons.lock_reset),
+                  label: const Text('Resetar senha'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      unawaited(_toggleUserRole(usuario));
+                    });
+                  },
+                  icon: Icon(
+                    isAdmin ? Icons.person_outline : Icons.admin_panel_settings,
+                  ),
+                  label: Text(isAdmin ? 'Tornar usuário' : 'Tornar admin'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              autocorrect: false,
+              textInputAction: TextInputAction.next,
+              decoration: buildUserInputDecoration('Nome', Icons.person),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: emailController,
+              autocorrect: false,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.next,
+              decoration: buildUserInputDecoration('E-mail', Icons.email),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: phoneController,
+              autocorrect: false,
+              keyboardType: TextInputType.phone,
+              textInputAction: TextInputAction.done,
+              decoration: buildUserInputDecoration('Telefone', Icons.phone),
+            ),
+          ],
+        ),
+        actions: _buildResponsiveDialogActions(
+          secondaryAction: _buildDialogSecondaryButton(
+            label: 'Cancelar',
+            onPressed: () => Navigator.of(dialogContext).pop(),
+          ),
+          primaryAction: _buildDialogPrimaryButton(
+            label: 'Salvar alterações',
+            icon: Icons.save,
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              final navigator = Navigator.of(dialogContext);
+              try {
+                await Supabase.instance.client.rpc(
+                  'admin_update_user_profile',
+                  params: {
+                    'target_user_id': usuario['id'],
+                    'new_name': nameController.text.trim(),
+                    'new_email': emailController.text.trim(),
+                    'new_phone': phoneController.text.trim(),
+                    'new_avatar_url': usuario['avatar_url'],
+                  },
+                );
+                if (!mounted) return;
+                navigator.pop();
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Usuário atualizado com sucesso!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+                _loadData();
+              } catch (e) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Erro ao atualizar usuário: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+      ),
+    );
+
+    nameController.dispose();
+    emailController.dispose();
+    phoneController.dispose();
+  }
+
+  Future<void> _changeUserPhoto(Map<String, dynamic> usuario) async {
+    final image = await ImageService.showImagePickerDialog(context);
+    if (image == null || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final avatarUrl = await ImageService.uploadProfileImage(
+        imageFile: image,
+        userId: usuario['id'].toString(),
+        oldImageUrl: usuario['avatar_url']?.toString(),
+      );
+      if (avatarUrl == null) {
+        throw Exception('Não foi possível enviar a imagem.');
+      }
+
+      await Supabase.instance.client.rpc(
+        'admin_update_user_profile',
+        params: {
+          'target_user_id': usuario['id'],
+          'new_name': usuario['full_name'],
+          'new_email': usuario['email'],
+          'new_phone': usuario['phone'],
+          'new_avatar_url': avatarUrl,
+        },
+      );
+
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Foto do usuário atualizada!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      _loadData();
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Erro ao alterar foto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _showResetPasswordDialog(Map<String, dynamic> usuario) async {
+    final passwordController = TextEditingController();
+    final confirmController = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => _buildAdminDialog(
+        dialogContext,
+        icon: Icons.lock_reset,
+        iconColor: Colors.orange,
+        title: 'Resetar Senha',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              usuario['email']?.toString().isNotEmpty == true
+                  ? usuario['email'].toString()
+                  : 'Usuário selecionado',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passwordController,
+              autocorrect: false,
+              enableSuggestions: false,
+              obscureText: true,
+              textInputAction: TextInputAction.next,
+              decoration: InputDecoration(
+                labelText: 'Nova senha',
+                prefixIcon: const Icon(Icons.lock),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmController,
+              autocorrect: false,
+              enableSuggestions: false,
+              obscureText: true,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: 'Confirmar senha',
+                prefixIcon: const Icon(Icons.lock_outline),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: _buildResponsiveDialogActions(
+          secondaryAction: _buildDialogSecondaryButton(
+            label: 'Cancelar',
+            onPressed: () => Navigator.of(dialogContext).pop(),
+          ),
+          primaryAction: _buildDialogPrimaryButton(
+            label: 'Resetar senha',
+            icon: Icons.lock_reset,
+            onPressed: () async {
+              final password = passwordController.text;
+              final messenger = ScaffoldMessenger.of(context);
+              final navigator = Navigator.of(dialogContext);
+
+              if (password.length < 6 || password != confirmController.text) {
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'As senhas devem coincidir e ter pelo menos 6 caracteres.',
+                    ),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+
+              try {
+                await Supabase.instance.client.rpc(
+                  'admin_reset_user_password',
+                  params: {
+                    'target_user_id': usuario['id'],
+                    'new_password': password,
+                  },
+                );
+                if (!mounted) return;
+                navigator.pop();
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Senha resetada com sucesso!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } catch (e) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Erro ao resetar senha: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+      ),
+    );
+
+    passwordController.dispose();
+    confirmController.dispose();
+  }
+
+  double _adminDialogWidth(BuildContext context, {double maxWidth = 420}) {
+    return (MediaQuery.of(context).size.width - 40)
+        .clamp(280.0, maxWidth)
+        .toDouble();
+  }
+
+  Widget _buildAdminDialog(
+    BuildContext context, {
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required Widget content,
+    required Widget actions,
+    double maxWidth = 420,
+  }) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: _adminDialogWidth(context, maxWidth: maxWidth),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, color: iconColor, size: 28),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      softWrap: true,
+                      maxLines: 2,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              content,
+              const SizedBox(height: 20),
+              actions,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResponsiveDialogActions({
+    required Widget secondaryAction,
+    required Widget primaryAction,
+  }) {
+    return Row(
+      children: [
+        Expanded(child: secondaryAction),
+        const SizedBox(width: 10),
+        Expanded(child: primaryAction),
+      ],
+    );
+  }
+
+  Widget _buildDialogSecondaryButton({
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Image.asset(
+            'assets/icons/menu/cancel_button.png',
+            width: 18,
+            height: 18,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(label, textAlign: TextAlign.center, maxLines: 2),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDialogPrimaryButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onPressed,
+    Color backgroundColor = Colors.black,
+    Color foregroundColor = Colors.white,
+  }) {
+    return ElevatedButton(
+      onPressed: onPressed,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: backgroundColor,
+        foregroundColor: foregroundColor,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              softWrap: true,
+              maxLines: 2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleUserBan(Map<String, dynamic> usuario) async {
+    if (_isCurrentUser(usuario)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Você não pode banir a própria conta.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final isBanned = usuario['is_banned'] == true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(isBanned ? 'Desbanir usuário' : 'Banir usuário'),
+        content: Text(
+          isBanned
+              ? 'Deseja liberar o acesso deste usuário novamente?'
+              : 'Deseja bloquear o acesso deste usuário ao app?',
+          textAlign: TextAlign.center,
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancelar'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: Icon(isBanned ? Icons.verified_user : Icons.block),
+            label: Text(isBanned ? 'Desbanir' : 'Banir'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isBanned ? Colors.green : Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await Supabase.instance.client.rpc(
+        'admin_set_user_ban',
+        params: {'target_user_id': usuario['id'], 'ban_user': !isBanned},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isBanned ? 'Usuário desbanido!' : 'Usuário banido!'),
+          backgroundColor: isBanned ? Colors.green : Colors.orange,
+        ),
+      );
+      _loadData();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao alterar banimento: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteUser(Map<String, dynamic> usuario) async {
+    if (_isCurrentUser(usuario)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Você não pode excluir a própria conta.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Excluir usuário', textAlign: TextAlign.center),
+        content: const Text(
+          'Esta ação remove o usuário do Auth e do perfil. Pedidos existentes podem impedir a exclusão se houver vínculos obrigatórios.',
+          textAlign: TextAlign.center,
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            icon: const Icon(Icons.close),
+            label: const Text('Cancelar'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.delete),
+            label: const Text('Excluir'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await Supabase.instance.client.rpc(
+        'admin_delete_user',
+        params: {'target_user_id': usuario['id']},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Usuário excluído com sucesso!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      _loadData();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao excluir usuário: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _toggleUserRole(Map<String, dynamic> usuario) async {
-    final newRole = usuario['role'] == 'admin' ? 'user' : 'admin';
+    if (_isCurrentUser(usuario) && usuario['role'] == 'admin') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Você não pode remover o próprio acesso admin.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final newRole = usuario['role'] == 'admin' ? 'client' : 'admin';
     final userName = usuario['full_name'] ?? usuario['email'] ?? 'Usuário';
 
     try {

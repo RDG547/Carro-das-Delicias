@@ -7,12 +7,13 @@ import '../services/favorites_service.dart';
 import '../services/main_navigation_service.dart';
 import '../screens/cart_screen.dart';
 import '../screens/product_detail_screen.dart';
-import '../screens/checkout_screen.dart';
 import '../utils/app_snackbar.dart';
-import 'size_selector_dialog.dart';
+import '../utils/product_action_helper.dart';
+import '../utils/product_variant_utils.dart';
 import 'main_navigation_provider.dart';
 import 'category_icon_widget.dart';
 import 'favorite_heart_animation.dart';
+import 'flavor_count_badge.dart';
 import '../providers/admin_status_provider.dart';
 import 'edit_product_dialog.dart';
 
@@ -383,17 +384,20 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
   }
 
   Widget _buildPriceWidget() {
-    final tamanhos = widget.produto['tamanhos'];
+    final tamanhos = ProductVariantUtils.extractSizes(
+      widget.produto['tamanhos'],
+    );
     final preco = widget.produto['preco'];
     final precoAnterior = widget.produto['preco_anterior'];
     final isPromocao = widget.produto['promocao'] ?? false;
 
     // Se tem múltiplos tamanhos, mostrar o menor preço
-    if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
+    if (tamanhos.isNotEmpty) {
       // Encontrar o menor preço
       double menorPreco = double.infinity;
       for (var tamanho in tamanhos) {
-        final precoTamanho = tamanho['preco']?.toDouble() ?? 0.0;
+        final precoTamanho =
+            ProductVariantUtils.toDouble(tamanho['preco']) ?? 0.0;
         if (precoTamanho < menorPreco && precoTamanho > 0) {
           menorPreco = precoTamanho;
         }
@@ -417,12 +421,13 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         );
       }
 
-      final hasDesconto = precoAnterior != null && precoAnterior > menorPreco;
+      final previousPrice = ProductVariantUtils.toDouble(precoAnterior);
+      final hasDesconto = previousPrice != null && previousPrice > menorPreco;
       final temMultiplosPrecos = tamanhos.length > 1;
 
       if (hasDesconto) {
         final percentualDesconto =
-            ((precoAnterior - menorPreco) / precoAnterior * 100).toInt();
+            ((previousPrice - menorPreco) / previousPrice * 100).toInt();
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -444,7 +449,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
             ),
             const SizedBox(height: 4),
             Text(
-              CurrencyFormatter.format(precoAnterior),
+              CurrencyFormatter.format(previousPrice),
               style: TextStyle(
                 fontSize: 12,
                 color: Colors.grey[600],
@@ -566,13 +571,14 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
       );
     }
 
-    final precoAtual = preco.toDouble();
-    final hasDesconto = precoAnterior != null && precoAnterior > precoAtual;
+    final precoAtual = ProductVariantUtils.toDouble(preco) ?? 0.0;
+    final previousPrice = ProductVariantUtils.toDouble(precoAnterior);
+    final hasDesconto = previousPrice != null && previousPrice > precoAtual;
 
     // Se tem desconto, mostra preço anterior riscado
     if (hasDesconto) {
       final percentualDesconto =
-          ((precoAnterior - precoAtual) / precoAnterior * 100).toInt();
+          ((previousPrice - precoAtual) / previousPrice * 100).toInt();
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -596,7 +602,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
           const SizedBox(height: 4),
           // Preço anterior riscado
           Text(
-            CurrencyFormatter.format(precoAnterior),
+            CurrencyFormatter.format(previousPrice),
             style: TextStyle(
               fontSize: 12,
               color: Colors.grey[600],
@@ -741,62 +747,11 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         return;
       }
 
-      final produto = widget.produto;
-      final tamanhos = produto['tamanhos'];
-
-      // Se tem tamanhos, mostrar diálogo para escolher
-      if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
-        await _showSizeSelectorAndBuy();
-        return;
-      }
-
-      final preco = produto['preco']?.toDouble();
-
-      debugPrint('🛒 Comprando produto: ${produto['nome']}');
-
-      if (preco == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Produto sem preço não pode ser comprado'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      // Adiciona ao carrinho com flag isBuyNow = true
-      await _cartService.addItem(produto, isBuyNow: true);
-      debugPrint(
-        '✅ Produto adicionado ao carrinho, navegando para checkout...',
+      await ProductActionHelper.buyNow(
+        context: context,
+        cartService: _cartService,
+        produto: widget.produto,
       );
-
-      if (mounted) {
-        try {
-          final result = await Navigator.pushNamed(context, '/checkout');
-          debugPrint('🔗 Navegação para checkout executada');
-
-          // Se o usuário voltou sem finalizar, remove o item
-          if (result == null && mounted) {
-            await _cartService.clearBuyNowItems();
-            debugPrint('🗑️ Item de compra rápida removido');
-          }
-        } catch (e) {
-          debugPrint('❌ Erro na navegação para checkout: $e');
-          // Fallback: usar Navigator.push
-          if (!mounted) return;
-
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const CheckoutScreen()),
-          );
-
-          // Se o usuário voltou sem finalizar no fallback também
-          if (result == null && mounted) {
-            await _cartService.clearBuyNowItems();
-            debugPrint('🗑️ Item de compra rápida removido (fallback)');
-          }
-        }
-      }
     } catch (e) {
       debugPrint('❌ Erro em _buyNow: $e');
       if (mounted) {
@@ -810,128 +765,18 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
     }
   }
 
-  Future<void> _showSizeSelectorAndBuy() async {
-    if (!mounted) return;
-
-    await showDialog(
-      context: context,
-      builder: (context) => SizeSelectorDialog(
-        produto: widget.produto,
-        action: SizeSelectionAction.buyNow,
-        onSizeSelected: (selectedSize) async {
-          // Criar produto com tamanho selecionado
-          final produtoComTamanho = Map<String, dynamic>.from(widget.produto);
-          produtoComTamanho['preco'] = selectedSize['preco'];
-          produtoComTamanho['tamanho_selecionado'] = selectedSize['nome'];
-
-          debugPrint(
-            '🛒 Comprando produto com tamanho: ${selectedSize['nome']}',
-          );
-
-          // Capturar contexto ANTES do await
-          final navigator = Navigator.of(context);
-
-          // Adiciona ao carrinho com flag isBuyNow = true
-          await _cartService.addItem(produtoComTamanho, isBuyNow: true);
-
-          if (!mounted) return;
-
-          try {
-            final result = await navigator.pushNamed('/checkout');
-
-            // Se o usuário voltou sem finalizar, remove o item
-            if (result == null && mounted) {
-              await _cartService.clearBuyNowItems();
-              debugPrint('🗑️ Item de compra rápida removido');
-            }
-          } catch (e) {
-            debugPrint('❌ Erro na navegação para checkout: $e');
-            if (!mounted) return;
-
-            final result = await navigator.push(
-              MaterialPageRoute(builder: (context) => const CheckoutScreen()),
-            );
-
-            if (result == null && mounted) {
-              await _cartService.clearBuyNowItems();
-              debugPrint('🗑️ Item de compra rápida removido (fallback)');
-            }
-          }
-        },
-      ),
-    );
-  }
-
   Future<void> _addToCart() async {
     if (!_isProductAvailable) {
       _showUnavailableProductMessage();
       return;
     }
 
-    final currentContext = context;
-    final produto = widget.produto;
-    final tamanhos = produto['tamanhos'];
-
-    // Se tem tamanhos, mostrar diálogo para escolher
-    if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
-      await _showSizeSelectorAndAddToCart();
-      return;
-    }
-
-    final preco = produto['preco']?.toDouble();
-
-    if (preco == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Produto sem preço não pode ser adicionado ao carrinho',
-          ),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    await _cartService.addItem(produto);
-
-    if (!currentContext.mounted) return;
-
-    AppSnackBar.showCartAdded(
-      currentContext,
-      message: '${produto['nome']} adicionado ao carrinho!',
+    await ProductActionHelper.addToCart(
+      context: context,
+      cartService: _cartService,
+      produto: widget.produto,
       onViewCart: _openCartPage,
       avoidAdminFab: widget.isAdmin == true,
-    );
-  }
-
-  Future<void> _showSizeSelectorAndAddToCart() async {
-    if (!mounted) return;
-
-    await showDialog(
-      context: context,
-      builder: (context) => SizeSelectorDialog(
-        produto: widget.produto,
-        action: SizeSelectionAction.addToCart,
-        onSizeSelected: (selectedSize) async {
-          final currentContext = context;
-          // Criar produto com tamanho selecionado
-          final produtoComTamanho = Map<String, dynamic>.from(widget.produto);
-          produtoComTamanho['preco'] = selectedSize['preco'];
-          produtoComTamanho['tamanho_selecionado'] = selectedSize['nome'];
-
-          await _cartService.addItem(produtoComTamanho);
-
-          if (!currentContext.mounted) return;
-
-          AppSnackBar.showCartAdded(
-            currentContext,
-            message:
-                '${widget.produto['nome']} (${selectedSize['nome']}) adicionado ao carrinho!',
-            onViewCart: _openCartPage,
-            avoidAdminFab: widget.isAdmin == true,
-          );
-        },
-      ),
     );
   }
 
@@ -1195,6 +1040,21 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
 
   @override
   Widget build(BuildContext context) {
+    final flavorCount = ProductVariantUtils.extractFlavors(
+      widget.produto['sabores'],
+    ).length;
+    final cardImages = ProductVariantUtils.productImages(widget.produto);
+    final cardPrice = ProductVariantUtils.toDouble(widget.produto['preco']);
+    final cardPreviousPrice = ProductVariantUtils.toDouble(
+      widget.produto['preco_anterior'],
+    );
+    final cardDiscountPercent =
+        cardPrice != null &&
+            cardPreviousPrice != null &&
+            cardPreviousPrice > cardPrice
+        ? ((cardPreviousPrice - cardPrice) / cardPreviousPrice * 100).toInt()
+        : null;
+
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
@@ -1269,9 +1129,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                   child: Column(
                     children: [
                       // Tag de Promoção/Desconto no topo (se houver)
-                      if (widget.produto['preco_anterior'] != null &&
-                          widget.produto['preco_anterior'] >
-                              widget.produto['preco'])
+                      if (cardDiscountPercent != null)
                         Container(
                           width: double.infinity,
                           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1296,7 +1154,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                'PROMOÇÃO - ${((widget.produto['preco_anterior'] - widget.produto['preco']) / widget.produto['preco_anterior'] * 100).toInt()}% OFF',
+                                'PROMOÇÃO - $cardDiscountPercent% OFF',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
@@ -1322,15 +1180,11 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(color: Colors.orange[200]!),
                               ),
-                              child:
-                                  widget.produto['imagem_url'] != null &&
-                                      widget.produto['imagem_url']
-                                          .toString()
-                                          .isNotEmpty
+                              child: cardImages.isNotEmpty
                                   ? ClipRRect(
                                       borderRadius: BorderRadius.circular(12),
                                       child: Image.network(
-                                        widget.produto['imagem_url'],
+                                        cardImages.first,
                                         fit: BoxFit.cover,
                                         cacheWidth: 240,
                                         cacheHeight: 240,
@@ -1366,9 +1220,25 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   // Nome do produto
-                                  Text(
-                                    widget.produto['nome'] ??
-                                        'Produto sem nome',
+                                  Text.rich(
+                                    TextSpan(
+                                      children: [
+                                        TextSpan(
+                                          text:
+                                              widget.produto['nome'] ??
+                                              'Produto sem nome',
+                                        ),
+                                        if (flavorCount > 1)
+                                          flavorCountBadgeSpan(
+                                            flavorCount,
+                                            leftPadding: 3,
+                                            fontSize: 10,
+                                            iconSize: 10,
+                                            horizontalPadding: 4,
+                                            iconSpacing: 2,
+                                          ),
+                                      ],
+                                    ),
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 18,
@@ -1377,7 +1247,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                           ? TextDecoration.none
                                           : TextDecoration.lineThrough,
                                     ),
-                                    maxLines: 3,
+                                    maxLines: 4,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   const SizedBox(height: 4),

@@ -6,6 +6,7 @@ import '../widgets/main_navigation_provider.dart';
 import '../screens/login_screen.dart';
 import '../screens/profile_screen.dart';
 import '../services/cart_service.dart';
+import '../utils/realtime_auth_utils.dart';
 
 // ValueNotifier global para o status da Kombi (compartilhado entre todas instâncias)
 final ValueNotifier<bool> kombiOnlineStatus = ValueNotifier<bool>(false);
@@ -33,6 +34,7 @@ class _AppMenuState extends State<AppMenu> {
       false; // Garante apenas uma subscription ativa
   static StreamSubscription?
   _globalKombiSubscription; // Subscription global compartilhada
+  bool _isRecoveringKombiAuth = false;
 
   @override
   void initState() {
@@ -69,29 +71,63 @@ class _AppMenuState extends State<AppMenu> {
 
   void _listenToKombiStatus() {
     debugPrint('🎧 AppMenu - _listenToKombiStatus iniciado');
+    _globalKombiSubscription?.cancel();
     // Escuta mudanças na tabela kombi_location em tempo real
     _globalKombiSubscription = Supabase.instance.client
         .from('kombi_location')
         .stream(primaryKey: ['id'])
-        .listen((data) {
-          debugPrint('🔍 AppMenu - Stream update recebido');
-          debugPrint('📦 AppMenu - Data: $data');
-          debugPrint('📏 AppMenu - Data length: ${data.length}');
+        .listen(
+          (data) {
+            debugPrint('🔍 AppMenu - Stream update recebido');
+            debugPrint('📦 AppMenu - Data: $data');
+            debugPrint('📏 AppMenu - Data length: ${data.length}');
 
-          if (data.isEmpty) {
-            debugPrint(
-              '⚠️ AppMenu - Data vazio, mantendo status atual: ${kombiOnlineStatus.value}',
-            );
-          } else {
-            final isOnline = data.any((d) => d['is_online'] == true);
-            debugPrint(
-              '📡 AppMenu - Status atualizado: ${isOnline ? "ONLINE" : "OFFLINE"}',
-            );
-            kombiOnlineStatus.value =
-                isOnline; // Atualiza o ValueNotifier global
-          }
-        });
+            if (data.isEmpty) {
+              debugPrint(
+                '⚠️ AppMenu - Data vazio, mantendo status atual: ${kombiOnlineStatus.value}',
+              );
+            } else {
+              final isOnline = data.any((d) => d['is_online'] == true);
+              debugPrint(
+                '📡 AppMenu - Status atualizado: ${isOnline ? "ONLINE" : "OFFLINE"}',
+              );
+              kombiOnlineStatus.value =
+                  isOnline; // Atualiza o ValueNotifier global
+            }
+          },
+          onError: (error) {
+            debugPrint('❌ AppMenu - Erro no stream da Kombi: $error');
+            unawaited(_handleKombiStreamError(error));
+          },
+        );
     debugPrint('✅ AppMenu - Stream subscription criado');
+  }
+
+  Future<void> _handleKombiStreamError(Object? error) async {
+    if (_isRecoveringKombiAuth || !mounted) {
+      return;
+    }
+
+    _isRecoveringKombiAuth = true;
+    try {
+      final recovered = await RealtimeAuthUtils.recoverFromAuthError(
+        error: error,
+        source: 'app_menu_kombi_stream',
+        onRecovered: () async {
+          if (!mounted) return;
+          _listenToKombiStatus();
+          await _checkKombiStatus();
+        },
+      );
+
+      if (!recovered && RealtimeAuthUtils.isExpiredJwtError(error)) {
+        debugPrint(
+          '⚠️ AppMenu - Não foi possível recuperar o stream da Kombi após expiração do token',
+        );
+      }
+    } finally {
+      _isRecoveringKombiAuth = false;
+    }
   }
 
   // Verifica se o erro é de conexão de rede

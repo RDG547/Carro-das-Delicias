@@ -12,10 +12,12 @@ import '../widgets/edit_product_dialog.dart';
 import '../widgets/category_icon_widget.dart';
 import '../widgets/favorite_heart_animation.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/flavor_count_badge.dart';
 import '../utils/custom_fab_location.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/constants.dart';
 import '../utils/product_action_helper.dart';
+import '../utils/product_variant_utils.dart';
 import '../utils/scroll_indicator_layout.dart';
 import '../services/favorites_service.dart';
 import '../services/cart_service.dart';
@@ -499,11 +501,11 @@ class _HomeScreenState extends State<HomeScreen>
     // Cancelar timer anterior se existir
     _searchDebounce?.cancel();
 
-    // Criar novo timer com delay de 150ms para resposta mais rápida
-    _searchDebounce = Timer(const Duration(milliseconds: 150), () {
+    // Criar novo timer curto para reação mais natural ao digitar
+    _searchDebounce = Timer(const Duration(milliseconds: 90), () {
       if (mounted) {
         // Atualizar apenas o valor da busca sem setState - mantém o foco!
-        _searchQueryNotifier.value = _searchController.text;
+        _searchQueryNotifier.value = _searchController.text.trim();
         _updateScrollIndicatorAvailability();
       }
     });
@@ -1240,6 +1242,9 @@ class _HomeScreenState extends State<HomeScreen>
                                 child: TextField(
                                   controller: _searchController,
                                   focusNode: _searchFocusNode,
+                                  autocorrect: false,
+                                  enableSuggestions: false,
+                                  textInputAction: TextInputAction.search,
                                   decoration: InputDecoration(
                                     hintText: 'Buscar produtos...',
                                     prefixIcon: const Icon(Icons.search),
@@ -2070,9 +2075,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildProductCard(Map<String, dynamic> produto, {String? tipo}) {
-    final imagens = produto['imagens'];
-    final hasImage = imagens is List && imagens.isNotEmpty;
+    final imagens = ProductVariantUtils.productImages(produto);
+    final hasImage = imagens.isNotEmpty;
     final isAvailable = _isProductAvailable(produto);
+    final flavorCount = ProductVariantUtils.extractFlavors(
+      produto['sabores'],
+    ).length;
 
     // Definir ícone baseado no tipo
     String badgeIcon = '';
@@ -2129,7 +2137,7 @@ class _HomeScreenState extends State<HomeScreen>
                           ),
                           child: hasImage
                               ? Image.network(
-                                  imagens[0],
+                                  imagens.first,
                                   height: imageHeight,
                                   width: double.infinity,
                                   fit: BoxFit.cover,
@@ -2293,8 +2301,18 @@ class _HomeScreenState extends State<HomeScreen>
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   // Nome
-                                  Text(
-                                    produto['nome'] ?? '',
+                                  Text.rich(
+                                    TextSpan(
+                                      children: [
+                                        TextSpan(text: produto['nome'] ?? ''),
+                                        if (flavorCount > 1)
+                                          flavorCountBadgeSpan(
+                                            flavorCount,
+                                            fontSize: isCompactCard ? 9 : 10,
+                                            iconSize: isCompactCard ? 10 : 11,
+                                          ),
+                                      ],
+                                    ),
                                     style: TextStyle(
                                       fontSize: titleFontSize,
                                       fontWeight: FontWeight.bold,
@@ -3154,14 +3172,17 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, dynamic> _getProductDisplayPriceInfo(
     Map<String, dynamic> produto,
   ) {
-    final tamanhos = produto['tamanhos'];
-    final precoAnterior = produto['preco_anterior'];
-    final precoAtual = produto['preco'];
+    final tamanhos = ProductVariantUtils.extractSizes(produto['tamanhos']);
+    final precoAnterior = ProductVariantUtils.toDouble(
+      produto['preco_anterior'],
+    );
+    final precoAtual = ProductVariantUtils.toDouble(produto['preco']);
 
-    if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
+    if (tamanhos.isNotEmpty) {
       final precos = <double>{};
       for (final tamanho in tamanhos) {
-        final precoTamanho = (tamanho['preco'] as num?)?.toDouble() ?? 0.0;
+        final precoTamanho =
+            ProductVariantUtils.toDouble(tamanho['preco']) ?? 0.0;
         if (precoTamanho > 0) {
           precos.add(precoTamanho);
         }
@@ -3178,34 +3199,31 @@ class _HomeScreenState extends State<HomeScreen>
       }
 
       final menorPreco = precos.reduce((a, b) => a < b ? a : b);
-      final previousPrice = (precoAnterior as num?)?.toDouble();
-      final hasDiscount = previousPrice != null && previousPrice > menorPreco;
+      final hasDiscount = precoAnterior != null && precoAnterior > menorPreco;
 
       return {
         'currentPrice': menorPreco,
-        'previousPrice': hasDiscount ? previousPrice : null,
+        'previousPrice': hasDiscount ? precoAnterior : null,
         'hasDiscount': hasDiscount,
         'hasMultiplePrices': tamanhos.length > 1 || precos.length > 1,
         'discountPercentage': hasDiscount
-            ? (((previousPrice - menorPreco) / previousPrice) * 100).round()
+            ? (((precoAnterior - menorPreco) / precoAnterior) * 100).round()
             : null,
       };
     }
 
-    final currentPrice = (precoAtual as num?)?.toDouble();
-    final previousPrice = (precoAnterior as num?)?.toDouble();
     final hasDiscount =
-        previousPrice != null &&
-        currentPrice != null &&
-        previousPrice > currentPrice;
+        precoAnterior != null &&
+        precoAtual != null &&
+        precoAnterior > precoAtual;
 
     return {
-      'currentPrice': currentPrice,
-      'previousPrice': hasDiscount ? previousPrice : null,
+      'currentPrice': precoAtual,
+      'previousPrice': hasDiscount ? precoAnterior : null,
       'hasDiscount': hasDiscount,
       'hasMultiplePrices': false,
       'discountPercentage': hasDiscount
-          ? (((previousPrice - currentPrice) / previousPrice) * 100).round()
+          ? (((precoAnterior - precoAtual) / precoAnterior) * 100).round()
           : null,
     };
   }

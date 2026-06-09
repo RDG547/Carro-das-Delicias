@@ -6,11 +6,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/base_screen.dart';
 import '../providers/admin_status_provider.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/flavor_count_badge.dart';
 import '../widgets/main_navigation_provider.dart';
 import '../services/cart_service.dart';
 import '../services/catalog_sync_service.dart';
 import '../services/main_navigation_service.dart';
 import '../utils/product_action_helper.dart';
+import '../utils/product_variant_utils.dart';
 import '../utils/scroll_indicator_layout.dart';
 import '../widgets/scroll_down_indicator.dart';
 import 'cart_screen.dart';
@@ -306,13 +308,16 @@ class _DescontosScreenState extends State<DescontosScreen>
   }
 
   Map<String, dynamic> _getDisplayPriceInfo(Map<String, dynamic> produto) {
-    final tamanhos = produto['tamanhos'];
-    final precoAnterior = produto['preco_anterior']?.toDouble();
+    final tamanhos = ProductVariantUtils.extractSizes(produto['tamanhos']);
+    final precoAnterior = ProductVariantUtils.toDouble(
+      produto['preco_anterior'],
+    );
 
-    if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
+    if (tamanhos.isNotEmpty) {
       final precos = <double>{};
       for (final tamanho in tamanhos) {
-        final precoTamanho = tamanho['preco']?.toDouble() ?? 0.0;
+        final precoTamanho =
+            ProductVariantUtils.toDouble(tamanho['preco']) ?? 0.0;
         if (precoTamanho > 0) precos.add(precoTamanho);
       }
 
@@ -336,7 +341,7 @@ class _DescontosScreenState extends State<DescontosScreen>
       };
     }
 
-    final precoAtual = produto['preco']?.toDouble();
+    final precoAtual = ProductVariantUtils.toDouble(produto['preco']);
     final hasDiscount =
         precoAnterior != null &&
         precoAtual != null &&
@@ -614,6 +619,9 @@ class _DescontosScreenState extends State<DescontosScreen>
                       final hasDiscount = priceInfo['hasDiscount'] as bool;
                       final hasMultiplePrices =
                           priceInfo['hasMultiplePrices'] as bool;
+                      final flavorCount = ProductVariantUtils.extractFlavors(
+                        produto['sabores'],
+                      ).length;
                       final percentualDesconto =
                           hasDiscount && precoAtual != null
                           ? _calcularPercentualDesconto(
@@ -858,8 +866,21 @@ class _DescontosScreenState extends State<DescontosScreen>
                                             : _buildEmojiPlaceholder(categoria),
                                       ),
                                       const SizedBox(height: 12),
-                                      Text(
-                                        produto['nome'] ?? 'Produto',
+                                      Text.rich(
+                                        TextSpan(
+                                          children: [
+                                            TextSpan(
+                                              text:
+                                                  produto['nome'] ?? 'Produto',
+                                            ),
+                                            if (flavorCount > 1)
+                                              flavorCountBadgeSpan(
+                                                flavorCount,
+                                                fontSize: 11,
+                                                iconSize: 12,
+                                              ),
+                                          ],
+                                        ),
                                         style: TextStyle(
                                           fontSize: 18,
                                           fontWeight: FontWeight.bold,
@@ -867,6 +888,8 @@ class _DescontosScreenState extends State<DescontosScreen>
                                               ? TextDecoration.none
                                               : TextDecoration.lineThrough,
                                         ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                       if (produto['descricao'] != null)
                                         Padding(

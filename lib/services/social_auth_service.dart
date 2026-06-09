@@ -1,14 +1,21 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SocialAuthService {
   /// Web Client ID do Google Cloud Console (mesmo configurado no Supabase Auth).
   /// Defina via GOOGLE_WEB_CLIENT_ID no .env
-  static const String _webClientId = String.fromEnvironment(
+  static const String _dartDefinedWebClientId = String.fromEnvironment(
     'GOOGLE_WEB_CLIENT_ID',
     defaultValue: '',
   );
+
+  static String get _webClientId {
+    final fromDartDefine = _dartDefinedWebClientId.trim();
+    if (fromDartDefine.isNotEmpty) return fromDartDefine;
+    return dotenv.env['GOOGLE_WEB_CLIENT_ID']?.trim() ?? '';
+  }
 
   static Future<void> signInWithGoogle() async {
     // Na web, usar OAuth redirect padrão
@@ -23,8 +30,15 @@ class SocialAuthService {
       return;
     }
 
+    final webClientId = _webClientId;
+    if (webClientId.isEmpty) {
+      throw Exception(
+        'GOOGLE_WEB_CLIENT_ID não configurado. Adicione o Web Client ID do Google no .env e confirme o SHA-1/SHA-256 do app no Google Cloud/Supabase.',
+      );
+    }
+
     // No mobile, usar login nativo (dentro do app)
-    final googleSignIn = GoogleSignIn(serverClientId: _webClientId);
+    final googleSignIn = GoogleSignIn(serverClientId: webClientId);
 
     final googleUser = await googleSignIn.signIn();
     if (googleUser == null) {

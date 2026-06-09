@@ -68,7 +68,8 @@ class RegisterScreen extends StatefulWidget {
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> {
+class _RegisterScreenState extends State<RegisterScreen>
+    with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -77,10 +78,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _confirmPasswordController = TextEditingController();
   final _loadingManager = LoadingManager();
   StreamSubscription<AuthState>? _authSubscription;
+  bool _keyboardVisible = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _keyboardVisible = _isKeyboardVisibleFromWindow();
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((
       data,
     ) {
@@ -92,6 +96,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _authSubscription?.cancel();
     _nameController.dispose();
     _phoneController.dispose();
@@ -100,6 +105,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _confirmPasswordController.dispose();
     _loadingManager.dispose();
     super.dispose();
+  }
+
+  bool _isKeyboardVisibleFromWindow() {
+    return WidgetsBinding.instance.platformDispatcher.views.any(
+      (view) => view.viewInsets.bottom > 0,
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    final keyboardVisible = _isKeyboardVisibleFromWindow();
+    if (keyboardVisible == _keyboardVisible || !mounted) return;
+    setState(() {
+      _keyboardVisible = keyboardVisible;
+    });
   }
 
   void _returnToAuthRoot() {
@@ -375,9 +395,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenWidth = mediaQuery.size.width;
-    final keyboardVisible = mediaQuery.viewInsets.bottom > 0;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final keyboardVisible = _keyboardVisible;
     final isCompact = screenWidth < 380;
     final horizontalPadding = screenWidth < 360 ? 16.0 : 24.0;
 

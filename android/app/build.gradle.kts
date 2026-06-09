@@ -3,15 +3,20 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
-    id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // The Flutter Gradle Plugin must be applied after the Android Gradle plugin.
 }
 
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+val localPropertiesFile = rootProject.file("local.properties")
+val localProperties = Properties()
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
 }
 
 android {
@@ -30,10 +35,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
-    }
-
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.rdtech.carrodasdelicias"
@@ -46,10 +47,15 @@ android {
 
         // Mapbox Access Token (read from local.properties or CI environment)
         val mapboxToken = System.getenv("MAPBOX_ACCESS_TOKEN")
-            ?: (rootProject.file("local.properties").takeIf { it.exists() }
-                ?.let { java.util.Properties().also { p -> p.load(it.inputStream()) }["MAPBOX_ACCESS_TOKEN"] as? String })
+            ?: localProperties.getProperty("MAPBOX_ACCESS_TOKEN")
             ?: ""
         manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = mapboxToken
+
+        val googleWebClientId = System.getenv("GOOGLE_WEB_CLIENT_ID")
+            ?: localProperties.getProperty("GOOGLE_WEB_CLIENT_ID")
+            ?: ""
+        resValue("string", "default_web_client_id", googleWebClientId)
+        resValue("string", "server_client_id", googleWebClientId)
     }
 
     signingConfigs {
@@ -87,7 +93,7 @@ dependencies {
     // Desugaring para suportar APIs Java 8+ em versões antigas do Android
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     // Edge-to-edge support for Android 15+
-    implementation("androidx.activity:activity-ktx:1.9.3")
+    implementation("androidx.activity:activity:1.12.4")
 }
 
 // Workaround: Copy APK and AAB to expected Flutter location

@@ -21,18 +21,21 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _currentIndex = 0;
   late PageController _pageController;
   bool _isAdmin = false;
   bool _isLoadingAdminStatus = true;
   bool _showNavbar = true; // Controla se a navbar deve ser exibida
+  bool _keyboardVisible = false;
   int _currentPageIndex = 0; // Rastreia o índice atual do PageView
   final GlobalKey<NotificationBellNavbarState> _notificationKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _keyboardVisible = _isKeyboardVisibleFromWindow();
     _pageController = PageController();
     MainNavigationService.attach(_navigateToPageDirect);
     _checkAdminStatus();
@@ -40,9 +43,25 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     MainNavigationService.detach();
     _pageController.dispose();
     super.dispose();
+  }
+
+  bool _isKeyboardVisibleFromWindow() {
+    return WidgetsBinding.instance.platformDispatcher.views.any(
+      (view) => view.viewInsets.bottom > 0,
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    final keyboardVisible = _isKeyboardVisibleFromWindow();
+    if (keyboardVisible == _keyboardVisible || !mounted) return;
+    setState(() {
+      _keyboardVisible = keyboardVisible;
+    });
   }
 
   Future<void> _checkAdminStatus() async {
@@ -163,8 +182,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     final view = View.of(context);
     final rawBottomInset = view.viewPadding.bottom / view.devicePixelRatio;
-    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
-    final navbarBottomOffset = keyboardVisible ? 16.0 : 16.0 + rawBottomInset;
+    final navbarBottomOffset = _keyboardVisible ? 16.0 : 16.0 + rawBottomInset;
 
     return Scaffold(
       backgroundColor: Colors.white,

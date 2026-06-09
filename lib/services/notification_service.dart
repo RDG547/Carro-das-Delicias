@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'permission_service.dart';
+import '../utils/realtime_auth_utils.dart';
 
 class NotificationService {
   static final SupabaseClient _supabase = Supabase.instance.client;
@@ -9,6 +12,7 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
   static RealtimeChannel? _notificationChannel;
+  static bool _isRecoveringRealtimeAuth = false;
 
   /// Inicializar serviço de notificações locais
   static Future<void> initialize() async {
@@ -108,6 +112,7 @@ class NotificationService {
             debugPrint('⏱️ Timeout ao conectar canal principal');
           } else if (status == RealtimeSubscribeStatus.channelError) {
             debugPrint('❌ Erro no canal principal: $error');
+            unawaited(_handleChannelError(error));
           }
         });
 
@@ -119,6 +124,32 @@ class NotificationService {
     _notificationChannel?.unsubscribe();
     _notificationChannel = null;
     debugPrint('🔇 Parou de escutar notificações');
+  }
+
+  static Future<void> _handleChannelError(Object? error) async {
+    if (_isRecoveringRealtimeAuth) {
+      return;
+    }
+
+    _isRecoveringRealtimeAuth = true;
+    try {
+      final recovered = await RealtimeAuthUtils.recoverFromAuthError(
+        error: error,
+        source: 'notification_service',
+        onRecovered: () async {
+          startListeningToNotifications();
+          await checkPendingNotifications();
+        },
+      );
+
+      if (!recovered && RealtimeAuthUtils.isExpiredJwtError(error)) {
+        debugPrint(
+          '⚠️ [notification_service] Não foi possível recuperar o canal de notificações após expiração do token',
+        );
+      }
+    } finally {
+      _isRecoveringRealtimeAuth = false;
+    }
   }
 
   /// Callback quando notificação é tocada (funciona em foreground e background)

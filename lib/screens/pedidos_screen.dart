@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/base_screen.dart';
@@ -8,6 +9,7 @@ import '../services/order_payment_service.dart';
 import '../services/cart_service.dart';
 import '../services/main_navigation_service.dart';
 import '../widgets/main_navigation_provider.dart';
+import '../utils/realtime_auth_utils.dart';
 import 'abacatepay_payment_screen.dart';
 import 'stripe_payment_screen.dart';
 
@@ -25,6 +27,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
   int _realtimeRetryCount = 0;
   static const int _maxRealtimeRetries = 5;
   Timer? _retryTimer;
+  bool _isRecoveringRealtimeAuth = false;
 
   // Conjuntos para controle otimista de cancelamento/exclusão
   final Set<int> _recentlyCancelledIds = {};
@@ -64,6 +67,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
           },
           onError: (error) {
             debugPrint('❌ Erro no stream de pedidos: $error');
+            unawaited(_handlePedidosRealtimeError(error));
             // Retry with exponential backoff on timeout/error
             if (_realtimeRetryCount < _maxRealtimeRetries && mounted) {
               _realtimeRetryCount++;
@@ -83,6 +87,33 @@ class _PedidosScreenState extends State<PedidosScreen> {
             }
           },
         );
+  }
+
+  Future<void> _handlePedidosRealtimeError(Object? error) async {
+    if (_isRecoveringRealtimeAuth || !mounted) {
+      return;
+    }
+
+    _isRecoveringRealtimeAuth = true;
+    try {
+      final recovered = await RealtimeAuthUtils.recoverFromAuthError(
+        error: error,
+        source: 'pedidos_screen_stream',
+        onRecovered: () async {
+          if (!mounted) return;
+          _setupRealtimeSubscription();
+          await _loadPedidos();
+        },
+      );
+
+      if (!recovered && RealtimeAuthUtils.isExpiredJwtError(error)) {
+        debugPrint(
+          '⚠️ PedidosScreen - Não foi possível recuperar o stream após expiração do token',
+        );
+      }
+    } finally {
+      _isRecoveringRealtimeAuth = false;
+    }
   }
 
   Future<void> _processarPedidosRealtime(
@@ -175,21 +206,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
         final itens = rawItens.map<Map<String, dynamic>>((item) {
           final produto = item['produtos'];
           final tamanhoRaw = item['tamanho_selecionado'];
-          String? tamanhoFormatado;
-
-          if (tamanhoRaw != null) {
-            try {
-              // Se for um Map, extrair o nome
-              if (tamanhoRaw is Map) {
-                tamanhoFormatado = tamanhoRaw['nome']?.toString();
-              } else {
-                // Se for String, usar direto
-                tamanhoFormatado = tamanhoRaw.toString();
-              }
-            } catch (e) {
-              debugPrint('Erro ao processar tamanho: $e');
-            }
-          }
+          final saborRaw = item['sabor_selecionado'];
+          final tamanhoFormatado = _formatSelectedOption(tamanhoRaw);
+          final saborFormatado = _formatSelectedOption(saborRaw);
 
           return {
             'produto_id': item['produto_id'], // IMPORTANTE: incluir produto_id
@@ -199,7 +218,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
             'subtotal': item['subtotal'],
             'observacoes': item['observacoes'],
             'tamanho': tamanhoFormatado,
-            'imagem_url': produto?['imagem_url'],
+            'sabor': saborFormatado,
+            'imagem_url': item['imagem_url'] ?? produto?['imagem_url'],
           };
         }).toList();
 
@@ -309,21 +329,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
               .map<Map<String, dynamic>>((item) {
                 final produto = item['produtos'];
                 final tamanhoRaw = item['tamanho_selecionado'];
-                String? tamanhoFormatado;
-
-                if (tamanhoRaw != null) {
-                  try {
-                    // Se for um Map, extrair o nome
-                    if (tamanhoRaw is Map) {
-                      tamanhoFormatado = tamanhoRaw['nome']?.toString();
-                    } else {
-                      // Se for String, usar direto
-                      tamanhoFormatado = tamanhoRaw.toString();
-                    }
-                  } catch (e) {
-                    debugPrint('Erro ao processar tamanho: $e');
-                  }
-                }
+                final saborRaw = item['sabor_selecionado'];
+                final tamanhoFormatado = _formatSelectedOption(tamanhoRaw);
+                final saborFormatado = _formatSelectedOption(saborRaw);
 
                 return {
                   'produto_id':
@@ -334,7 +342,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
                   'subtotal': item['subtotal'],
                   'observacoes': item['observacoes'],
                   'tamanho': tamanhoFormatado,
-                  'imagem_url': produto?['imagem_url'],
+                  'sabor': saborFormatado,
+                  'imagem_url': item['imagem_url'] ?? produto?['imagem_url'],
                 };
               })
               .toList();
@@ -407,6 +416,27 @@ class _PedidosScreenState extends State<PedidosScreen> {
       return 'R\$ ${price.toStringAsFixed(2).replaceAll('.', ',')}';
     }
     return 'R\$ 0,00';
+  }
+
+  String? _formatSelectedOption(dynamic rawOption) {
+    if (rawOption == null) return null;
+
+    try {
+      if (rawOption is Map) {
+        return (rawOption['nome'] ?? rawOption['name'])?.toString();
+      }
+
+      final text = rawOption.toString();
+      if (text.trim().isEmpty) return null;
+
+      final decoded = json.decode(text);
+      if (decoded is Map) {
+        return (decoded['nome'] ?? decoded['name'])?.toString() ?? text;
+      }
+      return text;
+    } catch (_) {
+      return rawOption.toString();
+    }
   }
 
   String _formatDate(String dateStr) {
@@ -887,10 +917,27 @@ class _PedidosScreenState extends State<PedidosScreen> {
             'categoria_nome': produtoResponse['categorias']?['nome'],
             'categoria_icone': produtoResponse['categorias']?['icone'],
           };
+          final produtoSelecionado = Map<String, dynamic>.from(produto);
+          if (item['tamanho'] != null &&
+              item['tamanho'].toString().trim().isNotEmpty) {
+            produtoSelecionado['tamanho_selecionado'] = item['tamanho'];
+          }
+          if (item['sabor'] != null &&
+              item['sabor'].toString().trim().isNotEmpty) {
+            produtoSelecionado['sabor_selecionado'] = item['sabor'];
+          }
+          if (item['preco'] != null) {
+            produtoSelecionado['preco'] = item['preco'];
+          }
+          if (item['imagem_url'] != null &&
+              item['imagem_url'].toString().trim().isNotEmpty) {
+            produtoSelecionado['imagem_url'] = item['imagem_url'];
+            produtoSelecionado['imagens'] = [item['imagem_url']];
+          }
 
           debugPrint('✅ Adicionando ao carrinho: ${produto['nome']}');
           await cartService.addItem(
-            produto,
+            produtoSelecionado,
             quantidade: item['quantidade'] ?? 1,
             observacoes: item['observacoes'],
           );
@@ -1166,18 +1213,11 @@ class _PedidosScreenState extends State<PedidosScreen> {
                               ) {
                                 final item = pedido['itens'][itemIndex];
                                 final tamanho = item['tamanho'];
-                                // Extrai o nome do tamanho se for um objeto/map
-                                String? tamanhoTexto;
-                                if (tamanho != null) {
-                                  if (tamanho is Map) {
-                                    tamanhoTexto =
-                                        tamanho['nome']?.toString() ??
-                                        tamanho['name']?.toString();
-                                  } else if (tamanho is String &&
-                                      tamanho.isNotEmpty) {
-                                    tamanhoTexto = tamanho;
-                                  }
-                                }
+                                final sabor = item['sabor'];
+                                final tamanhoTexto = _formatSelectedOption(
+                                  tamanho,
+                                );
+                                final saborTexto = _formatSelectedOption(sabor);
 
                                 return Padding(
                                   padding: const EdgeInsets.only(bottom: 4),
@@ -1228,10 +1268,18 @@ class _PedidosScreenState extends State<PedidosScreen> {
                                               ),
                                               if (tamanhoTexto != null)
                                                 TextSpan(
-                                                  text: ' ($tamanhoTexto)',
+                                                  text: ' - $tamanhoTexto',
                                                   style: TextStyle(
                                                     fontWeight: FontWeight.bold,
                                                     color: Colors.purple[700],
+                                                  ),
+                                                ),
+                                              if (saborTexto != null)
+                                                TextSpan(
+                                                  text: ' - $saborTexto',
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.orange[700],
                                                   ),
                                                 ),
                                             ],
@@ -1762,6 +1810,25 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     }
   }
 
+  Widget _buildItemOptionChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final displayStatus = _resolveStatusKey(_pedidoAtual);
@@ -1924,6 +1991,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
               ...(widget.pedido['itens'] as List<dynamic>? ?? []).map((item) {
                 final tamanho = item['tamanho'];
+                final sabor = item['sabor'];
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(12),
@@ -1980,27 +2048,18 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                                 ),
                                 if (tamanho != null &&
                                     tamanho.toString().isNotEmpty)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.purple[100],
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: Colors.purple[300]!,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      tamanho.toString(),
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.purple[700],
-                                      ),
-                                    ),
+                                  _buildItemOptionChip(
+                                    tamanho.toString(),
+                                    Colors.purple,
                                   ),
+                                if (sabor != null &&
+                                    sabor.toString().isNotEmpty) ...[
+                                  const SizedBox(width: 4),
+                                  _buildItemOptionChip(
+                                    sabor.toString(),
+                                    Colors.orange,
+                                  ),
+                                ],
                               ],
                             ),
                             const SizedBox(height: 4),

@@ -1,10 +1,9 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import '../screens/checkout_screen.dart';
 import '../services/cart_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/product_variant_utils.dart';
 import '../widgets/size_selector_dialog.dart';
 
 class ProductActionHelper {
@@ -15,30 +14,57 @@ class ProductActionHelper {
     required VoidCallback onViewCart,
     bool avoidAdminFab = false,
   }) async {
-    final tamanhos = _extractSizes(produto['tamanhos']);
+    final tamanhos = ProductVariantUtils.extractSizes(produto['tamanhos']);
+    final sabores = ProductVariantUtils.extractFlavors(produto['sabores']);
 
-    if (tamanhos.isNotEmpty) {
-      final produtoComTamanhos = Map<String, dynamic>.from(produto)
-        ..['tamanhos'] = tamanhos;
+    if (tamanhos.isNotEmpty || sabores.isNotEmpty) {
+      final produtoComOpcoes = Map<String, dynamic>.from(produto)
+        ..['tamanhos'] = tamanhos
+        ..['sabores'] = sabores;
 
       await showDialog(
         context: context,
         builder: (_) => SizeSelectorDialog(
-          produto: produtoComTamanhos,
+          produto: produtoComOpcoes,
           action: SizeSelectionAction.addToCart,
-          onSizeSelected: (selectedSize) async {
-            final produtoComTamanho = Map<String, dynamic>.from(produto)
-              ..['preco'] = _toDouble(selectedSize['preco'])
-              ..['tamanho_selecionado'] = selectedSize['nome'];
+          onOptionsSelected: (selection) async {
+            final produtoSelecionado = ProductVariantUtils.applySelections(
+              produto,
+              selectedSize: selection.selectedSize,
+              selectedFlavor: selection.selectedFlavor,
+            );
+            if (ProductVariantUtils.toDouble(produtoSelecionado['preco']) ==
+                null) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Produto sem preço não pode ser adicionado ao carrinho',
+                  ),
+                  backgroundColor: Colors.red,
+                ),
+              );
+              return;
+            }
 
-            await cartService.addItem(produtoComTamanho);
+            await cartService.addItem(produtoSelecionado);
 
             if (!context.mounted) return;
 
+            final sizeName = ProductVariantUtils.optionName(
+              selection.selectedSize,
+            );
+            final flavorName = ProductVariantUtils.optionName(
+              selection.selectedFlavor,
+            );
+            final suffix = ProductVariantUtils.selectionSuffix(
+              sizeName: sizeName,
+              flavorName: flavorName,
+            );
+
             AppSnackBar.showCartAdded(
               context,
-              message:
-                  '${produto['nome']} (${selectedSize['nome']}) adicionado ao carrinho!',
+              message: '${produto['nome']}$suffix adicionado ao carrinho!',
               onViewCart: onViewCart,
               avoidAdminFab: avoidAdminFab,
             );
@@ -48,7 +74,7 @@ class ProductActionHelper {
       return;
     }
 
-    final preco = _toDouble(produto['preco']);
+    final preco = ProductVariantUtils.toDouble(produto['preco']);
     if (preco == null) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -79,26 +105,41 @@ class ProductActionHelper {
     required CartService cartService,
     required Map<String, dynamic> produto,
   }) async {
-    final tamanhos = _extractSizes(produto['tamanhos']);
+    final tamanhos = ProductVariantUtils.extractSizes(produto['tamanhos']);
+    final sabores = ProductVariantUtils.extractFlavors(produto['sabores']);
 
-    if (tamanhos.isNotEmpty) {
-      final produtoComTamanhos = Map<String, dynamic>.from(produto)
-        ..['tamanhos'] = tamanhos;
+    if (tamanhos.isNotEmpty || sabores.isNotEmpty) {
+      final produtoComOpcoes = Map<String, dynamic>.from(produto)
+        ..['tamanhos'] = tamanhos
+        ..['sabores'] = sabores;
 
       await showDialog(
         context: context,
         builder: (_) => SizeSelectorDialog(
-          produto: produtoComTamanhos,
+          produto: produtoComOpcoes,
           action: SizeSelectionAction.buyNow,
-          onSizeSelected: (selectedSize) async {
-            final produtoComTamanho = Map<String, dynamic>.from(produto)
-              ..['preco'] = _toDouble(selectedSize['preco'])
-              ..['tamanho_selecionado'] = selectedSize['nome'];
+          onOptionsSelected: (selection) async {
+            final produtoSelecionado = ProductVariantUtils.applySelections(
+              produto,
+              selectedSize: selection.selectedSize,
+              selectedFlavor: selection.selectedFlavor,
+            );
+            if (ProductVariantUtils.toDouble(produtoSelecionado['preco']) ==
+                null) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Produto sem preço não pode ser comprado'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+              return;
+            }
 
             await _finishBuyNow(
               context: context,
               cartService: cartService,
-              produto: produtoComTamanho,
+              produto: produtoSelecionado,
             );
           },
         ),
@@ -106,7 +147,7 @@ class ProductActionHelper {
       return;
     }
 
-    final preco = _toDouble(produto['preco']);
+    final preco = ProductVariantUtils.toDouble(produto['preco']);
     if (preco == null) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -148,39 +189,5 @@ class ProductActionHelper {
     if (result == null && context.mounted) {
       await cartService.clearBuyNowItems();
     }
-  }
-
-  static double? _toDouble(dynamic value) {
-    if (value == null) return null;
-    if (value is num) return value.toDouble();
-    if (value is String) {
-      final normalized = value
-          .replaceAll('R\$', '')
-          .replaceAll(RegExp(r'\s+'), '')
-          .replaceAll(',', '.');
-      return double.tryParse(normalized);
-    }
-    return null;
-  }
-
-  static List<Map<String, dynamic>> _extractSizes(dynamic rawSizes) {
-    dynamic parsed = rawSizes;
-
-    if (parsed is String && parsed.trim().isNotEmpty) {
-      try {
-        parsed = jsonDecode(parsed);
-      } catch (_) {
-        return const [];
-      }
-    }
-
-    if (parsed is! List) {
-      return const [];
-    }
-
-    return parsed
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .toList();
   }
 }

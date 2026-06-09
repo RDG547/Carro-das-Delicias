@@ -24,7 +24,7 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutScreenState extends State<CheckoutScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _cartService = CartService();
   final _scrollController = ScrollController();
@@ -32,6 +32,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   bool _showScrollIndicator = true;
   bool _hasScrolledDown = false;
   bool _isScrollIndicatorAnimating = false;
+  bool _keyboardVisible = false;
 
   // Controllers para os campos do formulário
   final _nomeController = TextEditingController();
@@ -110,6 +111,8 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _keyboardVisible = _isKeyboardVisibleFromWindow();
     _cartService.addListener(_onCartChanged);
     _loadUserData();
     _loadReputacao();
@@ -140,6 +143,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _cartService.removeListener(_onCartChanged);
     _scrollController.dispose();
     _scrollIndicatorController.dispose();
@@ -152,6 +156,21 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     _observacoesController.dispose();
     _trocoController.dispose();
     super.dispose();
+  }
+
+  bool _isKeyboardVisibleFromWindow() {
+    return WidgetsBinding.instance.platformDispatcher.views.any(
+      (view) => view.viewInsets.bottom > 0,
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    final keyboardVisible = _isKeyboardVisibleFromWindow();
+    if (keyboardVisible == _keyboardVisible || !mounted) return;
+    setState(() {
+      _keyboardVisible = keyboardVisible;
+    });
   }
 
   void _onCartChanged() {
@@ -292,11 +311,9 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
   @override
   Widget build(BuildContext context) {
-    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
-
     return Scaffold(
       backgroundColor: Colors.white,
-      resizeToAvoidBottomInset: true,
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text(
           'Finalizar Pedido',
@@ -319,8 +336,8 @@ class _CheckoutScreenState extends State<CheckoutScreen>
           ? _buildEmptyCart()
           : Stack(
               children: [
-                _buildCheckoutForm(keyboardVisible: keyboardVisible),
-                if (_showScrollIndicator && !keyboardVisible)
+                _buildCheckoutForm(keyboardVisible: _keyboardVisible),
+                if (_showScrollIndicator && !_keyboardVisible)
                   Positioned(
                     bottom: 16,
                     left: 0,
@@ -331,7 +348,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                   ),
               ],
             ),
-      bottomNavigationBar: _cartService.isEmpty || keyboardVisible
+      bottomNavigationBar: _cartService.isEmpty || _keyboardVisible
           ? null
           : _buildBottomBar(),
     );
@@ -505,7 +522,21 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                       Padding(
                         padding: const EdgeInsets.only(left: 4),
                         child: Text(
-                          'Tamanho: ${_formatTamanho(item.tamanhoSelecionado!)}',
+                          'Tamanho: ${_formatOption(item.tamanhoSelecionado!)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (item.saborSelecionado != null) ...[
+                      const SizedBox(height: 2),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4),
+                        child: Text(
+                          'Sabor: ${_formatOption(item.saborSelecionado!)}',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey[600],
@@ -1810,6 +1841,10 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         'subtotal': item.subtotal,
         'observacoes': item.observacoes,
         'tamanho_selecionado': item.tamanhoSelecionado,
+        if (item.saborSelecionado != null)
+          'sabor_selecionado': item.saborSelecionado,
+        if (item.saborSelecionado != null && item.imagemUrl != null)
+          'imagem_url': item.imagemUrl,
       };
     }).toList();
   }
@@ -2083,15 +2118,15 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     }
   }
 
-  String _formatTamanho(String tamanhoJson) {
+  String _formatOption(String optionJson) {
     try {
-      final tamanho = json.decode(tamanhoJson);
-      if (tamanho is Map<String, dynamic>) {
-        return tamanho['nome'] ?? tamanhoJson;
+      final option = json.decode(optionJson);
+      if (option is Map<String, dynamic>) {
+        return option['nome'] ?? option['name'] ?? optionJson;
       }
-      return tamanhoJson;
+      return optionJson;
     } catch (e) {
-      return tamanhoJson;
+      return optionJson;
     }
   }
 }

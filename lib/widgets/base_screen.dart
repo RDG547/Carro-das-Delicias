@@ -76,7 +76,7 @@ class BaseScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: backgroundColor ?? Colors.white,
-      resizeToAvoidBottomInset: true,
+      resizeToAvoidBottomInset: false,
       appBar: hasAppBar
           ? PreferredSize(
               preferredSize: const Size.fromHeight(

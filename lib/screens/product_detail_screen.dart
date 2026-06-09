@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
@@ -9,8 +8,13 @@ import '../services/catalog_sync_service.dart';
 import '../services/favorites_service.dart';
 import '../utils/constants.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/product_action_helper.dart';
+import '../utils/product_variant_utils.dart';
 import '../widgets/favorite_heart_animation.dart';
+import '../widgets/adaptive_dropdown_menu.dart';
 import '../widgets/category_icon_widget.dart';
+import '../widgets/flavor_count_badge.dart';
+import '../widgets/flavor_icon_widget.dart';
 import '../widgets/scroll_down_indicator.dart';
 
 class ProductDetailScreen extends StatefulWidget {
@@ -23,7 +27,7 @@ class ProductDetailScreen extends StatefulWidget {
 }
 
 class _ProductDetailScreenState extends State<ProductDetailScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _observacoesController = TextEditingController();
   int _quantidade = 1;
   final _cartService = CartService();
@@ -33,6 +37,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   int _currentImageIndex = 0;
   bool _showScrollIndicator = true;
   bool _isScrollIndicatorAnimating = false;
+  bool _keyboardVisible = false;
   late final AnimationController _scrollIndicatorController;
   RealtimeChannel? _productsChannel;
   Timer? _similarProductsRefreshDebounce;
@@ -63,6 +68,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
   // Tamanho selecionado (para produtos com múltiplos tamanhos)
   Map<String, dynamic>? _selectedSize;
+  Map<String, dynamic>? _selectedFlavor;
 
   // Cache de produtos semelhantes para evitar recarregar
   List<Map<String, dynamic>>? _cachedSimilarProducts;
@@ -70,6 +76,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _keyboardVisible = _isKeyboardVisibleFromWindow();
     _scrollIndicatorController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -83,9 +91,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       }
     });
     // Se o produto tem tamanhos, selecionar o primeiro por padrão
-    final tamanhos = widget.produto['tamanhos'];
-    if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
-      _selectedSize = tamanhos[0];
+    final tamanhos = ProductVariantUtils.extractSizes(
+      widget.produto['tamanhos'],
+    );
+    if (tamanhos.isNotEmpty) {
+      _selectedSize = tamanhos.first;
+    }
+    final sabores = ProductVariantUtils.extractFlavors(
+      widget.produto['sabores'],
+    );
+    if (sabores.isNotEmpty) {
+      _selectedFlavor = sabores.first;
     }
     _favoritesService.addListener(_onFavoritesChanged);
     _favoritesService.loadFavorites();
@@ -101,6 +117,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _favoritesService.removeListener(_onFavoritesChanged);
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
     _similarProductsRefreshDebounce?.cancel();
@@ -112,6 +129,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     _scrollController.dispose();
     _scrollIndicatorController.dispose();
     super.dispose();
+  }
+
+  bool _isKeyboardVisibleFromWindow() {
+    return WidgetsBinding.instance.platformDispatcher.views.any(
+      (view) => view.viewInsets.bottom > 0,
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    final keyboardVisible = _isKeyboardVisibleFromWindow();
+    if (keyboardVisible == _keyboardVisible || !mounted) return;
+    setState(() {
+      _keyboardVisible = keyboardVisible;
+    });
   }
 
   String _getObservacaoPlaceholder() {
@@ -292,11 +324,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
   @override
   Widget build(BuildContext context) {
-    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
-
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      resizeToAvoidBottomInset: true,
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
           CustomScrollView(
@@ -389,8 +419,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                         // Seletor de tamanho (se houver múltiplos tamanhos)
                         _buildSizeSelector(),
 
-                        // Preço
-                        _buildPriceSection(),
+                        // Preço e sabor
+                        _buildPriceAndFlavorSection(),
                         const SizedBox(height: 16),
 
                         // Badges (mais vendido, novidade, promoção)
@@ -419,7 +449,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
               ),
             ],
           ),
-          if (_showScrollIndicator && !keyboardVisible)
+          if (_showScrollIndicator && !_keyboardVisible)
             Positioned(
               bottom: 16,
               left: 0,
@@ -432,30 +462,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
             ),
         ],
       ),
-      bottomNavigationBar: keyboardVisible ? null : _buildBottomBar(),
+      bottomNavigationBar: _keyboardVisible ? null : _buildBottomBar(),
     );
   }
 
   Widget _buildProductImage() {
-    // Obter lista de imagens
-    final List<String> imagens = [];
-
-    // Adicionar imagens do array 'imagens'
-    if (widget.produto['imagens'] != null &&
-        widget.produto['imagens'] is List) {
-      for (var img in widget.produto['imagens']) {
-        if (img != null && img.toString().isNotEmpty) {
-          imagens.add(img.toString());
-        }
-      }
-    }
-
-    // Se não houver imagens no array, usar imagem_url
-    if (imagens.isEmpty &&
-        widget.produto['imagem_url'] != null &&
-        widget.produto['imagem_url'].toString().isNotEmpty) {
-      imagens.add(widget.produto['imagem_url'].toString());
-    }
+    final imagens = ProductVariantUtils.productImages(
+      widget.produto,
+      selectedFlavor: _selectedFlavor,
+    );
 
     // Se não houver imagens, mostrar placeholder
     if (imagens.isEmpty) {
@@ -634,10 +649,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Widget _buildSizeSelector() {
-    final tamanhos = widget.produto['tamanhos'];
+    final tamanhos = ProductVariantUtils.extractSizes(
+      widget.produto['tamanhos'],
+    );
 
     // Se não tem tamanhos, não mostrar nada
-    if (tamanhos == null || tamanhos is! List || tamanhos.isEmpty) {
+    if (tamanhos.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -657,7 +674,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
           spacing: 8,
           runSpacing: 8,
           children: tamanhos.map<Widget>((tamanho) {
-            final isSelected = _selectedSize == tamanho;
+            final isSelected = _isSameOption(_selectedSize, tamanho);
+            final preco = ProductVariantUtils.toDouble(tamanho['preco']) ?? 0.0;
             return GestureDetector(
               onTap: () {
                 setState(() {
@@ -691,7 +709,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      CurrencyFormatter.format(tamanho['preco'] ?? 0.0),
+                      CurrencyFormatter.format(preco),
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -711,18 +729,182 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     );
   }
 
+  Widget _buildPriceAndFlavorSection() {
+    final sabores = ProductVariantUtils.extractFlavors(
+      widget.produto['sabores'],
+    );
+
+    if (sabores.isEmpty) {
+      return _buildPriceSection();
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        _buildPriceSection(),
+        const SizedBox(width: 16),
+        Expanded(child: _buildFlavorSelector(sabores: sabores, compact: true)),
+      ],
+    );
+  }
+
+  Widget _buildFlavorSelector({
+    required List<Map<String, dynamic>> sabores,
+    bool compact = false,
+  }) {
+    final selectedFlavor = _matchingOption(sabores, _selectedFlavor);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Escolha o sabor',
+          style: TextStyle(
+            fontSize: compact ? 13 : 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+        SizedBox(height: compact ? 8 : 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return AdaptiveDropdownMenu<Map<String, dynamic>>(
+              items: sabores,
+              selectedItem: selectedFlavor,
+              menuWidth: constraints.maxWidth,
+              itemHeight: 56,
+              maxVisibleItems: 5,
+              onSelected: (value) {
+                setState(() {
+                  _selectedFlavor = value;
+                  _currentImageIndex = 0;
+                });
+                if (_pageController.hasClients) {
+                  _pageController.jumpToPage(0);
+                }
+              },
+              buttonBuilder: (context, isOpen) =>
+                  _buildFlavorMenuField(selectedFlavor, isOpen: isOpen),
+              itemBuilder: (context, sabor, isSelected) {
+                final nome = ProductVariantUtils.optionName(sabor) ?? 'Sabor';
+                final icon = ProductVariantUtils.optionIcon(sabor);
+                return Container(
+                  color: isSelected ? Colors.orange[50] : Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Row(
+                    children: [
+                      if (icon != null) ...[
+                        FlavorIconWidget(icon: icon, size: 24),
+                        const SizedBox(width: 8),
+                      ],
+                      Expanded(
+                        child: Text(nome, overflow: TextOverflow.ellipsis),
+                      ),
+                      if (isSelected)
+                        Icon(
+                          Icons.check_rounded,
+                          color: Colors.orange[700],
+                          size: 20,
+                        ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        ),
+        if (sabores.length > 1) ...[
+          const SizedBox(height: 6),
+          Text(
+            '${sabores.length} sabores disponíveis',
+            style: TextStyle(
+              fontSize: compact ? 11 : 12,
+              color: Colors.orange[700],
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildFlavorMenuField(
+    Map<String, dynamic>? selectedFlavor, {
+    bool isOpen = false,
+  }) {
+    final selectedName =
+        ProductVariantUtils.optionName(selectedFlavor) ?? 'Escolha';
+    final selectedIcon = ProductVariantUtils.optionIcon(selectedFlavor);
+
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black87, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          if (selectedIcon != null) ...[
+            FlavorIconWidget(icon: selectedIcon, size: 24),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            child: Text(
+              selectedName,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, color: Colors.black87),
+            ),
+          ),
+          Icon(
+            isOpen
+                ? Icons.keyboard_arrow_up_rounded
+                : Icons.keyboard_arrow_down_rounded,
+            color: Colors.black54,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Map<String, dynamic>? _matchingOption(
+    List<Map<String, dynamic>> options,
+    Map<String, dynamic>? selected,
+  ) {
+    if (options.isEmpty) return null;
+    if (selected == null) return options.first;
+
+    for (final option in options) {
+      if (_isSameOption(selected, option)) {
+        return option;
+      }
+    }
+    return options.first;
+  }
+
+  bool _isSameOption(Map<String, dynamic>? a, Map<String, dynamic>? b) {
+    if (a == null || b == null) return false;
+    final aName = ProductVariantUtils.optionName(a);
+    final bName = ProductVariantUtils.optionName(b);
+    return aName != null && aName == bName;
+  }
+
   Widget _buildPriceSection() {
-    final tamanhos = widget.produto['tamanhos'];
+    final tamanhos = ProductVariantUtils.extractSizes(
+      widget.produto['tamanhos'],
+    );
     final preco = widget.produto['preco'];
     final precoAnterior = widget.produto['preco_anterior'];
 
     // Se tem múltiplos tamanhos, mostrar o menor preço
-    if (tamanhos != null && tamanhos is List && tamanhos.isNotEmpty) {
+    if (tamanhos.isNotEmpty) {
       // Encontrar o menor preço
       double menorPreco = double.infinity;
 
       for (var tamanho in tamanhos) {
-        final precoTamanho = tamanho['preco']?.toDouble() ?? 0.0;
+        final precoTamanho =
+            ProductVariantUtils.toDouble(tamanho['preco']) ?? 0.0;
         if (precoTamanho < menorPreco && precoTamanho > 0) {
           menorPreco = precoTamanho;
         }
@@ -747,8 +929,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       }
 
       // Verificar se o PRODUTO tem desconto (não os tamanhos individuais)
-      final produtoPreco = preco?.toDouble();
-      final produtoPrecoAnterior = precoAnterior?.toDouble();
+      final produtoPreco = ProductVariantUtils.toDouble(preco);
+      final produtoPrecoAnterior = ProductVariantUtils.toDouble(precoAnterior);
       final hasDesconto =
           produtoPrecoAnterior != null &&
           produtoPreco != null &&
@@ -762,88 +944,85 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                 .toInt();
       }
 
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            // Coluna com "A partir de" e preço
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                const Text(
-                  'A partir de',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.w500,
-                  ),
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // Coluna com "A partir de" e preço
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Text(
+                'A partir de',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                  fontWeight: FontWeight.w500,
                 ),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: hasDesconto
-                          ? [Colors.orange, Colors.deepOrange]
-                          : [Colors.green, Colors.teal],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: (hasDesconto ? Colors.orange : Colors.green)
-                            .withValues(alpha: 0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: Text(
-                    CurrencyFormatter.format(menorPreco),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20,
-                      color: Colors.white,
-                      shadows: [
-                        Shadow(
-                          color: Colors.black26,
-                          offset: Offset(0, 1),
-                          blurRadius: 2,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            // Badge ao lado do preço
-            if (hasDesconto) ...[
-              const SizedBox(width: 8),
+              ),
+              const SizedBox(height: 4),
               Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
-                  color: Colors.orange,
-                  borderRadius: BorderRadius.circular(8),
+                  gradient: LinearGradient(
+                    colors: hasDesconto
+                        ? [Colors.orange, Colors.deepOrange]
+                        : [Colors.green, Colors.teal],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (hasDesconto ? Colors.orange : Colors.green)
+                          .withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
                 ),
                 child: Text(
-                  '$percentualDesconto% OFF',
+                  CurrencyFormatter.format(menorPreco),
                   style: const TextStyle(
-                    fontSize: 12,
                     fontWeight: FontWeight.bold,
+                    fontSize: 20,
                     color: Colors.white,
+                    shadows: [
+                      Shadow(
+                        color: Colors.black26,
+                        offset: Offset(0, 1),
+                        blurRadius: 2,
+                      ),
+                    ],
                   ),
                 ),
               ),
             ],
+          ),
+          // Badge ao lado do preço
+          if (hasDesconto) ...[
+            const SizedBox(width: 8),
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.orange,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$percentualDesconto% OFF',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
           ],
-        ),
+        ],
       );
     }
 
@@ -866,130 +1045,122 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       );
     }
 
-    final precoAtual = preco.toDouble();
-    final hasDesconto = precoAnterior != null && precoAnterior > precoAtual;
+    final precoAtual = ProductVariantUtils.toDouble(preco) ?? 0.0;
+    final precoAnteriorAtual = ProductVariantUtils.toDouble(precoAnterior);
+    final hasDesconto =
+        precoAnteriorAtual != null && precoAnteriorAtual > precoAtual;
 
     // Se tem desconto, mostra preço anterior riscado
     if (hasDesconto) {
       final percentualDesconto =
-          ((precoAnterior - precoAtual) / precoAnterior * 100).toInt();
+          ((precoAnteriorAtual - precoAtual) / precoAnteriorAtual * 100)
+              .toInt();
 
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Preço anterior riscado
-            Text(
-              CurrencyFormatter.format(precoAnterior),
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
-                decoration: TextDecoration.lineThrough,
-              ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Preço anterior riscado
+          Text(
+            CurrencyFormatter.format(precoAnteriorAtual),
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[600],
+              decoration: TextDecoration.lineThrough,
             ),
-            const SizedBox(height: 4),
-            // Preço com desconto e badge ao lado
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
+          ),
+          const SizedBox(height: 4),
+          // Preço com desconto e badge ao lado
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Colors.orange, Colors.deepOrange],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Colors.orange, Colors.deepOrange],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.orange.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
                     ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.orange.withValues(alpha: 0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
+                  ],
+                ),
+                child: Text(
+                  CurrencyFormatter.format(precoAtual),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    color: Colors.white,
+                    shadows: [
+                      Shadow(
+                        color: Colors.black26,
+                        offset: Offset(0, 1),
+                        blurRadius: 2,
                       ),
                     ],
                   ),
-                  child: Text(
-                    CurrencyFormatter.format(precoAtual),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20,
-                      color: Colors.white,
-                      shadows: [
-                        Shadow(
-                          color: Colors.black26,
-                          offset: Offset(0, 1),
-                          blurRadius: 2,
-                        ),
-                      ],
-                    ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Badge de desconto ao lado
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.orange,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$percentualDesconto% OFF',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
                   ),
                 ),
-                const SizedBox(width: 8),
-                // Badge de desconto ao lado
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.orange,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '$percentualDesconto% OFF',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+        ],
       );
     }
 
     // Preço normal
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Colors.green, Colors.teal],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.green.withValues(alpha: 0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Colors.green, Colors.teal],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        child: Text(
-          CurrencyFormatter.format(precoAtual),
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-            color: Colors.white,
-            shadows: [
-              Shadow(
-                color: Colors.black26,
-                offset: Offset(0, 1),
-                blurRadius: 2,
-              ),
-            ],
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.green.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
+        ],
+      ),
+      child: Text(
+        CurrencyFormatter.format(precoAtual),
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 20,
+          color: Colors.white,
+          shadows: [
+            Shadow(color: Colors.black26, offset: Offset(0, 1), blurRadius: 2),
+          ],
         ),
       ),
     );
@@ -1283,9 +1454,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       final supabase = Supabase.instance.client;
       final response = await supabase
           .from('produtos')
-          .select(
-            'id, nome, descricao, preco, preco_anterior, promocao, imagens, tamanhos, categoria_id, ativo',
-          )
+          .select('*')
           .eq('categoria_id', categoriaId)
           .neq('id', produtoAtualId)
           .order('updated_at', ascending: false)
@@ -1307,9 +1476,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Widget _buildSimilarProductCard(Map<String, dynamic> produto) {
-    final imagens = produto['imagens'];
-    final hasImage = imagens is List && imagens.isNotEmpty;
+    final imagens = ProductVariantUtils.productImages(produto);
+    final hasImage = imagens.isNotEmpty;
     final isAvailable = _isProductAvailable(produto);
+    final flavorCount = ProductVariantUtils.extractFlavors(
+      produto['sabores'],
+    ).length;
 
     return GestureDetector(
       onTap: () async {
@@ -1439,8 +1611,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // Nome
-                        Text(
-                          produto['nome'] ?? '',
+                        Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(text: produto['nome'] ?? ''),
+                              if (flavorCount > 1)
+                                flavorCountBadgeSpan(flavorCount),
+                            ],
+                          ),
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -1480,15 +1658,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                               }
 
                               try {
-                                await _cartService.addItem(
-                                  produto,
-                                  quantidade: 1,
+                                await ProductActionHelper.addToCart(
+                                  context: context,
+                                  cartService: _cartService,
+                                  produto: produto,
+                                  onViewCart: () =>
+                                      Navigator.of(context).pop('go_to_cart'),
                                 );
-                                if (mounted) {
-                                  _showAddedToCartSnackBar(
-                                    '${produto['nome']} adicionado ao carrinho!',
-                                  );
-                                }
                               } catch (e) {
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1655,15 +1831,18 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Map<String, dynamic> _getDisplayPriceInfo(Map<String, dynamic> produto) {
-    final tamanhos = _extractSizes(produto['tamanhos']);
-    final precoAnterior = _toDouble(produto['preco_anterior']);
-    final precoAtual = _toDouble(produto['preco']);
+    final tamanhos = ProductVariantUtils.extractSizes(produto['tamanhos']);
+    final precoAnterior = ProductVariantUtils.toDouble(
+      produto['preco_anterior'],
+    );
+    final precoAtual = ProductVariantUtils.toDouble(produto['preco']);
     final isPromotion = produto['promocao'] == true;
 
     if (tamanhos.isNotEmpty) {
       final precos = <double>{};
       for (final tamanho in tamanhos) {
-        final precoTamanho = _toDouble(tamanho['preco']) ?? 0.0;
+        final precoTamanho =
+            ProductVariantUtils.toDouble(tamanho['preco']) ?? 0.0;
         if (precoTamanho > 0) {
           precos.add(precoTamanho);
         }
@@ -1675,6 +1854,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
           'previousPrice': null,
           'hasDiscount': false,
           'hasMultiplePrices': false,
+          'isPromotion': isPromotion,
+          'discountPercentage': null,
         };
       }
 
@@ -1710,36 +1891,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       'isPromotion': isPromotion,
       'discountPercentage': discountPercentage,
     };
-  }
-
-  double? _toDouble(dynamic value) {
-    if (value == null) return null;
-    if (value is num) return value.toDouble();
-    if (value is String) {
-      return double.tryParse(value.replaceAll(',', '.'));
-    }
-    return null;
-  }
-
-  List<Map<String, dynamic>> _extractSizes(dynamic rawSizes) {
-    dynamic parsed = rawSizes;
-
-    if (parsed is String && parsed.trim().isNotEmpty) {
-      try {
-        parsed = jsonDecode(parsed);
-      } catch (_) {
-        return const [];
-      }
-    }
-
-    if (parsed is! List) {
-      return const [];
-    }
-
-    return parsed
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .toList();
   }
 
   Widget _buildBottomBar() {
@@ -1823,18 +1974,20 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                         Builder(
                           builder: (context) {
                             // Calcular preço baseado no tamanho selecionado
-                            final tamanhos = widget.produto['tamanhos'];
                             double precoUnitario;
 
-                            if (tamanhos != null &&
-                                tamanhos is List &&
-                                tamanhos.isNotEmpty &&
-                                _selectedSize != null) {
+                            if (_selectedSize != null) {
                               precoUnitario =
-                                  _selectedSize!['preco']?.toDouble() ?? 0.0;
+                                  ProductVariantUtils.toDouble(
+                                    _selectedSize!['preco'],
+                                  ) ??
+                                  0.0;
                             } else {
                               precoUnitario =
-                                  widget.produto['preco']?.toDouble() ?? 0.0;
+                                  ProductVariantUtils.toDouble(
+                                    widget.produto['preco'],
+                                  ) ??
+                                  0.0;
                             }
 
                             return Text(
@@ -1925,17 +2078,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         return;
       }
 
-      // Preparar produto com tamanho selecionado se houver
-      final produtoParaCarrinho = Map<String, dynamic>.from(widget.produto);
-
-      // Se tem tamanhos e um está selecionado, adicionar informações do tamanho
-      final tamanhos = widget.produto['tamanhos'];
-      if (tamanhos != null &&
-          tamanhos is List &&
-          tamanhos.isNotEmpty &&
-          _selectedSize != null) {
-        produtoParaCarrinho['tamanho_selecionado'] = _selectedSize!['nome'];
-        produtoParaCarrinho['preco'] = _selectedSize!['preco'];
+      final produtoParaCarrinho = ProductVariantUtils.applySelections(
+        widget.produto,
+        selectedSize: _selectedSize,
+        selectedFlavor: _selectedFlavor,
+      );
+      if (ProductVariantUtils.toDouble(produtoParaCarrinho['preco']) == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Produto sem preço não pode ser adicionado ao carrinho',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
       }
 
       await _cartService.addItem(
@@ -1947,11 +2104,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       );
 
       if (mounted) {
-        final tamanhoText = produtoParaCarrinho['tamanho_selecionado'] != null
-            ? ' (${produtoParaCarrinho['tamanho_selecionado']})'
-            : '';
+        final suffix = ProductVariantUtils.selectionSuffix(
+          sizeName: ProductVariantUtils.optionName(_selectedSize),
+          flavorName: ProductVariantUtils.optionName(_selectedFlavor),
+        );
         _showAddedToCartSnackBar(
-          '${widget.produto['nome']}$tamanhoText adicionado ao carrinho!',
+          '${widget.produto['nome']}$suffix adicionado ao carrinho!',
         );
       }
     } catch (e) {
@@ -1978,17 +2136,19 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         return;
       }
 
-      // Preparar produto com tamanho selecionado se houver
-      final produtoParaCarrinho = Map<String, dynamic>.from(widget.produto);
-
-      // Se tem tamanhos e um está selecionado, adicionar informações do tamanho
-      final tamanhos = widget.produto['tamanhos'];
-      if (tamanhos != null &&
-          tamanhos is List &&
-          tamanhos.isNotEmpty &&
-          _selectedSize != null) {
-        produtoParaCarrinho['tamanho_selecionado'] = _selectedSize!['nome'];
-        produtoParaCarrinho['preco'] = _selectedSize!['preco'];
+      final produtoParaCarrinho = ProductVariantUtils.applySelections(
+        widget.produto,
+        selectedSize: _selectedSize,
+        selectedFlavor: _selectedFlavor,
+      );
+      if (ProductVariantUtils.toDouble(produtoParaCarrinho['preco']) == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Produto sem preço não pode ser comprado'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
       }
 
       // Adiciona ao carrinho com flag isBuyNow = true
@@ -2028,8 +2188,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   void _shareProduct() async {
     final produto = widget.produto;
     final nome = produto['nome'] ?? 'Produto delicioso';
-    final preco = produto['preco'] != null
-        ? CurrencyFormatter.format(produto['preco'].toDouble())
+    final precoAtual = ProductVariantUtils.toDouble(produto['preco']);
+    final preco = precoAtual != null
+        ? CurrencyFormatter.format(precoAtual)
         : 'Consulte o preço';
 
     // Gerar link do produto para deep linking

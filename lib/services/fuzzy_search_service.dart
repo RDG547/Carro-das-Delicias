@@ -67,25 +67,44 @@ class FuzzySearchService {
   static double calculateRelevance(String query, String text) {
     if (query.isEmpty) return 1.0;
 
-    final normalizedQuery = removeAccents(query.toLowerCase());
+    final normalizedQuery = removeAccents(query.toLowerCase().trim());
     final normalizedText = removeAccents(text.toLowerCase());
+
+    if (normalizedQuery.isEmpty || normalizedText.isEmpty) {
+      return 0.0;
+    }
 
     // Match exato — máxima relevância
     if (normalizedText == normalizedQuery) return 1.0;
+
+    final queryWords = normalizedQuery.split(RegExp(r'\s+'));
+    final textWords = normalizedText.split(RegExp(r'\s+'));
+    final singleShortQuery =
+        !normalizedQuery.contains(' ') && normalizedQuery.length <= 4;
 
     // Começa com a query — alta relevância
     if (normalizedText.startsWith(normalizedQuery)) return 0.95;
 
     // Contém a query como substring — boa relevância
-    if (normalizedText.contains(normalizedQuery)) return 0.9;
+    if (normalizedText.contains(normalizedQuery)) {
+      if (!singleShortQuery) return 0.9;
+
+      final hasShortWordMatch = textWords.any(
+        (word) => word == normalizedQuery || word.startsWith(normalizedQuery),
+      );
+      if (hasShortWordMatch) {
+        return 0.9;
+      }
+    }
 
     // Verificar match por palavras individuais
-    final queryWords = normalizedQuery.split(RegExp(r'\s+'));
-    final textWords = normalizedText.split(RegExp(r'\s+'));
     int matchedWords = 0;
     for (final qw in queryWords) {
       for (final tw in textWords) {
-        if (tw.contains(qw) || tw.startsWith(qw)) {
+        final hasDirectWordMatch =
+            tw.startsWith(qw) ||
+            (!singleShortQuery && qw.length >= 4 && tw.contains(qw));
+        if (hasDirectWordMatch) {
           matchedWords++;
           break;
         }
@@ -93,13 +112,26 @@ class FuzzySearchService {
     }
     if (matchedWords == queryWords.length) return 0.85;
 
-    // Subsequência — as letras da query aparecem na ordem no texto
-    if (isSubsequence(normalizedQuery, normalizedText)) return 0.7;
+    // Subsequência só para buscas maiores.
+    // Em termos curtos isso gera falso positivo demais.
+    if ((normalizedQuery.contains(' ') || normalizedQuery.length >= 7) &&
+        isSubsequence(normalizedQuery, normalizedText)) {
+      return 0.7;
+    }
 
     // Fuzzy match por palavras — tolera 1-2 erros
     for (final tw in textWords) {
       for (final qw in queryWords) {
-        final maxDistance = qw.length <= 3 ? 1 : 2;
+        if (qw.isEmpty || tw.isEmpty) continue;
+
+        final maxDistance = qw.length <= 4 ? 1 : 2;
+        final sameInitial = tw[0] == qw[0];
+        final lengthGap = (tw.length - qw.length).abs();
+
+        if (!sameInitial || lengthGap > maxDistance) {
+          continue;
+        }
+
         final distance = levenshteinDistance(qw, tw);
         if (distance <= maxDistance) {
           return 0.6 - (distance * 0.1);
@@ -115,10 +147,13 @@ class FuzzySearchService {
       }
     }
 
-    // Fuzzy match no texto completo — para queries curtas
-    if (normalizedQuery.length <= 5) {
+    // Fuzzy match no texto completo apenas para queries maiores,
+    // evitando falsos positivos agressivos em buscas curtas.
+    if (normalizedQuery.length > 5 &&
+        normalizedText[0] == normalizedQuery[0] &&
+        (normalizedText.length - normalizedQuery.length).abs() <= 2) {
       final distance = levenshteinDistance(normalizedQuery, normalizedText);
-      final maxAllowed = normalizedQuery.length <= 3 ? 1 : 2;
+      final maxAllowed = normalizedQuery.length <= 6 ? 2 : 3;
       if (distance <= maxAllowed) {
         return 0.4;
       }
@@ -136,6 +171,10 @@ class FuzzySearchService {
   ) {
     if (query.isEmpty) return products;
 
+    final normalizedQuery = removeAccents(query.toLowerCase().trim());
+    final requiresStrongShortMatch =
+        !normalizedQuery.contains(' ') && normalizedQuery.length <= 4;
+
     final scored = <MapEntry<Map<String, dynamic>, double>>[];
 
     for (final produto in products) {
@@ -149,10 +188,17 @@ class FuzzySearchService {
       final categoriaScore = calculateRelevance(query, categoriaNome) * 0.4;
 
       // Pegar o melhor score
-      final bestScore = [nomeScore, descricaoScore, categoriaScore]
-          .reduce((a, b) => a > b ? a : b);
+      final bestScore = [
+        nomeScore,
+        descricaoScore,
+        categoriaScore,
+      ].reduce((a, b) => a > b ? a : b);
 
-      if (bestScore > 0.0) {
+      final hasStrongShortMatch =
+          nomeScore >= 0.85 || descricaoScore >= 0.54 || categoriaScore >= 0.34;
+
+      if (bestScore > 0.0 &&
+          (!requiresStrongShortMatch || hasStrongShortMatch)) {
         scored.add(MapEntry(produto, bestScore));
       }
     }

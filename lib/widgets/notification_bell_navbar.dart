@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import '../services/notification_service.dart';
+import '../utils/realtime_auth_utils.dart';
 
 class NotificationBellNavbar extends StatefulWidget {
   const NotificationBellNavbar({super.key});
@@ -21,6 +22,7 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar>
   late final AnimationController _menuAnimationController;
   bool _isClosingOverlay = false;
   bool _isDisposed = false;
+  bool _isRecoveringRealtimeAuth = false;
 
   @override
   void initState() {
@@ -99,12 +101,40 @@ class NotificationBellNavbarState extends State<NotificationBellNavbar>
             debugPrint('⏱️ Timeout ao conectar canal do navbar');
           } else if (status == RealtimeSubscribeStatus.channelError) {
             debugPrint('❌ Erro no canal do navbar: $error');
+            unawaited(_handleRealtimeChannelError(error));
           }
         });
 
     debugPrint(
       '👀 Navbar configurado para escutar atualizações de notificações',
     );
+  }
+
+  Future<void> _handleRealtimeChannelError(Object? error) async {
+    if (_isDisposed || _isRecoveringRealtimeAuth) {
+      return;
+    }
+
+    _isRecoveringRealtimeAuth = true;
+    try {
+      final recovered = await RealtimeAuthUtils.recoverFromAuthError(
+        error: error,
+        source: 'notification_bell_navbar',
+        onRecovered: () async {
+          if (_isDisposed || !mounted) return;
+          _startListeningToUpdates();
+          await _loadNotifications();
+        },
+      );
+
+      if (!recovered && RealtimeAuthUtils.isExpiredJwtError(error)) {
+        debugPrint(
+          '⚠️ [notification_bell_navbar] Não foi possível recuperar o canal após expiração do token',
+        );
+      }
+    } finally {
+      _isRecoveringRealtimeAuth = false;
+    }
   }
 
   Future<void> _loadNotifications() async {

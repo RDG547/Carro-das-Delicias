@@ -17,6 +17,10 @@ class KombiTrackingScreen extends StatefulWidget {
 }
 
 class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
+  static const double _bottomNavbarHeight = 88.0;
+  static const double _bottomNavbarGap = 20.0;
+  static const double _myLocationZoomCenterOffset = 26.0;
+
   MapboxMap? _mapboxMap;
   PointAnnotationManager? _pointAnnotationManager;
   final LocationTrackingService _trackingService = LocationTrackingService();
@@ -436,6 +440,12 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
     );
   }
 
+  double _mapControlsBottomInset(BuildContext context) {
+    final view = View.of(context);
+    final safeBottom = view.viewPadding.bottom / view.devicePixelRatio;
+    return _bottomNavbarHeight + _bottomNavbarGap + safeBottom;
+  }
+
   String _formatLastUpdate() {
     if (_lastUpdate == null) return 'Nunca';
 
@@ -489,6 +499,8 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mapControlsBottom = _mapControlsBottomInset(context);
+
     return Scaffold(
       backgroundColor: Colors.white,
       extendBodyBehindAppBar: true,
@@ -525,7 +537,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
               ? MapWidget(
                   key: const ValueKey('mapbox-map'),
                   onMapCreated: _onMapCreated,
-                  cameraOptions: CameraOptions(
+                  viewport: CameraViewportState(
                     center: _kombiLocation,
                     zoom: 16.0,
                   ),
@@ -568,9 +580,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
           if (_kombiLocation != null)
             Positioned(
               left: 16,
-              bottom:
-                  80 +
-                  MediaQuery.of(context).padding.bottom, // Navbar + SafeArea
+              bottom: mapControlsBottom,
               child: Column(
                 children: [
                   // Botão Zoom In (+)
@@ -644,11 +654,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
           if (_kombiLocation != null)
             Positioned(
               right: 16,
-              bottom:
-                  106 +
-                  MediaQuery.of(
-                    context,
-                  ).padding.bottom, // Navbar + botões de zoom + SafeArea
+              bottom: mapControlsBottom + _myLocationZoomCenterOffset,
               child: FloatingActionButton(
                 mini: true,
                 backgroundColor: Colors.white,

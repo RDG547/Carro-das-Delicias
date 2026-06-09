@@ -46,12 +46,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         // Gerenciar listener de notificações baseado no estado de autenticação
         if (newUser != null) {
-          unawaited(AuthProfileSyncService.syncCurrentUserProfile());
-          unawaited(OrderPaymentService.syncPendingPaymentsForCurrentUser());
-          // Usuário fez login - iniciar escuta de notificações
-          NotificationService.startListeningToNotifications();
-          // Verificar notificações pendentes
-          NotificationService.checkPendingNotifications();
+          unawaited(_startAuthenticatedServices(newUser));
         } else {
           // Usuário fez logout - parar escuta de notificações
           NotificationService.stopListeningToNotifications();
@@ -71,11 +66,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         // Se já há um usuário logado, iniciar escuta de notificações
         if (_user != null) {
-          unawaited(AuthProfileSyncService.syncCurrentUserProfile());
-          unawaited(OrderPaymentService.syncPendingPaymentsForCurrentUser());
-          NotificationService.startListeningToNotifications();
-          // Verificar notificações pendentes ao abrir app
-          NotificationService.checkPendingNotifications();
+          unawaited(_startAuthenticatedServices(_user!));
         }
       }
     } catch (error) {
@@ -86,6 +77,43 @@ class _AuthWrapperState extends State<AuthWrapper> {
         });
       }
     }
+  }
+
+  Future<void> _startAuthenticatedServices(User user) async {
+    final supabase = Supabase.instance.client;
+
+    try {
+      final profile = await supabase
+          .from('profiles')
+          .select('is_banned, banned_until')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      final bannedUntil = DateTime.tryParse(
+        profile?['banned_until']?.toString() ?? '',
+      );
+      final isBanned =
+          profile?['is_banned'] == true ||
+          (bannedUntil != null && bannedUntil.isAfter(DateTime.now()));
+
+      if (isBanned) {
+        await supabase.auth.signOut();
+        if (mounted) {
+          setState(() {
+            _user = null;
+          });
+        }
+        NotificationService.stopListeningToNotifications();
+        return;
+      }
+    } catch (_) {
+      // Colunas de banimento podem não existir até a migration ser aplicada.
+    }
+
+    unawaited(AuthProfileSyncService.syncCurrentUserProfile());
+    unawaited(OrderPaymentService.syncPendingPaymentsForCurrentUser());
+    NotificationService.startListeningToNotifications();
+    NotificationService.checkPendingNotifications();
   }
 
   @override
