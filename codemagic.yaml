@@ -57,6 +57,8 @@ workflows:
     name: iOS Build
     max_build_duration: 60
     instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic
     environment:
       ios_signing:
         distribution_type: app_store
@@ -84,7 +86,11 @@ workflows:
           flutter packages pub get
       - name: Install CocoaPods dependencies
         script: |
-          cd ios && pod install
+          if [ -f ios/Podfile ]; then
+            cd ios && pod install
+          else
+            echo "No ios/Podfile found; skipping CocoaPods install."
+          fi
       - name: Flutter analyze
         script: |
           flutter analyze
