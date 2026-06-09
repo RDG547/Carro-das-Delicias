@@ -227,7 +227,7 @@ class _AdminScreenState extends State<AdminScreen>
                       u.userMetadata?['full_name'] ??
                       u.userMetadata?['name'] ??
                       'Usuário',
-                  'role': u.userMetadata?['role'] ?? 'client',
+                  'role': u.userMetadata?['role'] ?? 'user',
                   'created_at': u.createdAt is DateTime
                       ? (u.createdAt as DateTime).toIso8601String()
                       : u.createdAt.toString(),
@@ -286,7 +286,7 @@ class _AdminScreenState extends State<AdminScreen>
               'Usuário',
           'email': usuarioMap['email'] ?? profile?['email'] ?? '',
           'phone': usuarioMap['phone'] ?? profile?['phone'] ?? '',
-          'role': usuarioMap['role'] ?? profile?['role'] ?? 'client',
+          'role': usuarioMap['role'] ?? profile?['role'] ?? 'user',
           'avatar_url': usuarioMap['avatar_url'] ?? profile?['avatar_url'],
           'is_banned':
               usuarioMap['is_banned'] ??
@@ -3143,7 +3143,7 @@ class _AdminScreenState extends State<AdminScreen>
                         child: Text(usuario['name']?.substring(0, 1) ?? 'U'),
                       ),
                       title: Text(usuario['name'] ?? 'Usuário'),
-                      subtitle: Text('Role: ${usuario['role'] ?? 'client'}'),
+                      subtitle: Text('Role: ${usuario['role'] ?? 'user'}'),
                       trailing: Text(
                         'Ativo',
                         style: TextStyle(
@@ -5677,7 +5677,7 @@ class _AdminScreenState extends State<AdminScreen>
       return;
     }
 
-    final newRole = usuario['role'] == 'admin' ? 'client' : 'admin';
+    final newRole = usuario['role'] == 'admin' ? 'user' : 'admin';
     final userName = usuario['full_name'] ?? usuario['email'] ?? 'Usuário';
 
     try {

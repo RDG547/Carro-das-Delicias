@@ -248,7 +248,6 @@ class _RegisterScreenState extends State<RegisterScreen>
         'name': name,
         'full_name': name,
         'phone': formattedPhone,
-        'role': 'client',
       };
 
       // Cadastro no Supabase Auth
@@ -266,7 +265,6 @@ class _RegisterScreenState extends State<RegisterScreen>
             'name': name,
             'phone': formattedPhone,
             'email': email,
-            'role': 'client',
             'updated_at': DateTime.now().toIso8601String(),
           }, onConflict: 'id');
         } catch (e) {

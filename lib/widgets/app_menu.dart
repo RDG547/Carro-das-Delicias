@@ -34,7 +34,8 @@ class _AppMenuState extends State<AppMenu> {
       false; // Garante apenas uma subscription ativa
   static StreamSubscription?
   _globalKombiSubscription; // Subscription global compartilhada
-  bool _isRecoveringKombiAuth = false;
+  static bool _isRecoveringKombiAuth = false;
+  static int _kombiListenerOwners = 0;
 
   @override
   void initState() {
@@ -50,16 +51,21 @@ class _AppMenuState extends State<AppMenu> {
     _checkKombiStatus();
 
     // Inicia o stream apenas uma vez globalmente
+    _kombiListenerOwners++;
     if (!_isListeningToKombi) {
       _isListeningToKombi = true;
-      _listenToKombiStatus();
+      unawaited(_listenToKombiStatus());
     }
   }
 
   @override
   void dispose() {
+    _kombiListenerOwners = (_kombiListenerOwners - 1).clamp(0, 1 << 30);
+
     // Cancela a subscription global quando a última instância for destruída
-    if (_isListeningToKombi && _globalKombiSubscription != null) {
+    if (_kombiListenerOwners == 0 &&
+        _isListeningToKombi &&
+        _globalKombiSubscription != null) {
       _globalKombiSubscription?.cancel();
       _globalKombiSubscription = null;
       _isListeningToKombi = false;
@@ -69,9 +75,17 @@ class _AppMenuState extends State<AppMenu> {
     super.dispose();
   }
 
-  void _listenToKombiStatus() {
+  Future<void> _listenToKombiStatus() async {
     debugPrint('🎧 AppMenu - _listenToKombiStatus iniciado');
     _globalKombiSubscription?.cancel();
+    await RealtimeAuthUtils.syncRealtimeAuthToken(
+      source: 'app_menu_kombi_stream',
+    );
+    if (_kombiListenerOwners == 0) {
+      _isListeningToKombi = false;
+      return;
+    }
+
     // Escuta mudanças na tabela kombi_location em tempo real
     _globalKombiSubscription = Supabase.instance.client
         .from('kombi_location')
@@ -104,7 +118,7 @@ class _AppMenuState extends State<AppMenu> {
   }
 
   Future<void> _handleKombiStreamError(Object? error) async {
-    if (_isRecoveringKombiAuth || !mounted) {
+    if (_isRecoveringKombiAuth || _kombiListenerOwners == 0) {
       return;
     }
 
@@ -114,8 +128,7 @@ class _AppMenuState extends State<AppMenu> {
         error: error,
         source: 'app_menu_kombi_stream',
         onRecovered: () async {
-          if (!mounted) return;
-          _listenToKombiStatus();
+          await _listenToKombiStatus();
           await _checkKombiStatus();
         },
       );

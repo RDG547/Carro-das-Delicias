@@ -17,22 +17,10 @@ class AuthProfileSyncService {
           .trim();
       final phone = metadata['phone']?.toString().trim();
 
-      // Verificar se o perfil já existe para não sobrescrever o role
-      final existing = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('id', user.id)
-          .maybeSingle();
-
       final payload = <String, dynamic>{
         'id': user.id,
         'updated_at': DateTime.now().toIso8601String(),
       };
-
-      // Só definir role na criação do perfil (não sobrescrever role existente)
-      if (existing == null) {
-        payload['role'] = 'client';
-      }
 
       final email = user.email?.trim().toLowerCase();
       if (email != null && email.isNotEmpty) {
