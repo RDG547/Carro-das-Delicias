@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RD Tech — Carro das Delícias</title>
-  <meta name="description" content="RD Tech é a empresa responsável pelo app Carro das Delícias, uma solução para pedidos, pagamentos e rastreamento de food truck.">
+  <title>Carro das Delícias</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,152 +12,61 @@
 <body>
   <header>
     <nav class="container">
-      <a href="index.html" class="logo" aria-label="RD Tech">
-        <span class="logo-mark">RD</span>
-        <span>
-          <span class="logo-text">RD Tech</span>
-          <span class="logo-subtitle">Produtos digitais</span>
-        </span>
-      </a>
+      <div class="logo">
+        <span class="logo-icon">🚐</span>
+        <span class="logo-text">Carro das Delícias</span>
+      </div>
       <ul class="nav-links">
-        <li><a href="#empresa">Empresa</a></li>
-        <li><a href="#carro-das-delicias">Carro das Delícias</a></li>
-        <li><a href="politica-de-privacidade.html">Privacidade</a></li>
-        <li><a href="termos-de-servico.html">Termos</a></li>
+        <li><a href="politica-de-privacidade.html">Política de Privacidade</a></li>
+        <li><a href="termos-de-servico.html">Termos de Serviço</a></li>
+        <li><a href="excluir-conta.html">Excluir Conta</a></li>
       </ul>
     </nav>
   </header>
 
   <main>
-    <section class="rd-hero">
-      <div class="container rd-hero-grid">
-        <div class="rd-hero-copy">
-          <span class="eyebrow">RD Tech apresenta</span>
-          <h1>Tecnologia para negócios locais venderem melhor.</h1>
-          <p class="hero-subtitle">A RD Tech desenvolve sistemas sob medida para operação, atendimento, pagamentos e relacionamento com clientes. Nosso primeiro produto público é o <strong>Carro das Delícias</strong>, app oficial de pedidos da nossa Kombi.</p>
-          <div class="hero-actions">
-            <a href="#carro-das-delicias" class="primary-link">Conhecer o app</a>
-            <a href="#documentos" class="secondary-link">Documentos legais</a>
-          </div>
-        </div>
-
-        <div class="app-showcase" aria-label="Prévia visual do app Carro das Delícias">
-          <div class="phone-frame">
-            <div class="phone-top"></div>
-            <div class="app-screen">
-              <div class="app-brand-icon">🚐</div>
-              <h2>Carro das Delícias</h2>
-              <p>Pedidos, ofertas e rastreamento em tempo real.</p>
-              <div class="app-row">
-                <span>🍰</span>
-                <div>
-                  <strong>Cardápio digital</strong>
-                  <small>Produtos, sabores e promoções</small>
-                </div>
-              </div>
-              <div class="app-row">
-                <span>💳</span>
-                <div>
-                  <strong>Pagamento integrado</strong>
-                  <small>PIX, cartão e dinheiro</small>
-                </div>
-              </div>
-              <div class="app-row">
-                <span>📍</span>
-                <div>
-                  <strong>Kombi ao vivo</strong>
-                  <small>Localização quando disponível</small>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="company-section" id="empresa">
-      <div class="container split-section">
-        <div>
-          <span class="eyebrow">Empresa proprietária</span>
-          <h2>RD Tech</h2>
-          <p>A RD Tech é responsável pela criação, evolução e manutenção do ecossistema digital do Carro das Delícias. Unimos engenharia, automação e experiência do usuário para simplificar operações que antes dependiam de planilhas, mensagens soltas e processos manuais.</p>
-        </div>
-        <div class="metrics-grid">
-          <div class="metric-card">
-            <strong>App</strong>
-            <span>Pedidos e catálogo</span>
-          </div>
-          <div class="metric-card">
-            <strong>Realtime</strong>
-            <span>Rastreamento e status</span>
-          </div>
-          <div class="metric-card">
-            <strong>Pagamentos</strong>
-            <span>PIX, cartão e dinheiro</span>
-          </div>
-          <div class="metric-card">
-            <strong>Admin</strong>
-            <span>Gestão da operação</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="product-section" id="carro-das-delicias">
+    <section class="hero">
       <div class="container">
-        <div class="section-heading">
-          <span class="eyebrow">Produto RD Tech</span>
-          <h2>Carro das Delícias</h2>
-          <p>Um aplicativo feito para aproximar clientes da operação da Kombi, com compra simples, comunicação clara e controle administrativo completo.</p>
-        </div>
-
-        <div class="feature-grid">
-          <article class="feature-card">
+        <h1>Carro das Delícias</h1>
+        <p class="hero-subtitle">Seu app de pedidos de delícias direto do nosso food truck até você! 🍨</p>
+        <div class="hero-features">
+          <div class="feature-card">
             <span class="feature-icon">📱</span>
-            <h3>Experiência de compra</h3>
-            <p>Cardápio organizado, favoritos, descontos, novidades e fluxo de pedido pensado para o cliente comprar sem atrito.</p>
-          </article>
-          <article class="feature-card">
-            <span class="feature-icon">🧾</span>
-            <h3>Painel administrativo</h3>
-            <p>Gestão de produtos, categorias, pedidos, usuários, disponibilidade e relatórios operacionais em um só lugar.</p>
-          </article>
-          <article class="feature-card">
+            <h3>Peça pelo App</h3>
+            <p>Navegue pelo nosso cardápio, escolha seus favoritos e faça seu pedido com facilidade.</p>
+          </div>
+          <div class="feature-card">
             <span class="feature-icon">📍</span>
-            <h3>Kombi rastreável</h3>
-            <p>Status online/offline e localização em tempo real quando a equipe ativa o rastreamento.</p>
-          </article>
-          <article class="feature-card">
-            <span class="feature-icon">🔐</span>
-            <h3>Conta e segurança</h3>
-            <p>Cadastro por e-mail, login com Google, controle de perfil e documentos de privacidade e termos acessíveis ao usuário.</p>
-          </article>
+            <h3>Rastreie em Tempo Real</h3>
+            <p>Acompanhe a localização da nossa Kombi e saiba quando estamos perto de você.</p>
+          </div>
+          <div class="feature-card">
+            <span class="feature-icon">💳</span>
+            <h3>Pagamento Fácil</h3>
+            <p>Pague com PIX, cartão de crédito ou dinheiro — como preferir.</p>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="links-section" id="documentos">
+    <section class="links-section">
       <div class="container">
-        <div class="section-heading">
-          <span class="eyebrow">Transparência</span>
-          <h2>Documentos do app</h2>
-          <p>Informações públicas sobre privacidade, termos de uso e exclusão de conta do Carro das Delícias.</p>
-        </div>
+        <h2>Informações Importantes</h2>
         <div class="links-grid">
           <a href="politica-de-privacidade.html" class="link-card">
             <span class="link-icon">🔒</span>
             <h3>Política de Privacidade</h3>
-            <p>Como coletamos, usamos e protegemos dados pessoais no aplicativo.</p>
+            <p>Saiba como coletamos, usamos e protegemos seus dados pessoais.</p>
           </a>
           <a href="termos-de-servico.html" class="link-card">
             <span class="link-icon">📋</span>
             <h3>Termos de Serviço</h3>
-            <p>Regras de uso do app, pedidos, pagamentos, entregas e suporte.</p>
+            <p>Conheça as regras de uso do aplicativo, pedidos, pagamentos e entregas.</p>
           </a>
           <a href="excluir-conta.html" class="link-card">
             <span class="link-icon">🗑️</span>
             <h3>Solicitar Exclusão de Conta</h3>
-            <p>Canal para solicitar a exclusão da conta e dos dados pessoais.</p>
+            <p>Solicite a exclusão da sua conta e de todos os seus dados pessoais.</p>
           </a>
         </div>
       </div>
@@ -166,11 +74,8 @@
   </main>
 
   <footer>
-    <div class="container footer-grid">
-      <div>
-        <strong>RD Tech</strong>
-        <p>Empresa proprietária do app Carro das Delícias.</p>
-      </div>
+    <div class="container">
+      <p>&copy; 2026 Carro das Delícias. Todos os direitos reservados.</p>
       <div class="footer-links">
         <a href="politica-de-privacidade.html">Política de Privacidade</a>
         <a href="termos-de-servico.html">Termos de Serviço</a>
