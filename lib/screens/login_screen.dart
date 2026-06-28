@@ -160,14 +160,18 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     _loadingManager.setLoading('google_login', true);
 
     try {
-      await SocialAuthService.signInWithGoogle();
+      final result = await SocialAuthService.signInWithGoogle();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Continue o login na janela do Google.'),
+          SnackBar(
+            content: Text(
+              result.openedExternalBrowser
+                  ? 'Continue o login na janela do Google.'
+                  : 'Login com Google realizado.',
+            ),
             backgroundColor: Colors.black,
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
       }

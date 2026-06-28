@@ -1,8 +1,19 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/env_config.dart';
+
+enum SocialAuthLaunchMode { native, oauth }
+
+class SocialAuthResult {
+  final SocialAuthLaunchMode mode;
+
+  const SocialAuthResult(this.mode);
+
+  bool get openedExternalBrowser => mode == SocialAuthLaunchMode.oauth;
+}
 
 class SocialAuthService {
   /// Web Client ID do Google Cloud Console (mesmo configurado no Supabase Auth).
@@ -17,7 +28,7 @@ class SocialAuthService {
 
   static const String _googleScopes = 'openid email profile';
 
-  static Future<void> signInWithGoogle() async {
+  static Future<SocialAuthResult> signInWithGoogle() async {
     if (kIsWeb) {
       return _signInWithGoogleOAuth();
     }
@@ -29,6 +40,22 @@ class SocialAuthService {
       );
     }
 
+    try {
+      await _signInWithGoogleNative(webClientId);
+      return const SocialAuthResult(SocialAuthLaunchMode.native);
+    } on PlatformException catch (error) {
+      if (_shouldFallbackToOAuth(error)) {
+        debugPrint(
+          'Google Sign-In nativo falhou com código de configuração. Tentando OAuth do Supabase: $error',
+        );
+        return _signInWithGoogleOAuth();
+      }
+
+      throw Exception(_friendlyGoogleSignInError(error));
+    }
+  }
+
+  static Future<void> _signInWithGoogleNative(String webClientId) async {
     final googleSignIn = GoogleSignIn(serverClientId: webClientId);
     await _forgetPreviousGoogleAccount(googleSignIn);
 
@@ -54,7 +81,7 @@ class SocialAuthService {
     );
   }
 
-  static Future<void> _signInWithGoogleOAuth() async {
+  static Future<SocialAuthResult> _signInWithGoogleOAuth() async {
     final launched = await Supabase.instance.client.auth.signInWithOAuth(
       OAuthProvider.google,
       scopes: _googleScopes,
@@ -63,6 +90,7 @@ class SocialAuthService {
     if (!launched) {
       throw Exception('Não foi possível abrir o login do Google.');
     }
+    return const SocialAuthResult(SocialAuthLaunchMode.oauth);
   }
 
   static Future<void> _forgetPreviousGoogleAccount(
@@ -80,5 +108,34 @@ class SocialAuthService {
     return clientId.endsWith('.apps.googleusercontent.com') &&
         !clientId.contains('xxxx') &&
         !clientId.startsWith('000000000000-');
+  }
+
+  static bool _shouldFallbackToOAuth(PlatformException error) {
+    final details = [
+      error.code,
+      error.message,
+      error.details?.toString(),
+    ].whereType<String>().join(' ').toLowerCase();
+
+    return error.code == 'sign_in_failed' &&
+        (details.contains('10') || details.contains('developer_error'));
+  }
+
+  static String _friendlyGoogleSignInError(PlatformException error) {
+    final details = [
+      error.code,
+      error.message,
+      error.details?.toString(),
+    ].whereType<String>().join(' ');
+
+    if (_shouldFallbackToOAuth(error)) {
+      return 'Configuração do Google Sign-In incompleta. Confira o Web Client ID, o pacote Android e os SHA-1 no Google Cloud.';
+    }
+
+    if (details.toLowerCase().contains('network')) {
+      return 'Não foi possível conectar ao Google. Verifique sua internet e tente novamente.';
+    }
+
+    return 'Não foi possível iniciar o login com Google. Tente novamente.';
   }
 }

@@ -357,14 +357,18 @@ class _RegisterScreenState extends State<RegisterScreen>
     _loadingManager.setLoading('google_register', true);
 
     try {
-      await SocialAuthService.signInWithGoogle();
+      final result = await SocialAuthService.signInWithGoogle();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Continue o cadastro na janela do Google.'),
+          SnackBar(
+            content: Text(
+              result.openedExternalBrowser
+                  ? 'Continue o cadastro na janela do Google.'
+                  : 'Cadastro com Google realizado.',
+            ),
             backgroundColor: Colors.black,
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
