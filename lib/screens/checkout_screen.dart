@@ -294,19 +294,66 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
   Future<void> _saveUserAddress() async {
     final user = Supabase.instance.client.auth.currentUser;
-    if (user != null) {
-      final addressData = {
-        'id': user.id,
-        'address': _enderecoController.text.trim(),
-        'neighborhood': _bairroController.text.trim(),
-        'city': _cidadeController.text.trim(),
-        'cep': _cepController.text.trim(),
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+    if (user == null) return;
 
-      // Usar upsert para criar ou atualizar o perfil
-      await Supabase.instance.client.from('profiles').upsert(addressData);
+    final addressData = <String, dynamic>{
+      'address': _enderecoController.text.trim(),
+      'neighborhood': _bairroController.text.trim(),
+      'city': _cidadeController.text.trim(),
+      'cep': _cepController.text.trim(),
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+
+    final typedName = _nomeController.text.trim();
+    if (typedName.isNotEmpty) {
+      addressData['name'] = typedName;
     }
+
+    final typedPhone = _telefoneController.text.trim();
+    if (typedPhone.isNotEmpty) {
+      addressData['phone'] = typedPhone;
+    }
+
+    final supabase = Supabase.instance.client;
+    final updated = await supabase
+        .from('profiles')
+        .update(addressData)
+        .eq('id', user.id)
+        .select('id')
+        .limit(1);
+
+    if (updated.isNotEmpty) return;
+
+    await supabase.from('profiles').insert({
+      ...addressData,
+      'id': user.id,
+      'name': _fallbackProfileName(user),
+      'email': _fallbackProfileEmail(user),
+    });
+  }
+
+  String _fallbackProfileName(User user) {
+    final typedName = _nomeController.text.trim();
+    if (typedName.isNotEmpty) return typedName;
+
+    final metadata = user.userMetadata ?? <String, dynamic>{};
+    final metadataName = (metadata['full_name'] ?? metadata['name'])
+        ?.toString()
+        .trim();
+    if (metadataName != null && metadataName.isNotEmpty) {
+      return metadataName;
+    }
+
+    final emailName = user.email?.split('@').first.trim();
+    if (emailName != null && emailName.isNotEmpty) return emailName;
+
+    return 'Usuário';
+  }
+
+  String _fallbackProfileEmail(User user) {
+    final email = user.email?.trim().toLowerCase();
+    if (email != null && email.isNotEmpty) return email;
+    return 'sem-email-${user.id}@local.app';
   }
 
   @override
@@ -893,11 +940,26 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                                 const Icon(Icons.payment, size: 24),
                           ),
                           const SizedBox(width: 12),
-                          const Text(
-                            'PIX',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'PIX',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Pagamento no app',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -967,11 +1029,26 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                             height: 24,
                           ),
                           const SizedBox(width: 12),
-                          const Text(
-                            'Cartão de Crédito',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Cartão de Crédito',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Pagamento no app',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -1054,47 +1131,58 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                       ),
                       const SizedBox(width: 16),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Row(
-                              children: [
-                                Image.asset(
-                                  'assets/icons/menu/money.png',
-                                  width: 24,
-                                  height: 24,
-                                ),
-                                const SizedBox(width: 12),
-                                const Text(
-                                  'Dinheiro',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
+                            Image.asset(
+                              'assets/icons/menu/money.png',
+                              width: 24,
+                              height: 24,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Flexible(
+                                        child: Text(
+                                          'Dinheiro',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                      if (!podeUsarDinheiro) ...[
+                                        const SizedBox(width: 8),
+                                        const Text(
+                                          '🔒',
+                                          style: TextStyle(fontSize: 14),
+                                        ),
+                                      ],
+                                    ],
                                   ),
-                                ),
-                                if (!podeUsarDinheiro) ...[
-                                  const SizedBox(width: 8),
-                                  const Text(
-                                    '🔒',
-                                    style: TextStyle(fontSize: 14),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    podeUsarDinheiro
+                                        ? 'Pagamento na entrega'
+                                        : isGuest
+                                        ? 'Indisponível para visitantes'
+                                        : dinheiroLiberadoParaTodos
+                                        ? 'Disponível para clientes autenticados'
+                                        : 'Requer $_pedidosConcluidos/$pedidosMinimosDinheiro pedidos concluídos',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: podeUsarDinheiro
+                                          ? Colors.grey
+                                          : Colors.orange,
+                                    ),
                                   ),
                                 ],
-                              ],
-                            ),
-                            Text(
-                              podeUsarDinheiro
-                                  ? 'Pagamento na entrega'
-                                  : isGuest
-                                  ? 'Indisponível para visitantes'
-                                  : dinheiroLiberadoParaTodos
-                                  ? 'Disponível para clientes autenticados'
-                                  : 'Requer $_pedidosConcluidos/$pedidosMinimosDinheiro pedidos concluídos',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: podeUsarDinheiro
-                                    ? Colors.grey
-                                    : Colors.orange,
-                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
@@ -1292,7 +1380,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                 Icon(Icons.calendar_today, color: Colors.orange[700]),
                 const SizedBox(width: 8),
                 Text(
-                  'Agendar Entrega',
+                  'Entrega',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,

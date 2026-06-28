@@ -64,6 +64,52 @@ class _EditProductDialogState extends State<EditProductDialog> {
     return 'R\$ ${numericValue.toStringAsFixed(2).replaceAll('.', ',')}';
   }
 
+  double? _toDouble(dynamic value) {
+    return ProductVariantUtils.toDouble(value);
+  }
+
+  double? _editableProductPrice({
+    required double? currentPrice,
+    required double? previousPrice,
+    required double? discountValue,
+  }) {
+    final hasDiscount =
+        _isPromocao &&
+        discountValue != null &&
+        discountValue > 0 &&
+        previousPrice != null &&
+        previousPrice > 0;
+    if (hasDiscount) return previousPrice;
+    return currentPrice;
+  }
+
+  double? _editableSizePrice(dynamic sizePrice, double? discountValue) {
+    final currentSizePrice = _toDouble(sizePrice);
+    if (currentSizePrice == null) return null;
+    if (_isPromocao && discountValue != null && discountValue > 0) {
+      return currentSizePrice + discountValue;
+    }
+    return currentSizePrice;
+  }
+
+  double? _resolveDiscountValue({
+    required double? savedDiscountValue,
+    required double? currentPrice,
+    required double? previousPrice,
+  }) {
+    if (savedDiscountValue != null && savedDiscountValue > 0) {
+      return savedDiscountValue;
+    }
+    if (_isPromocao &&
+        currentPrice != null &&
+        currentPrice > 0 &&
+        previousPrice != null &&
+        previousPrice > currentPrice) {
+      return previousPrice - currentPrice;
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -96,8 +142,14 @@ class _EditProductDialogState extends State<EditProductDialog> {
     }
 
     // Inicializar valor de desconto
-    final valorDesconto = widget.produto['valor_desconto'];
-    final precoAnterior = widget.produto['preco_anterior'];
+    final valorDescontoSalvo = _toDouble(widget.produto['valor_desconto']);
+    final precoAnterior = _toDouble(widget.produto['preco_anterior']);
+    final precoAtual = _toDouble(widget.produto['preco']);
+    final valorDesconto = _resolveDiscountValue(
+      savedDiscountValue: valorDescontoSalvo,
+      currentPrice: precoAtual,
+      previousPrice: precoAnterior,
+    );
 
     debugPrint('📦 Produto inicial: ${widget.produto['nome']}');
     debugPrint('💰 Preço: ${widget.produto['preco']}');
@@ -106,13 +158,15 @@ class _EditProductDialogState extends State<EditProductDialog> {
     debugPrint('🏷️ Promoção: ${widget.produto['promocao']}');
 
     _valorDescontoController = TextEditingController(
-      text: valorDesconto != null && valorDesconto > 0
-          ? valorDesconto.toString()
-          : '',
+      text: _formatCurrencyText(valorDesconto),
     );
 
     // Inicializar preço formatado como R$ X,XX
-    final precoRaw = widget.produto['preco'];
+    final precoRaw = _editableProductPrice(
+      currentPrice: precoAtual,
+      previousPrice: precoAnterior,
+      discountValue: valorDesconto,
+    );
     if (precoRaw != null) {
       _precoController = TextEditingController(
         text: _formatCurrencyText(precoRaw),
@@ -129,7 +183,9 @@ class _EditProductDialogState extends State<EditProductDialog> {
         _sizes.add({
           'nameController': TextEditingController(text: tamanho['nome'] ?? ''),
           'precoController': TextEditingController(
-            text: _formatCurrencyText(tamanho['preco']),
+            text: _formatCurrencyText(
+              _editableSizePrice(tamanho['preco'], valorDesconto),
+            ),
           ),
         });
       }
@@ -913,131 +969,103 @@ class _EditProductDialogState extends State<EditProductDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Nome
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue[200]!),
-            ),
-            child: TextField(
-              controller: _nomeController,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Nome do Produto *',
-                labelStyle: TextStyle(
-                  color: Colors.blue,
-                  fontWeight: FontWeight.w600,
-                ),
-                prefixIcon: Icon(Icons.shopping_bag, color: Colors.blue),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.all(16),
+          TextField(
+            controller: _nomeController,
+            autocorrect: false,
+            decoration: productDialogInputDecoration(
+              labelText: 'Nome do Produto *',
+              borderColor: Colors.blue[200]!,
+              fillColor: Colors.blue[50]!,
+              labelStyle: const TextStyle(
+                color: Colors.blue,
+                fontWeight: FontWeight.w600,
               ),
+              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.blue),
             ),
           ),
           const SizedBox(height: 16),
 
           // Descrição
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: TextField(
-              controller: _descricaoController,
-              maxLines: 3,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Descrição',
-                prefixIcon: Icon(Icons.description),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.all(16),
-              ),
+          TextField(
+            controller: _descricaoController,
+            maxLines: 3,
+            autocorrect: false,
+            decoration: productDialogInputDecoration(
+              labelText: 'Descrição',
+              borderColor: Colors.grey[300]!,
+              fillColor: Colors.grey[50]!,
+              prefixIcon: const Icon(Icons.description),
             ),
           ),
           const SizedBox(height: 16),
 
           // Campo de Preço (sempre visível se não tem tamanhos)
           if (!_hasMultipleSizes)
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue[200]!),
-              ),
-              child: TextField(
-                controller: _precoController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [CurrencyInputFormatter()],
-                decoration: InputDecoration(
-                  labelText: 'Preço *',
-                  labelStyle: const TextStyle(
-                    color: Colors.blue,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  prefixIcon: const Icon(
-                    Icons.payments_outlined,
-                    color: Colors.blue,
-                  ),
-                  hintText: 'R\$ 0,00',
-                  hintStyle: TextStyle(
-                    color: Colors.grey.withValues(alpha: 0.28),
-                  ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.all(16),
+            TextField(
+              controller: _precoController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [CurrencyInputFormatter()],
+              decoration: productDialogInputDecoration(
+                labelText: 'Preço *',
+                borderColor: Colors.blue[200]!,
+                fillColor: Colors.blue[50]!,
+                labelStyle: const TextStyle(
+                  color: Colors.blue,
+                  fontWeight: FontWeight.w600,
+                ),
+                prefixIcon: const Icon(
+                  Icons.payments_outlined,
+                  color: Colors.blue,
+                ),
+                hintText: 'R\$ 0,00',
+                hintStyle: TextStyle(
+                  color: Colors.grey.withValues(alpha: 0.28),
                 ),
               ),
             ),
           const SizedBox(height: 16),
 
           // Categoria
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue[200]!),
-            ),
-            child: DropdownButtonFormField<String>(
-              initialValue: _selectedCategoryId,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Categoria *',
-                labelStyle: TextStyle(
-                  color: Colors.blue,
-                  fontWeight: FontWeight.w600,
-                ),
-                prefixIcon: Icon(Icons.category, color: Colors.blue),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.all(16),
+          DropdownButtonFormField<String>(
+            initialValue: _selectedCategoryId,
+            isExpanded: true,
+            decoration: productDialogInputDecoration(
+              labelText: 'Categoria *',
+              borderColor: Colors.blue[200]!,
+              fillColor: Colors.blue[50]!,
+              labelStyle: const TextStyle(
+                color: Colors.blue,
+                fontWeight: FontWeight.w600,
               ),
-              items: widget.categorias.map((categoria) {
-                return DropdownMenuItem<String>(
-                  value: categoria['id'].toString(),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: Center(
-                          child: CategoryIconWidget(
-                            icone: categoria['icone'] ?? '📦',
-                            categoryName: categoria['nome'],
-                            size: 20,
-                          ),
+              prefixIcon: const Icon(Icons.category, color: Colors.blue),
+            ),
+            items: widget.categorias.map((categoria) {
+              return DropdownMenuItem<String>(
+                value: categoria['id'].toString(),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: Center(
+                        child: CategoryIconWidget(
+                          icone: categoria['icone'] ?? '📦',
+                          categoryName: categoria['nome'],
+                          size: 20,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Text(categoria['nome']),
-                    ],
-                  ),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedCategoryId = value;
-                });
-              },
-            ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(categoria['nome']),
+                  ],
+                ),
+              );
+            }).toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedCategoryId = value;
+              });
+            },
           ),
           const SizedBox(height: 16),
 
@@ -1507,50 +1535,31 @@ class _EditProductDialogState extends State<EditProductDialog> {
 
           // Campo de Desconto (visível quando marcado como promoção)
           if (_isPromocao)
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.green[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green[200]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: _valorDescontoController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [CurrencyInputFormatter()],
-                    decoration: InputDecoration(
-                      labelText: 'Valor do Desconto (em R\$)',
-                      labelStyle: const TextStyle(
-                        color: Colors.green,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      hintText: _hasMultipleSizes
-                          ? 'Ex: R\$ 5,00'
-                          : 'Valor a ser deduzido do preço',
-                      hintStyle: const TextStyle(fontSize: 12),
-                      prefixIcon: const Icon(
-                        Icons.local_offer,
-                        color: Colors.green,
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.all(16),
-                    ),
-                  ),
-                  if (_hasMultipleSizes)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                      child: Text(
-                        '💡 Este valor será deduzido automaticamente de TODOS os preços',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.green[700],
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ),
-                ],
+            TextField(
+              controller: _valorDescontoController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [CurrencyInputFormatter()],
+              decoration: productDialogInputDecoration(
+                labelText: 'Valor do Desconto (em R\$)',
+                borderColor: Colors.green[200]!,
+                fillColor: Colors.green[50]!,
+                labelStyle: const TextStyle(
+                  color: Colors.green,
+                  fontWeight: FontWeight.w600,
+                ),
+                hintText: _hasMultipleSizes
+                    ? 'Ex: R\$ 5,00'
+                    : 'Valor a ser deduzido do preço',
+                hintStyle: const TextStyle(fontSize: 12),
+                prefixIcon: const Icon(Icons.local_offer, color: Colors.green),
+                helperText: _hasMultipleSizes
+                    ? 'Este valor será deduzido automaticamente de todos os preços'
+                    : null,
+                helperStyle: TextStyle(
+                  fontSize: 12,
+                  color: Colors.green[700],
+                  fontStyle: FontStyle.italic,
+                ),
               ),
             ),
           if (_isPromocao) const SizedBox(height: 16),

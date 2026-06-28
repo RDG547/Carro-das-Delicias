@@ -1,11 +1,20 @@
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../config/env_config.dart';
 
 /// Serviço para integração com o Stripe para pagamentos com cartão
 class StripeService {
-  static String get _secretKey => dotenv.env['STRIPE_SECRET_KEY'] ?? '';
+  static const String _checkoutFunction = 'create-card-checkout';
+
+  static String get _secretKey {
+    if (kReleaseMode) return '';
+    return EnvConfig.get('STRIPE_SECRET_KEY');
+  }
+
   static const String _baseUrl = 'https://api.stripe.com/v1';
 
   // URLs de retorno (substituir por URLs reais em produção)
@@ -23,6 +32,11 @@ class StripeService {
     Map<String, String>? metadata,
   }) async {
     try {
+      if (_secretKey.isEmpty) {
+        debugPrint('STRIPE_SECRET_KEY não configurada no cliente.');
+        return null;
+      }
+
       debugPrint('💳 Criando Payment Intent no Stripe...');
       debugPrint('💰 Valor: R\$ ${amount / 100}');
 
@@ -64,6 +78,11 @@ class StripeService {
     required String paymentMethodId,
   }) async {
     try {
+      if (_secretKey.isEmpty) {
+        debugPrint('STRIPE_SECRET_KEY não configurada no cliente.');
+        return null;
+      }
+
       debugPrint('🔒 Confirmando pagamento...');
 
       final response = await http.post(
@@ -94,6 +113,11 @@ class StripeService {
   /// [paymentIntentId] - ID do Payment Intent
   Future<String?> checkPaymentStatus(String paymentIntentId) async {
     try {
+      if (_secretKey.isEmpty) {
+        debugPrint('STRIPE_SECRET_KEY não configurada no cliente.');
+        return null;
+      }
+
       debugPrint('🔍 Verificando status do pagamento...');
 
       final response = await http.get(
@@ -127,6 +151,11 @@ class StripeService {
   /// Cancela um Payment Intent
   Future<bool> cancelPaymentIntent(String paymentIntentId) async {
     try {
+      if (_secretKey.isEmpty) {
+        debugPrint('STRIPE_SECRET_KEY não configurada no cliente.');
+        return false;
+      }
+
       debugPrint('🚫 Cancelando Payment Intent...');
 
       final response = await http.post(
@@ -159,7 +188,22 @@ class StripeService {
     required String customerEmail,
     Map<String, String>? metadata,
   }) async {
+    final edgeResult = await _createCheckoutSessionViaFunction(
+      description: description,
+      customerEmail: customerEmail,
+      metadata: metadata,
+    );
+    if (edgeResult != null) return edgeResult;
+
     try {
+      if (_secretKey.isEmpty) {
+        return {
+          'success': false,
+          'message':
+              'Pagamento com cartão indisponível no momento. Use outro método.',
+        };
+      }
+
       if (amount < 0.50) {
         return {
           'success': false,
@@ -222,7 +266,14 @@ class StripeService {
   ///
   /// [sessionId] - ID da sessão retornado ao criar checkout
   Future<Map<String, dynamic>> checkSessionStatus(String sessionId) async {
+    final edgeResult = await _checkSessionStatusViaFunction(sessionId);
+    if (edgeResult != null) return edgeResult;
+
     try {
+      if (_secretKey.isEmpty) {
+        return {'status': 'error'};
+      }
+
       final response = await http.get(
         Uri.parse('$_baseUrl/checkout/sessions/$sessionId'),
         headers: {'Authorization': 'Bearer $_secretKey'},
@@ -244,5 +295,54 @@ class StripeService {
       debugPrint('❌ Exceção ao verificar status: $e');
       return {'status': 'error'};
     }
+  }
+
+  Future<Map<String, dynamic>?> _createCheckoutSessionViaFunction({
+    required String description,
+    required String customerEmail,
+    required Map<String, String>? metadata,
+  }) async {
+    final pedidoId = metadata?['pedido_id'] ?? metadata?['pedidoId'];
+    if (pedidoId == null || pedidoId.trim().isEmpty) return null;
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        _checkoutFunction,
+        body: {
+          'pedido_id': pedidoId,
+          'description': description,
+          'customer_email': customerEmail,
+        },
+      );
+      return _asStringKeyedMap(response.data);
+    } catch (error) {
+      debugPrint('Erro ao criar checkout via Edge Function: $error');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> _checkSessionStatusViaFunction(
+    String sessionId,
+  ) async {
+    if (sessionId.trim().isEmpty) return null;
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        _checkoutFunction,
+        body: {'action': 'check_status', 'session_id': sessionId},
+      );
+      return _asStringKeyedMap(response.data);
+    } catch (error) {
+      debugPrint('Erro ao verificar checkout via Edge Function: $error');
+      return null;
+    }
+  }
+
+  Map<String, dynamic>? _asStringKeyedMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) {
+      return value.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return null;
   }
 }

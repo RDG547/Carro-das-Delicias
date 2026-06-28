@@ -10,6 +10,7 @@ import '../services/cart_service.dart';
 import '../services/main_navigation_service.dart';
 import '../widgets/main_navigation_provider.dart';
 import '../utils/realtime_auth_utils.dart';
+import '../utils/product_variant_utils.dart';
 import 'abacatepay_payment_screen.dart';
 import 'stripe_payment_screen.dart';
 
@@ -844,6 +845,91 @@ class _PedidosScreenState extends State<PedidosScreen> {
     }
   }
 
+  Map<String, dynamic>? _findProductOptionByName(
+    List<Map<String, dynamic>> options,
+    dynamic rawName,
+  ) {
+    final targetName = ProductVariantUtils.optionName(
+      rawName,
+    )?.trim().toLowerCase();
+    if (targetName == null || targetName.isEmpty) return null;
+
+    for (final option in options) {
+      final optionName = ProductVariantUtils.optionName(
+        option,
+      )?.trim().toLowerCase();
+      if (optionName == targetName) return option;
+    }
+
+    return null;
+  }
+
+  bool _pricesAreDifferent(double? oldPrice, double? currentPrice) {
+    if (oldPrice == null || currentPrice == null) return false;
+    return (oldPrice - currentPrice).abs() > 0.009;
+  }
+
+  Future<void> _showReorderPriceChangesDialog(
+    List<_ReorderPriceChange> changes,
+  ) async {
+    if (changes.isEmpty || !mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.orange),
+            SizedBox(width: 8),
+            Expanded(child: Text('Preço atualizado')),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                changes.length == 1
+                    ? 'Este produto está com preço diferente desde sua última compra. O carrinho foi montado com o preço atual do app.'
+                    : 'Estes produtos estão com preço diferente desde sua última compra. O carrinho foi montado com os preços atuais do app.',
+              ),
+              const SizedBox(height: 12),
+              ...changes.map(
+                (change) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.local_offer_outlined,
+                        size: 18,
+                        color: Colors.orange,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${change.productName}: antes ${_formatPrice(change.oldPrice)}, agora ${_formatPrice(change.currentPrice)}',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _refazerPedido(Map<String, dynamic> pedido) async {
     try {
       final cartService = CartService();
@@ -869,7 +955,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
       debugPrint('🗑️ Carrinho limpo antes de refazer pedido');
 
       int itensAdicionados = 0;
-      List<String> produtosIndisponiveis = [];
+      final produtosIndisponiveis = <String>[];
+      final priceChanges = <_ReorderPriceChange>[];
 
       // Adicionar todos os itens do pedido ao carrinho
       for (var item in itens) {
@@ -917,22 +1004,62 @@ class _PedidosScreenState extends State<PedidosScreen> {
             'categoria_nome': produtoResponse['categorias']?['nome'],
             'categoria_icone': produtoResponse['categorias']?['icone'],
           };
-          final produtoSelecionado = Map<String, dynamic>.from(produto);
-          if (item['tamanho'] != null &&
-              item['tamanho'].toString().trim().isNotEmpty) {
-            produtoSelecionado['tamanho_selecionado'] = item['tamanho'];
+          final tamanhos = ProductVariantUtils.extractSizes(
+            produto['tamanhos'],
+          );
+          final sabores = ProductVariantUtils.extractFlavors(
+            produto['sabores'],
+          );
+          final tamanhoPedido = item['tamanho']?.toString().trim();
+          final saborPedido = item['sabor']?.toString().trim();
+          Map<String, dynamic>? selectedSize;
+          Map<String, dynamic>? selectedFlavor;
+
+          if (tamanhoPedido != null && tamanhoPedido.isNotEmpty) {
+            selectedSize = _findProductOptionByName(tamanhos, tamanhoPedido);
+            if (tamanhos.isNotEmpty && selectedSize == null) {
+              debugPrint(
+                '❌ Tamanho indisponível para ${item['nome']}: $tamanhoPedido',
+              );
+              produtosIndisponiveis.add('${item['nome']} ($tamanhoPedido)');
+              continue;
+            }
           }
-          if (item['sabor'] != null &&
-              item['sabor'].toString().trim().isNotEmpty) {
-            produtoSelecionado['sabor_selecionado'] = item['sabor'];
+
+          if (saborPedido != null && saborPedido.isNotEmpty) {
+            selectedFlavor = _findProductOptionByName(sabores, saborPedido);
+            if (sabores.isNotEmpty && selectedFlavor == null) {
+              debugPrint(
+                '❌ Sabor indisponível para ${item['nome']}: $saborPedido',
+              );
+              produtosIndisponiveis.add('${item['nome']} ($saborPedido)');
+              continue;
+            }
           }
-          if (item['preco'] != null) {
-            produtoSelecionado['preco'] = item['preco'];
+
+          final produtoSelecionado = ProductVariantUtils.applySelections(
+            produto,
+            selectedSize: selectedSize,
+            selectedFlavor: selectedFlavor,
+          );
+          final precoAtual = ProductVariantUtils.toDouble(
+            produtoSelecionado['preco'],
+          );
+          if (precoAtual == null) {
+            debugPrint('❌ Produto sem preço atual: ${item['nome']}');
+            produtosIndisponiveis.add(item['nome'] ?? 'Produto');
+            continue;
           }
-          if (item['imagem_url'] != null &&
-              item['imagem_url'].toString().trim().isNotEmpty) {
-            produtoSelecionado['imagem_url'] = item['imagem_url'];
-            produtoSelecionado['imagens'] = [item['imagem_url']];
+
+          final precoAntigo = ProductVariantUtils.toDouble(item['preco']);
+          if (_pricesAreDifferent(precoAntigo, precoAtual)) {
+            priceChanges.add(
+              _ReorderPriceChange(
+                productName: item['nome'] ?? produto['nome'] ?? 'Produto',
+                oldPrice: precoAntigo!,
+                currentPrice: precoAtual,
+              ),
+            );
           }
 
           debugPrint('✅ Adicionando ao carrinho: ${produto['nome']}');
@@ -955,6 +1082,11 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
       if (mounted) {
         if (itensAdicionados > 0) {
+          if (priceChanges.isNotEmpty) {
+            await _showReorderPriceChangesDialog(priceChanges);
+            if (!mounted) return;
+          }
+
           // Navegar direto para a tela de checkout
           final provider = MainNavigationProvider.of(context);
           if (MainNavigationService.navigateToCart()) {
@@ -2231,4 +2363,16 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
       ],
     );
   }
+}
+
+class _ReorderPriceChange {
+  final String productName;
+  final double oldPrice;
+  final double currentPrice;
+
+  const _ReorderPriceChange({
+    required this.productName,
+    required this.oldPrice,
+    required this.currentPrice,
+  });
 }

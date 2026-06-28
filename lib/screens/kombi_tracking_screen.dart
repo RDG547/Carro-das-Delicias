@@ -43,8 +43,12 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
   bool _isSheetExpanded = false;
   double get _sheetCollapsedHeight => 60.0;
   double get _sheetExpandedHeight {
-    final onlineCount = _allKombis.where((k) => k['is_online'] == true).length;
+    final onlineCount = _allKombis.where(_isKombiOnline).length;
     return onlineCount > 1 ? 340.0 : 280.0;
+  }
+
+  bool _isKombiOnline(Map<String, dynamic> kombi) {
+    return LocationTrackingService.isKombiRecentlyOnline(kombi);
   }
 
   @override
@@ -64,10 +68,17 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
     debugPrint(
       '🔔 KombiTracking - Status global mudou para: ${kombiOnlineStatus.value}',
     );
-    if (mounted) {
+    if (!mounted) return;
+
+    if (!kombiOnlineStatus.value) {
       setState(() {
-        _isOnline = kombiOnlineStatus.value;
+        _isOnline = false;
+        _kombiLocation = null;
+        _selectedAdminId = null;
       });
+      unawaited(_clearMarker());
+    } else if (_selectedAdminId == null || _kombiLocation == null) {
+      unawaited(_loadInitialLocation());
     }
   }
 
@@ -113,6 +124,14 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
       await _loadVendorNames(kombis);
       setState(() => _allKombis = kombis);
       _selectKombi(kombis.first['admin_id'] as String);
+    } else if (mounted) {
+      setState(() {
+        _allKombis = [];
+        _isOnline = false;
+        _kombiLocation = null;
+        _selectedAdminId = null;
+      });
+      await _clearMarker();
     }
   }
 
@@ -128,9 +147,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
       (allData) {
         if (!mounted) return;
 
-        final onlineKombis = allData
-            .where((d) => d['is_online'] == true)
-            .toList();
+        final onlineKombis = allData.where(_isKombiOnline).toList();
 
         // Carregar nomes de vendedores novos
         final currentIds = _vendorNames.keys.toSet();
@@ -205,7 +222,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
 
     final latitude = kombi['latitude'] as double?;
     final longitude = kombi['longitude'] as double?;
-    final isOnline = kombi['is_online'] as bool? ?? false;
+    final isOnline = _isKombiOnline(kombi);
 
     setState(() {
       _selectedAdminId = adminId;
@@ -740,10 +757,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
                       // Conteúdo expansível
                       if (_isSheetExpanded) ...[
                         // Seletor de Kombis (quando há mais de uma online)
-                        if (_allKombis
-                                .where((k) => k['is_online'] == true)
-                                .length >
-                            1) ...[
+                        if (_allKombis.where(_isKombiOnline).length > 1) ...[
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Column(
@@ -762,7 +776,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
                                   scrollDirection: Axis.horizontal,
                                   child: Row(
                                     children: _allKombis
-                                        .where((k) => k['is_online'] == true)
+                                        .where(_isKombiOnline)
                                         .map((kombi) {
                                           final adminId =
                                               kombi['admin_id'] as String;

@@ -8,6 +8,7 @@ import 'services/auth_profile_sync_service.dart';
 import 'services/notification_service.dart';
 import 'services/deep_link_service.dart';
 import 'services/order_payment_service.dart';
+import 'services/user_presence_service.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
@@ -16,14 +17,17 @@ class AuthWrapper extends StatefulWidget {
   State<AuthWrapper> createState() => _AuthWrapperState();
 }
 
-class _AuthWrapperState extends State<AuthWrapper> {
+class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   bool _isLoading = true;
   User? _user;
   StreamSubscription<AuthState>? _authSubscription;
+  String? _authenticatedServicesUserId;
+  Future<void>? _authenticatedServicesFuture;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkAuth();
 
     // Inicializar deep link service
@@ -49,10 +53,27 @@ class _AuthWrapperState extends State<AuthWrapper> {
           unawaited(_startAuthenticatedServices(newUser));
         } else {
           // Usuário fez logout - parar escuta de notificações
+          _authenticatedServicesUserId = null;
+          _authenticatedServicesFuture = null;
+          unawaited(UserPresenceService.instance.stop(markOffline: true));
           NotificationService.stopListeningToNotifications();
         }
       }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final user = _user;
+    if (user == null) return;
+
+    if (state == AppLifecycleState.resumed) {
+      unawaited(UserPresenceService.instance.start(user));
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(UserPresenceService.instance.pause());
+    }
   }
 
   Future<void> _checkAuth() async {
@@ -80,6 +101,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 
   Future<void> _startAuthenticatedServices(User user) async {
+    if (_authenticatedServicesUserId == user.id &&
+        _authenticatedServicesFuture != null) {
+      return _authenticatedServicesFuture;
+    }
+
+    _authenticatedServicesUserId = user.id;
+    _authenticatedServicesFuture = _startAuthenticatedServicesInternal(user);
+    return _authenticatedServicesFuture;
+  }
+
+  Future<void> _startAuthenticatedServicesInternal(User user) async {
     final supabase = Supabase.instance.client;
 
     try {
@@ -97,6 +129,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           (bannedUntil != null && bannedUntil.isAfter(DateTime.now()));
 
       if (isBanned) {
+        await UserPresenceService.instance.stop(markOffline: true);
         await supabase.auth.signOut();
         if (mounted) {
           setState(() {
@@ -110,7 +143,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
       // Colunas de banimento podem não existir até a migration ser aplicada.
     }
 
-    unawaited(AuthProfileSyncService.syncCurrentUserProfile());
+    await AuthProfileSyncService.syncCurrentUserProfile();
+    unawaited(UserPresenceService.instance.start(user));
     unawaited(OrderPaymentService.syncPendingPaymentsForCurrentUser());
     NotificationService.startListeningToNotifications();
     NotificationService.checkPendingNotifications();
@@ -118,8 +152,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _authSubscription?.cancel();
     // Parar escuta ao destruir o widget
+    unawaited(UserPresenceService.instance.stop(markOffline: true));
     NotificationService.stopListeningToNotifications();
     super.dispose();
   }

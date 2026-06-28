@@ -855,11 +855,10 @@ class _HomeScreenState extends State<HomeScreen>
         _cachedFilteredProducts = categoryFiltered;
       }
 
+      final filteredProducts =
+          _cachedFilteredProducts ?? <Map<String, dynamic>>[];
       _cachedFilteredProducts =
-          List<Map<String, dynamic>>.from(_cachedFilteredProducts!)..sort((
-            a,
-            b,
-          ) {
+          List<Map<String, dynamic>>.from(filteredProducts)..sort((a, b) {
             final availabilityCompare = (a['ativo'] == false ? 1 : 0).compareTo(
               b['ativo'] == false ? 1 : 0,
             );
@@ -887,7 +886,7 @@ class _HomeScreenState extends State<HomeScreen>
       _lastSortOption = _sortOption;
     }
 
-    return _cachedFilteredProducts!;
+    return _cachedFilteredProducts ?? <Map<String, dynamic>>[];
   }
 
   List<Map<String, dynamic>> get _maisVendidos {
@@ -1148,14 +1147,14 @@ class _HomeScreenState extends State<HomeScreen>
 
   double _specialSectionCardWidth(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    return (screenWidth * 0.46).clamp(172.0, 220.0).toDouble();
+    return (screenWidth * 0.52).clamp(190.0, 248.0).toDouble();
   }
 
   double _specialSectionHeight(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final cardWidth = _specialSectionCardWidth(context);
-    final height = cardWidth * (screenWidth < 380 ? 1.62 : 1.46);
-    return height.clamp(286.0, 308.0).toDouble();
+    final height = cardWidth * (screenWidth < 380 ? 1.72 : 1.46);
+    return height.clamp(326.0, 362.0).toDouble();
   }
 
   @override
@@ -2114,7 +2113,7 @@ class _HomeScreenState extends State<HomeScreen>
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final isCompactCard = constraints.maxWidth < 190;
-                final imageHeight = isCompactCard ? 106.0 : 116.0;
+                final imageHeight = isCompactCard ? 124.0 : 138.0;
                 final contentPadding = isCompactCard ? 8.0 : 9.0;
                 final titleFontSize = isCompactCard ? 12.5 : 13.0;
                 final descriptionFontSize = isCompactCard ? 9.5 : 10.0;
@@ -2141,6 +2140,9 @@ class _HomeScreenState extends State<HomeScreen>
                                   height: imageHeight,
                                   width: double.infinity,
                                   fit: BoxFit.cover,
+                                  cacheWidth: 520,
+                                  cacheHeight: 360,
+                                  filterQuality: FilterQuality.medium,
                                   errorBuilder: (context, error, stackTrace) {
                                     return Container(
                                       height: imageHeight,

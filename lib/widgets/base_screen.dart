@@ -65,18 +65,15 @@ class BaseScreen extends StatelessWidget {
       top: hasAppBar ? 0 : resolvedPadding.top,
     );
 
-    final Widget content = AnimatedSwitcher(
-      duration: const Duration(milliseconds: 400),
-      child: MediaQuery.removePadding(
-        context: context,
-        removeBottom: true,
-        child: Padding(padding: effectivePadding, child: child),
-      ),
+    final Widget content = MediaQuery.removePadding(
+      context: context,
+      removeBottom: true,
+      child: Padding(padding: effectivePadding, child: child),
     );
 
     return Scaffold(
       backgroundColor: backgroundColor ?? Colors.white,
-      resizeToAvoidBottomInset: false,
+      resizeToAvoidBottomInset: true,
       appBar: hasAppBar
           ? PreferredSize(
               preferredSize: const Size.fromHeight(

@@ -1,8 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/env_config.dart';
 
@@ -13,12 +13,10 @@ import '../config/env_config.dart';
 /// contratos novos da v2 para a AbacatePay.
 class AbacatePayService {
   static const String _baseUrl = 'https://api.abacatepay.com/v2';
+  static const String _paymentFunction = 'create-pix-payment';
 
   static String get _apiKey {
-    final dotenvValue = dotenv.env['ABACATEPAY_API_KEY'];
-    if (dotenvValue != null && dotenvValue.isNotEmpty) {
-      return dotenvValue;
-    }
+    if (kReleaseMode) return '';
     return EnvConfig.get('ABACATEPAY_API_KEY');
   }
 
@@ -217,6 +215,19 @@ class AbacatePayService {
     required String description,
     String? externalReference,
   }) async {
+    final edgeResult = await _createPixChargeViaFunction(
+      description: description,
+      externalReference: externalReference,
+    );
+    if (edgeResult != null) return edgeResult;
+
+    if (kReleaseMode) {
+      return {
+        'success': false,
+        'message': 'Pagamento PIX indisponível no momento.',
+      };
+    }
+
     try {
       final amountInCents = formatRealToCentavos(amount);
 
@@ -259,6 +270,13 @@ class AbacatePayService {
   ///
   /// [chargeId] - ID da cobrança retornado ao criar o PIX.
   Future<Map<String, dynamic>> checkPaymentStatus(String chargeId) async {
+    final edgeResult = await _checkPaymentStatusViaFunction(chargeId);
+    if (edgeResult != null) return edgeResult;
+
+    if (kReleaseMode) {
+      return {'status': 'ERROR'};
+    }
+
     try {
       final pixData = await checkPixStatus(chargeId);
       if (pixData == null) {
@@ -285,6 +303,54 @@ class AbacatePayService {
   /// Formatar valor de real para centavos.
   static int formatRealToCentavos(double reais) {
     return (reais * 100).round();
+  }
+
+  Future<Map<String, dynamic>?> _createPixChargeViaFunction({
+    required String description,
+    required String? externalReference,
+  }) async {
+    final pedidoId = externalReference?.trim();
+    if (pedidoId == null || pedidoId.isEmpty) return null;
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        _paymentFunction,
+        body: {'pedido_id': pedidoId, 'description': description},
+      );
+      final data = _asStringKeyedMap(response.data);
+      if (data == null) {
+        return {'success': false, 'message': 'Erro ao gerar código PIX'};
+      }
+      return data;
+    } catch (error) {
+      debugPrint('Erro ao criar PIX via Edge Function: $error');
+      return {'success': false, 'message': 'Erro ao gerar código PIX'};
+    }
+  }
+
+  Future<Map<String, dynamic>?> _checkPaymentStatusViaFunction(
+    String chargeId,
+  ) async {
+    if (chargeId.trim().isEmpty) return null;
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        _paymentFunction,
+        body: {'action': 'check_status', 'charge_id': chargeId},
+      );
+      return _asStringKeyedMap(response.data) ?? {'status': 'ERROR'};
+    } catch (error) {
+      debugPrint('Erro ao verificar PIX via Edge Function: $error');
+      return {'status': 'ERROR'};
+    }
+  }
+
+  Map<String, dynamic>? _asStringKeyedMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) {
+      return value.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return null;
   }
 
   Future<Map<String, dynamic>?> _createTransparentPix(

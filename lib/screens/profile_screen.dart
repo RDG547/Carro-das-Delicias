@@ -672,9 +672,19 @@ class _ProfileScreenState extends State<ProfileScreen>
                 child: SizedBox(
                   width: double.infinity,
                   child: Center(
-                    child: Text(
-                      'Informações Pessoais',
-                      textAlign: TextAlign.center,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.account_circle_outlined, size: 18),
+                          SizedBox(width: 6),
+                          Text(
+                            'Informações\nPessoais',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -683,7 +693,17 @@ class _ProfileScreenState extends State<ProfileScreen>
                 child: SizedBox(
                   width: double.infinity,
                   child: Center(
-                    child: Text('Estatísticas', textAlign: TextAlign.center),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.bar_chart_rounded, size: 18),
+                          SizedBox(width: 6),
+                          Text('Estatísticas', textAlign: TextAlign.center),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -695,6 +715,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         Expanded(
           child: TabBarView(
             controller: _tabController,
+            physics: const NeverScrollableScrollPhysics(),
             children: [_buildPersonalInfoTab(user), _buildStatisticsTab()],
           ),
         ),
@@ -707,7 +728,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 0 : 100),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 140 : 100),
       child: Card(
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -760,7 +781,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 0 : 100),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 140 : 100),
       child: Card(
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

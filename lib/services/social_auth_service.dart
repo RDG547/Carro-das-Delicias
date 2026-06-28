@@ -1,44 +1,36 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/env_config.dart';
+
 class SocialAuthService {
   /// Web Client ID do Google Cloud Console (mesmo configurado no Supabase Auth).
-  /// Defina via GOOGLE_WEB_CLIENT_ID no .env
-  static const String _dartDefinedWebClientId = String.fromEnvironment(
-    'GOOGLE_WEB_CLIENT_ID',
-    defaultValue: '',
-  );
+  /// Defina via --dart-define=GOOGLE_WEB_CLIENT_ID=...
+  static const String _defaultWebClientId =
+      '709873107589-kkvu666a7p4iigbeulrv4ptemfslg9co.apps.googleusercontent.com';
 
-  static String get _webClientId {
-    final fromDartDefine = _dartDefinedWebClientId.trim();
-    if (fromDartDefine.isNotEmpty) return fromDartDefine;
-    return dotenv.env['GOOGLE_WEB_CLIENT_ID']?.trim() ?? '';
-  }
+  static String get _webClientId => EnvConfig.get(
+    'GOOGLE_WEB_CLIENT_ID',
+    defaultValue: _defaultWebClientId,
+  ).trim();
+
+  static const String _googleScopes = 'openid email profile';
 
   static Future<void> signInWithGoogle() async {
-    // Na web, usar OAuth redirect padrão
     if (kIsWeb) {
-      final launched = await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.google,
-        scopes: 'openid email profile',
-      );
-      if (!launched) {
-        throw Exception('Não foi possível abrir o login do Google.');
-      }
-      return;
+      return _signInWithGoogleOAuth();
     }
 
     final webClientId = _webClientId;
-    if (webClientId.isEmpty) {
+    if (!_isUsableGoogleWebClientId(webClientId)) {
       throw Exception(
-        'GOOGLE_WEB_CLIENT_ID não configurado. Adicione o Web Client ID do Google no .env e confirme o SHA-1/SHA-256 do app no Google Cloud/Supabase.',
+        'GOOGLE_WEB_CLIENT_ID inválido. Configure o Web Client ID do Google no .env.json.',
       );
     }
 
-    // No mobile, usar login nativo (dentro do app)
     final googleSignIn = GoogleSignIn(serverClientId: webClientId);
+    await _forgetPreviousGoogleAccount(googleSignIn);
 
     final googleUser = await googleSignIn.signIn();
     if (googleUser == null) {
@@ -50,7 +42,9 @@ class SocialAuthService {
     final accessToken = googleAuth.accessToken;
 
     if (idToken == null) {
-      throw Exception('Não foi possível obter o token do Google.');
+      throw Exception(
+        'Não foi possível obter o token do Google. Confira o Web Client ID e os clientes Android com SHA-1 no Google Cloud.',
+      );
     }
 
     await Supabase.instance.client.auth.signInWithIdToken(
@@ -58,5 +52,33 @@ class SocialAuthService {
       idToken: idToken,
       accessToken: accessToken,
     );
+  }
+
+  static Future<void> _signInWithGoogleOAuth() async {
+    final launched = await Supabase.instance.client.auth.signInWithOAuth(
+      OAuthProvider.google,
+      scopes: _googleScopes,
+      queryParams: {'prompt': 'select_account'},
+    );
+    if (!launched) {
+      throw Exception('Não foi possível abrir o login do Google.');
+    }
+  }
+
+  static Future<void> _forgetPreviousGoogleAccount(
+    GoogleSignIn googleSignIn,
+  ) async {
+    try {
+      await googleSignIn.signOut();
+    } catch (error) {
+      debugPrint('Não foi possível limpar a conta Google anterior: $error');
+    }
+  }
+
+  static bool _isUsableGoogleWebClientId(String value) {
+    final clientId = value.trim();
+    return clientId.endsWith('.apps.googleusercontent.com') &&
+        !clientId.contains('xxxx') &&
+        !clientId.startsWith('000000000000-');
   }
 }

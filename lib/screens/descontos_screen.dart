@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/base_screen.dart';
+import '../widgets/category_icon_widget.dart';
 import '../providers/admin_status_provider.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/flavor_count_badge.dart';
@@ -14,34 +14,12 @@ import '../services/main_navigation_service.dart';
 import '../utils/product_action_helper.dart';
 import '../utils/product_variant_utils.dart';
 import '../utils/scroll_indicator_layout.dart';
+import '../widgets/edit_product_dialog.dart';
 import '../widgets/scroll_down_indicator.dart';
 import 'cart_screen.dart';
 import 'product_detail_screen.dart';
 
 enum DiscountSortOption { biggestDiscount, latest, alphabetical }
-
-/// Constrói o widget do ícone de categoria (suporta SVG asset, PNG asset, URL de imagem e emoji)
-Widget _buildCategoryIconWidget(String? icone, {double size = 24}) {
-  if (icone == null) return const SizedBox.shrink();
-  if (icone.startsWith('asset:')) {
-    final assetPath = icone.replaceFirst('asset:', '');
-    if (assetPath.endsWith('.svg')) {
-      return SvgPicture.asset(assetPath, width: size, height: size);
-    } else {
-      return Image.asset(assetPath, width: size, height: size);
-    }
-  } else if (icone.startsWith('http')) {
-    return Image.network(
-      icone,
-      width: size,
-      height: size,
-      errorBuilder: (context, error, stackTrace) =>
-          const Icon(Icons.broken_image, size: 16),
-    );
-  } else {
-    return Text(icone, style: TextStyle(fontSize: size * 0.67));
-  }
-}
 
 class DescontosScreen extends StatefulWidget {
   const DescontosScreen({super.key});
@@ -175,12 +153,23 @@ class _DescontosScreenState extends State<DescontosScreen>
           .not('preco_anterior', 'is', null)
           .order('created_at', ascending: false);
 
-      final produtos = List<Map<String, dynamic>>.from(response)
-        ..sort((a, b) {
-          final aPriority = a['ativo'] == false ? 1 : 0;
-          final bPriority = b['ativo'] == false ? 1 : 0;
-          return aPriority.compareTo(bPriority);
-        });
+      final produtos =
+          List<Map<String, dynamic>>.from(response).map((produto) {
+            final rawCategoria = produto['categorias'];
+            final categoria = rawCategoria is Map
+                ? Map<String, dynamic>.from(rawCategoria)
+                : null;
+            return {
+              ...produto,
+              'categoria_nome': categoria?['nome'] ?? produto['categoria_nome'],
+              'categoria_icone':
+                  categoria?['icone'] ?? produto['categoria_icone'],
+            };
+          }).toList()..sort((a, b) {
+            final aPriority = a['ativo'] == false ? 1 : 0;
+            final bPriority = b['ativo'] == false ? 1 : 0;
+            return aPriority.compareTo(bPriority);
+          });
 
       setState(() {
         _produtosComDesconto = produtos;
@@ -400,6 +389,192 @@ class _DescontosScreenState extends State<DescontosScreen>
     );
   }
 
+  void _showAdminOptions(Map<String, dynamic> produto) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Text(
+                  produto['nome']?.toString() ?? 'Produto',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                ListTile(
+                  leading: const Icon(Icons.edit, color: Colors.blue),
+                  title: const Text('Editar Produto'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showEditProductDialog(produto);
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: Image.asset(
+                    'assets/icons/menu/delete_button.png',
+                    width: 24,
+                    height: 24,
+                    color: Colors.red,
+                  ),
+                  title: const Text('Excluir Produto'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showDeleteConfirmation(produto);
+                  },
+                ),
+                const SizedBox(height: 10),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showEditProductDialog(Map<String, dynamic> produto) async {
+    try {
+      final response = await Supabase.instance.client
+          .from('categorias')
+          .select()
+          .order('ordem', ascending: true);
+
+      final categorias = List<Map<String, dynamic>>.from(response);
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (context) => EditProductDialog(
+          produto: produto,
+          categorias: categorias,
+          onProductUpdated: () {
+            _loadProdutosComDesconto();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Produto atualizado com sucesso!'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          },
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao carregar categorias: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showDeleteConfirmation(Map<String, dynamic> produto) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar Exclusão'),
+        content: Text(
+          'Tem certeza que deseja excluir o produto "${produto['nome']}"?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/cancel_button.png',
+                  width: 18,
+                  height: 18,
+                ),
+                const SizedBox(width: 4),
+                const Text('Cancelar'),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/menu/delete_button.png',
+                  width: 18,
+                  height: 18,
+                  color: Colors.black,
+                ),
+                const SizedBox(width: 4),
+                const Text('Excluir'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _deleteProduct(produto);
+    }
+  }
+
+  Future<void> _deleteProduct(Map<String, dynamic> produto) async {
+    try {
+      await Supabase.instance.client
+          .from('produtos')
+          .delete()
+          .eq('id', produto['id']);
+
+      CatalogSyncService.instance.notifyCatalogChanged();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Produto excluído com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        await _loadProdutosComDesconto();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao excluir produto: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   double _getDiscountPercentage(Map<String, dynamic> produto) {
     final priceInfo = _getDisplayPriceInfo(produto);
     final previousPrice = priceInfo['previousPrice'] as double?;
@@ -454,25 +629,6 @@ class _DescontosScreenState extends State<DescontosScreen>
     return produtos;
   }
 
-  Widget _buildEmojiPlaceholder(Map<String, dynamic>? categoria) {
-    final String icone = categoria?['icone'] ?? '🍰';
-    return Container(
-      width: 120,
-      height: 120,
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Center(
-        child: SizedBox(
-          width: 80,
-          height: 80,
-          child: _buildCategoryIconWidget(icone, size: 72),
-        ),
-      ),
-    );
-  }
-
   Future<void> _buyNow(Map<String, dynamic> produto) async {
     if (!_isProductAvailable(produto)) {
       _showUnavailableProductMessage();
@@ -483,6 +639,395 @@ class _DescontosScreenState extends State<DescontosScreen>
       context: context,
       cartService: _cartService,
       produto: produto,
+    );
+  }
+
+  Widget _buildDiscountProductCard(Map<String, dynamic> produto) {
+    final rawCategoria = produto['categorias'];
+    final categoria = rawCategoria is Map
+        ? Map<String, dynamic>.from(rawCategoria)
+        : produto['categoria_nome'] != null
+        ? {
+            'nome': produto['categoria_nome'],
+            'icone': produto['categoria_icone'],
+          }
+        : null;
+    final isAvailable = _isProductAvailable(produto);
+    final priceInfo = _getDisplayPriceInfo(produto);
+    final precoAtual = priceInfo['currentPrice'] as double?;
+    final precoAnterior = priceInfo['previousPrice'] as double?;
+    final hasDiscount = priceInfo['hasDiscount'] as bool;
+    final hasMultiplePrices = priceInfo['hasMultiplePrices'] as bool;
+    final flavorCount = ProductVariantUtils.extractFlavors(
+      produto['sabores'],
+    ).length;
+    final percentualDesconto = hasDiscount && precoAtual != null
+        ? _calcularPercentualDesconto(precoAnterior, precoAtual)
+        : 0.0;
+    final discountLabel = hasDiscount
+        ? '${percentualDesconto.toInt()}% OFF'
+        : 'OFERTA';
+
+    final isAdmin = AdminStatusProvider.of(context)?.isAdmin ?? false;
+
+    return GestureDetector(
+      onTap: () => _navigateToProductDetail(produto),
+      onLongPress: isAdmin ? () => _showAdminOptions(produto) : null,
+      child: ColorFiltered(
+        colorFilter: isAvailable
+            ? const ColorFilter.mode(Colors.transparent, BlendMode.dst)
+            : const ColorFilter.matrix(_grayscaleMatrix),
+        child: Opacity(
+          opacity: isAvailable ? 1 : 0.82,
+          child: Card(
+            margin: const EdgeInsets.only(bottom: 14),
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final imageSize = constraints.maxWidth < 360 ? 92.0 : 108.0;
+
+                return Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          _buildDiscountProductImage(
+                            produto: produto,
+                            categoria: categoria,
+                            size: imageSize,
+                          ),
+                          Positioned(
+                            left: 6,
+                            top: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red[700],
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                discountLabel,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text.rich(
+                                    TextSpan(
+                                      children: [
+                                        TextSpan(
+                                          text: produto['nome'] ?? 'Produto',
+                                        ),
+                                        if (flavorCount > 1)
+                                          flavorCountBadgeSpan(
+                                            flavorCount,
+                                            fontSize: 10,
+                                            iconSize: 11,
+                                          ),
+                                      ],
+                                    ),
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      height: 1.15,
+                                      decoration: isAvailable
+                                          ? TextDecoration.none
+                                          : TextDecoration.lineThrough,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (categoria != null) ...[
+                                  const SizedBox(width: 8),
+                                  _buildDiscountCategoryChip(categoria),
+                                ],
+                              ],
+                            ),
+                            if (produto['descricao'] != null &&
+                                produto['descricao']
+                                    .toString()
+                                    .trim()
+                                    .isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                produto['descricao'].toString(),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                  height: 1.2,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                            const SizedBox(height: 10),
+                            _buildDiscountPriceBlock(
+                              precoAtual: precoAtual,
+                              precoAnterior: precoAnterior,
+                              hasDiscount: hasDiscount,
+                              hasMultiplePrices: hasMultiplePrices,
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 38,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => _buyNow(produto),
+                                      icon: const Icon(
+                                        Icons.shopping_bag,
+                                        size: 15,
+                                      ),
+                                      label: const Text('Comprar'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.black,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                        ),
+                                        textStyle: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                SizedBox(
+                                  height: 38,
+                                  width: 48,
+                                  child: OutlinedButton(
+                                    onPressed: () => _addToCart(produto),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.black,
+                                      side: const BorderSide(
+                                        color: Colors.black,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    child: const Icon(
+                                      Icons.add_shopping_cart,
+                                      size: 18,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDiscountCategoryChip(Map<String, dynamic> categoria) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 120),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CategoryIconWidget(
+              icone: categoria['icone'] ?? '📦',
+              categoryName: categoria['nome']?.toString(),
+              size: 13,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              categoria['nome'] ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiscountProductImage({
+    required Map<String, dynamic> produto,
+    required Map<String, dynamic>? categoria,
+    required double size,
+  }) {
+    final images = ProductVariantUtils.productImages(produto);
+    final categoryPlaceholder = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Center(
+        child: SizedBox(
+          width: size * 0.58,
+          height: size * 0.58,
+          child: CategoryIconWidget(
+            icone: categoria?['icone'] ?? produto['categoria_icone'] ?? '🍰',
+            categoryName:
+                categoria?['nome']?.toString() ??
+                produto['categoria_nome']?.toString(),
+            size: 58,
+          ),
+        ),
+      ),
+    );
+
+    if (images.isEmpty) return categoryPlaceholder;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: size,
+        height: size,
+        color: Colors.grey[50],
+        child: Image.network(
+          images.first,
+          fit: BoxFit.contain,
+          cacheWidth: (size * 2).round(),
+          cacheHeight: (size * 2).round(),
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (context, error, stackTrace) => categoryPlaceholder,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  value: loadingProgress.expectedTotalBytes != null
+                      ? loadingProgress.cumulativeBytesLoaded /
+                            loadingProgress.expectedTotalBytes!
+                      : null,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDiscountPriceBlock({
+    required double? precoAtual,
+    required double? precoAnterior,
+    required bool hasDiscount,
+    required bool hasMultiplePrices,
+  }) {
+    if (precoAtual == null) {
+      return const Text(
+        'Sem preço',
+        style: TextStyle(
+          fontSize: 14,
+          color: Colors.grey,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
+
+    return Wrap(
+      spacing: 10,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.end,
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasDiscount && precoAnterior != null)
+              Text(
+                _formatPrice(precoAnterior),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                  decoration: TextDecoration.lineThrough,
+                ),
+              ),
+            Text(
+              hasMultiplePrices ? 'A partir de' : 'Preço',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            Text(
+              _formatPrice(precoAtual),
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.bold,
+                color: hasDiscount ? Colors.orange[800] : Colors.green[700],
+                height: 1.08,
+              ),
+            ),
+          ],
+        ),
+        if (hasDiscount && precoAnterior != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.green[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.green[100]!),
+            ),
+            child: Text(
+              'Economize ${_formatPrice(precoAnterior - precoAtual)}',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.green[800],
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -610,483 +1155,7 @@ class _DescontosScreenState extends State<DescontosScreen>
                       }
 
                       final produto = _sortedProdutosComDesconto[index - 1];
-                      final categoria = produto['categorias'];
-                      final isAvailable = _isProductAvailable(produto);
-                      final priceInfo = _getDisplayPriceInfo(produto);
-                      final precoAtual = priceInfo['currentPrice'] as double?;
-                      final precoAnterior =
-                          priceInfo['previousPrice'] as double?;
-                      final hasDiscount = priceInfo['hasDiscount'] as bool;
-                      final hasMultiplePrices =
-                          priceInfo['hasMultiplePrices'] as bool;
-                      final flavorCount = ProductVariantUtils.extractFlavors(
-                        produto['sabores'],
-                      ).length;
-                      final percentualDesconto =
-                          hasDiscount && precoAtual != null
-                          ? _calcularPercentualDesconto(
-                              precoAnterior,
-                              precoAtual,
-                            )
-                          : 0.0;
-
-                      return GestureDetector(
-                        onTap: () => _navigateToProductDetail(produto),
-                        child: ColorFiltered(
-                          colorFilter: isAvailable
-                              ? const ColorFilter.mode(
-                                  Colors.transparent,
-                                  BlendMode.dst,
-                                )
-                              : const ColorFilter.matrix(_grayscaleMatrix),
-                          child: Opacity(
-                            opacity: isAvailable ? 1 : 0.82,
-                            child: Card(
-                              margin: const EdgeInsets.only(bottom: 16),
-                              elevation: 4,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(16),
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.red[50]!,
-                                      Colors.orange[50]!,
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.red,
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                            ),
-                                            child: Text(
-                                              hasDiscount
-                                                  ? '${percentualDesconto.toInt()}% OFF'
-                                                  : 'OFERTA',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                          const Spacer(),
-                                          if (categoria != null)
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 8,
-                                                    vertical: 4,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.grey[200],
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  SizedBox(
-                                                    width: 16,
-                                                    height: 16,
-                                                    child:
-                                                        _buildCategoryIconWidget(
-                                                          categoria['icone'] ??
-                                                              '📦',
-                                                          size: 14,
-                                                        ),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    categoria['nome'] ?? '',
-                                                    style: const TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Center(
-                                        child:
-                                            (produto['imagens'] != null &&
-                                                produto['imagens'] is List &&
-                                                (produto['imagens'] as List)
-                                                    .isNotEmpty)
-                                            ? ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                child: Image.network(
-                                                  (produto['imagens'] as List)
-                                                      .first,
-                                                  width: 120,
-                                                  height: 120,
-                                                  fit: BoxFit.cover,
-                                                  cacheWidth: 240,
-                                                  cacheHeight: 240,
-                                                  filterQuality:
-                                                      FilterQuality.medium,
-                                                  errorBuilder:
-                                                      (
-                                                        context,
-                                                        error,
-                                                        stackTrace,
-                                                      ) {
-                                                        return _buildEmojiPlaceholder(
-                                                          categoria,
-                                                        );
-                                                      },
-                                                  loadingBuilder:
-                                                      (
-                                                        context,
-                                                        child,
-                                                        loadingProgress,
-                                                      ) {
-                                                        if (loadingProgress ==
-                                                            null) {
-                                                          return child;
-                                                        }
-                                                        return Container(
-                                                          width: 120,
-                                                          height: 120,
-                                                          decoration: BoxDecoration(
-                                                            color: Colors
-                                                                .grey[200],
-                                                            borderRadius:
-                                                                BorderRadius.circular(
-                                                                  12,
-                                                                ),
-                                                          ),
-                                                          child: const Center(
-                                                            child:
-                                                                CircularProgressIndicator(
-                                                                  strokeWidth:
-                                                                      2,
-                                                                ),
-                                                          ),
-                                                        );
-                                                      },
-                                                ),
-                                              )
-                                            : (produto['imagem_url'] != null &&
-                                                  produto['imagem_url']
-                                                      .toString()
-                                                      .isNotEmpty)
-                                            ? ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                child: Image.network(
-                                                  produto['imagem_url'],
-                                                  width: 120,
-                                                  height: 120,
-                                                  fit: BoxFit.cover,
-                                                  cacheWidth: 240,
-                                                  cacheHeight: 240,
-                                                  filterQuality:
-                                                      FilterQuality.medium,
-                                                  errorBuilder:
-                                                      (
-                                                        context,
-                                                        error,
-                                                        stackTrace,
-                                                      ) {
-                                                        return Container(
-                                                          width: 120,
-                                                          height: 120,
-                                                          decoration: BoxDecoration(
-                                                            color: Colors
-                                                                .grey[200],
-                                                            borderRadius:
-                                                                BorderRadius.circular(
-                                                                  12,
-                                                                ),
-                                                          ),
-                                                          child: const Icon(
-                                                            Icons
-                                                                .image_not_supported,
-                                                            size: 50,
-                                                            color: Colors.grey,
-                                                          ),
-                                                        );
-                                                      },
-                                                  loadingBuilder:
-                                                      (
-                                                        context,
-                                                        child,
-                                                        loadingProgress,
-                                                      ) {
-                                                        if (loadingProgress ==
-                                                            null) {
-                                                          return child;
-                                                        }
-                                                        return Container(
-                                                          width: 120,
-                                                          height: 120,
-                                                          decoration: BoxDecoration(
-                                                            color: Colors
-                                                                .grey[200],
-                                                            borderRadius:
-                                                                BorderRadius.circular(
-                                                                  12,
-                                                                ),
-                                                          ),
-                                                          child: const Center(
-                                                            child:
-                                                                CircularProgressIndicator(
-                                                                  strokeWidth:
-                                                                      2,
-                                                                ),
-                                                          ),
-                                                        );
-                                                      },
-                                                ),
-                                              )
-                                            : _buildEmojiPlaceholder(categoria),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Text.rich(
-                                        TextSpan(
-                                          children: [
-                                            TextSpan(
-                                              text:
-                                                  produto['nome'] ?? 'Produto',
-                                            ),
-                                            if (flavorCount > 1)
-                                              flavorCountBadgeSpan(
-                                                flavorCount,
-                                                fontSize: 11,
-                                                iconSize: 12,
-                                              ),
-                                          ],
-                                        ),
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          decoration: isAvailable
-                                              ? TextDecoration.none
-                                              : TextDecoration.lineThrough,
-                                        ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      if (produto['descricao'] != null)
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 8,
-                                          ),
-                                          child: Text(
-                                            produto['descricao'],
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              color: Colors.grey[600],
-                                            ),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      const SizedBox(height: 16),
-                                      if (precoAtual == null)
-                                        const Text(
-                                          'Sem preço',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            color: Colors.grey,
-                                          ),
-                                        )
-                                      else
-                                        Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.end,
-                                          children: [
-                                            Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                if (hasDiscount &&
-                                                    precoAnterior != null)
-                                                  Text(
-                                                    _formatPrice(precoAnterior),
-                                                    style: TextStyle(
-                                                      fontSize: 14,
-                                                      color: Colors.grey[600],
-                                                      decoration: TextDecoration
-                                                          .lineThrough,
-                                                    ),
-                                                  ),
-                                                Text(
-                                                  hasMultiplePrices
-                                                      ? 'A partir de'
-                                                      : 'Preço',
-                                                  style: const TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.grey,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  _formatPrice(precoAtual),
-                                                  style: TextStyle(
-                                                    fontSize: 20,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: hasDiscount
-                                                        ? Colors.orange
-                                                        : Colors.green,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            const Spacer(),
-                                            if (hasDiscount &&
-                                                precoAnterior != null)
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 4,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.green[100],
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                child: Text(
-                                                  'Economize ${_formatPrice(precoAnterior - precoAtual)}',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.green[800],
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      const SizedBox(height: 16),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: SizedBox(
-                                              height: 40,
-                                              child: ElevatedButton(
-                                                onPressed: () =>
-                                                    _buyNow(produto),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.black,
-                                                  foregroundColor: Colors.white,
-                                                  shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          8,
-                                                        ),
-                                                  ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                      ),
-                                                ),
-                                                child: FittedBox(
-                                                  fit: BoxFit.scaleDown,
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: const [
-                                                      Icon(
-                                                        Icons.shopping_bag,
-                                                        size: 16,
-                                                      ),
-                                                      SizedBox(width: 4),
-                                                      Text(
-                                                        'Comprar',
-                                                        style: TextStyle(
-                                                          fontSize: 12,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: SizedBox(
-                                              height: 40,
-                                              child: OutlinedButton(
-                                                onPressed: () =>
-                                                    _addToCart(produto),
-                                                style: OutlinedButton.styleFrom(
-                                                  foregroundColor: Colors.black,
-                                                  side: const BorderSide(
-                                                    color: Colors.black,
-                                                  ),
-                                                  shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          8,
-                                                        ),
-                                                  ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                      ),
-                                                ),
-                                                child: FittedBox(
-                                                  fit: BoxFit.scaleDown,
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: const [
-                                                      Icon(
-                                                        Icons.add_shopping_cart,
-                                                        size: 16,
-                                                      ),
-                                                      SizedBox(width: 4),
-                                                      Text(
-                                                        'Carrinho',
-                                                        style: TextStyle(
-                                                          fontSize: 12,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
+                      return _buildDiscountProductCard(produto);
                     },
                   ),
                 ),

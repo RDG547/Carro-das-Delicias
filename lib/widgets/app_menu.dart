@@ -5,7 +5,10 @@ import '../widgets/base_screen.dart';
 import '../widgets/main_navigation_provider.dart';
 import '../screens/login_screen.dart';
 import '../screens/profile_screen.dart';
+import '../screens/support_legal_screen.dart';
 import '../services/cart_service.dart';
+import '../services/location_tracking_service.dart';
+import '../services/user_presence_service.dart';
 import '../utils/realtime_auth_utils.dart';
 
 // ValueNotifier global para o status da Kombi (compartilhado entre todas instâncias)
@@ -34,6 +37,8 @@ class _AppMenuState extends State<AppMenu> {
       false; // Garante apenas uma subscription ativa
   static StreamSubscription?
   _globalKombiSubscription; // Subscription global compartilhada
+  static Timer? _kombiFreshnessTimer;
+  static List<Map<String, dynamic>> _lastKombiRows = const [];
   static bool _isRecoveringKombiAuth = false;
   static int _kombiListenerOwners = 0;
 
@@ -47,15 +52,15 @@ class _AppMenuState extends State<AppMenu> {
       _loadUserAvatar();
     }
 
-    // Sempre carrega o status da Kombi, mesmo para visitantes
-    _checkKombiStatus();
-
     // Inicia o stream apenas uma vez globalmente
     _kombiListenerOwners++;
     if (!_isListeningToKombi) {
       _isListeningToKombi = true;
       unawaited(_listenToKombiStatus());
     }
+
+    // Sempre carrega o status inicial da Kombi, mesmo para visitantes.
+    unawaited(_checkKombiStatus());
   }
 
   @override
@@ -63,12 +68,12 @@ class _AppMenuState extends State<AppMenu> {
     _kombiListenerOwners = (_kombiListenerOwners - 1).clamp(0, 1 << 30);
 
     // Cancela a subscription global quando a última instância for destruída
-    if (_kombiListenerOwners == 0 &&
-        _isListeningToKombi &&
-        _globalKombiSubscription != null) {
+    if (_kombiListenerOwners == 0) {
       _globalKombiSubscription?.cancel();
       _globalKombiSubscription = null;
       _isListeningToKombi = false;
+      _kombiFreshnessTimer?.cancel();
+      _kombiFreshnessTimer = null;
       debugPrint('🛑 AppMenu - Subscription global cancelada');
     }
 
@@ -86,28 +91,16 @@ class _AppMenuState extends State<AppMenu> {
       return;
     }
 
-    // Escuta mudanças na tabela kombi_location em tempo real
+    // Escuta mudanças na tabela kombi_location em tempo real via websocket.
     _globalKombiSubscription = Supabase.instance.client
         .from('kombi_location')
         .stream(primaryKey: ['id'])
         .listen(
           (data) {
-            debugPrint('🔍 AppMenu - Stream update recebido');
-            debugPrint('📦 AppMenu - Data: $data');
-            debugPrint('📏 AppMenu - Data length: ${data.length}');
-
-            if (data.isEmpty) {
-              debugPrint(
-                '⚠️ AppMenu - Data vazio, mantendo status atual: ${kombiOnlineStatus.value}',
-              );
-            } else {
-              final isOnline = data.any((d) => d['is_online'] == true);
-              debugPrint(
-                '📡 AppMenu - Status atualizado: ${isOnline ? "ONLINE" : "OFFLINE"}',
-              );
-              kombiOnlineStatus.value =
-                  isOnline; // Atualiza o ValueNotifier global
-            }
+            final rows = data
+                .map((row) => Map<String, dynamic>.from(row))
+                .toList();
+            _applyKombiStatusRows(rows, source: 'realtime');
           },
           onError: (error) {
             debugPrint('❌ AppMenu - Erro no stream da Kombi: $error');
@@ -115,6 +108,58 @@ class _AppMenuState extends State<AppMenu> {
           },
         );
     debugPrint('✅ AppMenu - Stream subscription criado');
+  }
+
+  static void _applyKombiStatusRows(
+    List<Map<String, dynamic>> rows, {
+    required String source,
+  }) {
+    _lastKombiRows = rows;
+    final isOnline = rows.any(LocationTrackingService.isKombiRecentlyOnline);
+
+    if (kombiOnlineStatus.value != isOnline) {
+      debugPrint(
+        '📡 AppMenu - Kombi ${isOnline ? "ONLINE" : "OFFLINE"} ($source)',
+      );
+      kombiOnlineStatus.value = isOnline;
+    }
+
+    _scheduleKombiFreshnessTimer(rows);
+  }
+
+  static void _scheduleKombiFreshnessTimer(List<Map<String, dynamic>> rows) {
+    _kombiFreshnessTimer?.cancel();
+    _kombiFreshnessTimer = null;
+
+    if (_kombiListenerOwners == 0) return;
+
+    final now = DateTime.now().toUtc();
+    DateTime? nextExpiry;
+
+    for (final row in rows) {
+      if (row['is_online'] != true) continue;
+
+      final updatedAt = DateTime.tryParse(row['updated_at']?.toString() ?? '');
+      if (updatedAt == null) continue;
+
+      final expiry = updatedAt.toUtc().add(
+        LocationTrackingService.onlineFreshness,
+      );
+      if (expiry.isBefore(now) || expiry.isAtSameMomentAs(now)) continue;
+
+      if (nextExpiry == null || expiry.isBefore(nextExpiry)) {
+        nextExpiry = expiry;
+      }
+    }
+
+    if (nextExpiry == null) return;
+
+    final delay = nextExpiry.difference(now) + const Duration(seconds: 1);
+    _kombiFreshnessTimer = Timer(delay, () {
+      if (_kombiListenerOwners > 0) {
+        _applyKombiStatusRows(_lastKombiRows, source: 'freshness_timeout');
+      }
+    });
   }
 
   Future<void> _handleKombiStreamError(Object? error) async {
@@ -144,7 +189,7 @@ class _AppMenuState extends State<AppMenu> {
   }
 
   // Verifica se o erro é de conexão de rede
-  bool _isConnectionError(dynamic error) {
+  static bool _isConnectionError(dynamic error) {
     if (error == null) return false;
     final errorString = error.toString().toLowerCase();
     return errorString.contains('socketexception') ||
@@ -158,27 +203,20 @@ class _AppMenuState extends State<AppMenu> {
         errorString.contains('clientexception');
   }
 
-  Future<void> _checkKombiStatus() async {
-    debugPrint('🔎 AppMenu - _checkKombiStatus iniciado');
+  static Future<void> _checkKombiStatus() async {
     try {
-      // Verifica se existe algum registro de localização (online ou offline)
+      // Verifica se existe pelo menos uma Kombi realmente online.
       final response = await Supabase.instance.client
           .from('kombi_location')
-          .select()
-          .limit(1)
-          .maybeSingle();
+          .select('id, is_online, updated_at')
+          .eq('is_online', true)
+          .order('updated_at', ascending: false)
+          .limit(5);
 
-      debugPrint('🔍 AppMenu - Check inicial response: $response');
-
-      if (response != null) {
-        final isOnline = response['is_online'] == true;
-        debugPrint(
-          '📊 AppMenu - Status inicial: ${isOnline ? "ONLINE" : "OFFLINE"}',
-        );
-        kombiOnlineStatus.value = isOnline; // Atualiza o ValueNotifier global
-      } else {
-        debugPrint('⚠️ AppMenu - Response null');
-      }
+      _applyKombiStatusRows(
+        List<Map<String, dynamic>>.from(response),
+        source: 'initial_check',
+      );
     } catch (e) {
       if (_isConnectionError(e)) {
         debugPrint('⚠️ AppMenu - Sem conexão para verificar status da Kombi');
@@ -188,6 +226,37 @@ class _AppMenuState extends State<AppMenu> {
         debugPrint('❌ AppMenu - Erro ao verificar status da Kombi: $e');
       }
     }
+  }
+
+  Widget _buildSimpleMenuItem({
+    required IconData icon,
+    required Color color,
+    required String label,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+            ),
+          ),
+          Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[600]),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadUserAvatar() async {
@@ -246,6 +315,7 @@ class _AppMenuState extends State<AppMenu> {
 
   void _signOut(BuildContext context) async {
     try {
+      await UserPresenceService.instance.stop(markOffline: true);
       await Supabase.instance.client.auth.signOut();
       if (context.mounted) {
         // Voltar para a tela inicial (AuthWrapper vai redirecionar para LoginScreen)
@@ -385,6 +455,8 @@ class _AppMenuState extends State<AppMenu> {
               }
             });
           }
+        } else if (value == 'support_legal') {
+          BaseScreen.push(context, const SupportLegalScreen());
         }
       },
       itemBuilder: (context) => [
@@ -451,8 +523,6 @@ class _AppMenuState extends State<AppMenu> {
             ),
           ),
         ),
-
-        const PopupMenuDivider(),
 
         // Opção Carrinho
         if (!widget.isGuestMode)
@@ -619,9 +689,6 @@ class _AppMenuState extends State<AppMenu> {
           child: ValueListenableBuilder<bool>(
             valueListenable: kombiOnlineStatus,
             builder: (context, isKombiOnlineLocal, _) {
-              debugPrint(
-                '🔄 Rastrear Kombi - Rebuild local, status: $isKombiOnlineLocal',
-              );
               return Container(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
@@ -697,6 +764,15 @@ class _AppMenuState extends State<AppMenu> {
                 ),
               );
             },
+          ),
+        ),
+
+        PopupMenuItem(
+          value: 'support_legal',
+          child: _buildSimpleMenuItem(
+            icon: Icons.policy_outlined,
+            color: Colors.teal,
+            label: 'Ajuda e Políticas',
           ),
         ),
 

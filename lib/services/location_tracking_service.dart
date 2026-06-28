@@ -9,6 +9,8 @@ class LocationTrackingService {
   factory LocationTrackingService() => _instance;
   LocationTrackingService._internal();
 
+  static const Duration onlineFreshness = Duration(minutes: 2);
+
   Timer? _locationTimer;
   StreamSubscription<Position>? _positionStreamSubscription;
   bool _isTracking = false;
@@ -86,11 +88,6 @@ class LocationTrackingService {
   /// Para o rastreamento de localização
   Future<void> stopTracking() async {
     debugPrint('🛑 stopTracking chamado - _isTracking: $_isTracking');
-    if (!_isTracking) {
-      debugPrint('⚠️ Rastreamento já estava parado');
-      return;
-    }
-
     _isTracking = false;
     debugPrint('✅ _isTracking definido como false');
 
@@ -112,6 +109,8 @@ class LocationTrackingService {
   /// Atualiza a localização no banco de dados
   Future<void> _updateLocation(double latitude, double longitude) async {
     try {
+      if (!_isTracking) return;
+
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
 
@@ -157,14 +156,21 @@ class LocationTrackingService {
       } else {
         // Apenas marca como offline, mantém última localização
         debugPrint('📡 Atualizando is_online=false no banco...');
+        final now = DateTime.now().toUtc().toIso8601String();
         final result = await _supabase
             .from('kombi_location')
-            .update({
-              'is_online': false,
-              'updated_at': DateTime.now().toIso8601String(),
-            })
+            .update({'is_online': false, 'updated_at': now})
             .eq('admin_id', userId)
             .select();
+
+        if (result.isEmpty) {
+          await _supabase.from('kombi_location').upsert({
+            'admin_id': userId,
+            'is_online': false,
+            'updated_at': now,
+          }, onConflict: 'admin_id');
+        }
+
         debugPrint('✅ Status OFFLINE atualizado no banco - resultado: $result');
       }
     } catch (e, stackTrace) {
@@ -180,9 +186,16 @@ class LocationTrackingService {
           .from('kombi_location')
           .select()
           .eq('is_online', true)
-          .maybeSingle();
+          .order('updated_at', ascending: false)
+          .limit(5);
 
-      return response;
+      for (final kombi in response) {
+        final typedKombi = Map<String, dynamic>.from(kombi);
+        if (isKombiRecentlyOnline(typedKombi)) {
+          return typedKombi;
+        }
+      }
+      return null;
     } catch (e) {
       debugPrint('Erro ao obter localização da Kombi: $e');
       return null;
@@ -197,7 +210,9 @@ class LocationTrackingService {
           .select()
           .eq('is_online', true);
 
-      return List<Map<String, dynamic>>.from(response);
+      return List<Map<String, dynamic>>.from(
+        response,
+      ).where(isKombiRecentlyOnline).toList();
     } catch (e) {
       debugPrint('Erro ao obter Kombis online: $e');
       return [];
@@ -232,7 +247,10 @@ class LocationTrackingService {
         .from('kombi_location')
         .stream(primaryKey: ['id'])
         .eq('is_online', true)
-        .map((data) => data.isNotEmpty ? data.first : null);
+        .map((data) {
+          final online = data.where(isKombiRecentlyOnline).toList();
+          return online.isNotEmpty ? online.first : null;
+        });
   }
 
   /// Stream de todas as Kombis (online e offline)
@@ -242,6 +260,16 @@ class LocationTrackingService {
 
   /// Verifica se está rastreando
   bool get isTracking => _isTracking;
+
+  static bool isKombiRecentlyOnline(Map<String, dynamic> kombi) {
+    if (kombi['is_online'] != true) return false;
+
+    final updatedAt = DateTime.tryParse(kombi['updated_at']?.toString() ?? '');
+    if (updatedAt == null) return false;
+
+    return DateTime.now().toUtc().difference(updatedAt.toUtc()) <=
+        onlineFreshness;
+  }
 
   /// Cleanup quando o app é fechado
   void dispose() {

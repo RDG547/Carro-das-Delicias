@@ -9,6 +9,7 @@ import '../services/image_service.dart';
 import '../services/location_tracking_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
+import '../utils/network_error_utils.dart';
 import '../utils/realtime_auth_utils.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/base_screen.dart';
@@ -40,8 +41,12 @@ class _AdminScreenState extends State<AdminScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _pedidosSubscription;
   RealtimeChannel? _catalogChannel;
   Timer? _catalogRefreshDebounce;
+  Timer? _presenceRefreshTimer;
   late final VoidCallback _catalogSyncListener;
   bool _isRecoveringPedidosRealtimeAuth = false;
+  bool _isRefreshingPresence = false;
+  DateTime? _presenceRetryAfter;
+  bool _presenceNetworkWarningShown = false;
 
   final TextEditingController _searchCategoryController =
       TextEditingController();
@@ -71,6 +76,11 @@ class _AdminScreenState extends State<AdminScreen>
     CatalogSyncService.instance.addListener(_catalogSyncListener);
     _setupRealtimeSubscription();
     _checkTrackingStatus();
+    _presenceRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted && !_isPresenceRefreshBackoffActive) {
+        unawaited(_refreshUserPresence());
+      }
+    });
     _fadeController.forward();
   }
 
@@ -127,6 +137,7 @@ class _AdminScreenState extends State<AdminScreen>
     _searchCategoryController.dispose();
     _pedidosSubscription?.cancel();
     _catalogRefreshDebounce?.cancel();
+    _presenceRefreshTimer?.cancel();
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
     if (_catalogChannel != null) {
       Supabase.instance.client.removeChannel(_catalogChannel!);
@@ -231,6 +242,8 @@ class _AdminScreenState extends State<AdminScreen>
                   'created_at': u.createdAt is DateTime
                       ? (u.createdAt as DateTime).toIso8601String()
                       : u.createdAt.toString(),
+                  'updated_at': u.updatedAt,
+                  'last_sign_in_at': u.lastSignInAt,
                 },
               )
               .toList();
@@ -263,7 +276,7 @@ class _AdminScreenState extends State<AdminScreen>
       final usuariosProfilesResponse = usuarioIds.isNotEmpty
           ? await Supabase.instance.client
                 .from('profiles')
-                .select('id, name, email, phone, role, avatar_url')
+                .select()
                 .inFilter('id', usuarioIds.toList())
           : <Map<String, dynamic>>[];
       final usuariosProfilesMap = Map<String, Map<String, dynamic>>.fromEntries(
@@ -295,6 +308,13 @@ class _AdminScreenState extends State<AdminScreen>
               false,
           'banned_until':
               usuarioMap['banned_until'] ?? profile?['banned_until'],
+          'is_online':
+              usuarioMap['is_online'] ?? profile?['is_online'] ?? false,
+          'last_access_at':
+              usuarioMap['last_access_at'] ?? profile?['last_access_at'],
+          'updated_at': usuarioMap['updated_at'] ?? profile?['updated_at'],
+          'last_sign_in_at':
+              usuarioMap['last_sign_in_at'] ?? profile?['last_sign_in_at'],
         };
       }).toList();
 
@@ -309,7 +329,8 @@ class _AdminScreenState extends State<AdminScreen>
                 id,
                 nome,
                 preco,
-                imagem_url
+                imagem_url,
+                imagens
               )
             )
           ''')
@@ -323,7 +344,7 @@ class _AdminScreenState extends State<AdminScreen>
       final profilesResponse = userIds.isNotEmpty
           ? await Supabase.instance.client
                 .from('profiles')
-                .select('id, name, phone, email')
+                .select()
                 .inFilter('id', userIds.toList())
           : <Map<String, dynamic>>[];
 
@@ -410,6 +431,12 @@ class _AdminScreenState extends State<AdminScreen>
           table: 'categorias',
           callback: (_) => _scheduleCatalogRefresh(),
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'profiles',
+          callback: (_) => _scheduleCatalogRefresh(),
+        )
         .subscribe();
   }
 
@@ -449,6 +476,94 @@ class _AdminScreenState extends State<AdminScreen>
     });
   }
 
+  bool get _isPresenceRefreshBackoffActive {
+    final retryAfter = _presenceRetryAfter;
+    return retryAfter != null && DateTime.now().isBefore(retryAfter);
+  }
+
+  Future<void> _refreshUserPresence() async {
+    if (_isRefreshingPresence ||
+        _isPresenceRefreshBackoffActive ||
+        _usuarios.isEmpty) {
+      return;
+    }
+
+    final userIds = _usuarios
+        .map((usuario) => usuario['id']?.toString())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (userIds.isEmpty) return;
+
+    _isRefreshingPresence = true;
+    try {
+      final profilesResponse = await Supabase.instance.client
+          .from('profiles')
+          .select('id, is_online, last_access_at, updated_at')
+          .inFilter('id', userIds);
+
+      _presenceRetryAfter = null;
+      _presenceNetworkWarningShown = false;
+
+      final profilesMap = {
+        for (final profile in profilesResponse)
+          profile['id'].toString(): Map<String, dynamic>.from(profile),
+      };
+
+      if (!mounted || profilesMap.isEmpty) return;
+
+      var hasChanges = false;
+      final updatedUsuarios = _usuarios.map((usuario) {
+        final profile = profilesMap[usuario['id']?.toString()];
+        if (profile == null) return usuario;
+
+        final nextOnline = profile['is_online'] ?? usuario['is_online'];
+        final nextLastAccess =
+            profile['last_access_at'] ?? usuario['last_access_at'];
+        final nextUpdatedAt = profile['updated_at'] ?? usuario['updated_at'];
+
+        if (usuario['is_online'] != nextOnline ||
+            usuario['last_access_at'] != nextLastAccess ||
+            usuario['updated_at'] != nextUpdatedAt) {
+          hasChanges = true;
+        }
+
+        return {
+          ...usuario,
+          'is_online': nextOnline,
+          'last_access_at': nextLastAccess,
+          'updated_at': nextUpdatedAt,
+        };
+      }).toList();
+
+      if (!hasChanges || !mounted) return;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _usuarios = updatedUsuarios;
+          });
+        }
+      });
+    } catch (e) {
+      if (NetworkErrorUtils.isTransientNetworkError(e)) {
+        _presenceRetryAfter = DateTime.now().add(const Duration(minutes: 1));
+        if (!_presenceNetworkWarningShown) {
+          debugPrint(
+            'Sem conexão com Supabase para atualizar presença dos usuários; nova tentativa em 60s.',
+          );
+          _presenceNetworkWarningShown = true;
+        }
+        return;
+      }
+
+      debugPrint('Erro ao atualizar presença dos usuários: $e');
+    } finally {
+      _isRefreshingPresence = false;
+    }
+  }
+
   /// Processar pedidos recebidos em tempo real
   Future<void> _processarPedidosRealtime(
     List<Map<String, dynamic>> pedidosData,
@@ -485,7 +600,7 @@ class _AdminScreenState extends State<AdminScreen>
       final profilesResponse = userIds.isNotEmpty
           ? await Supabase.instance.client
                 .from('profiles')
-                .select('id, name, phone, email')
+                .select()
                 .inFilter('id', userIds.toList())
           : <Map<String, dynamic>>[];
 
@@ -507,7 +622,8 @@ class _AdminScreenState extends State<AdminScreen>
                 id,
                 nome,
                 preco,
-                imagem_url
+                imagem_url,
+                imagens
               )
             ''')
             .eq('pedido_id', pedido['id']);
@@ -566,312 +682,285 @@ class _AdminScreenState extends State<AdminScreen>
           Navigator.of(context).popUntil((route) => route.isFirst);
         }
       },
-      child: FadeTransition(
-        opacity: _fadeAnimation,
-        child: Column(
-          children: [
-            // Header com estatísticas
-            Container(
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.all(16),
-              constraints: const BoxConstraints(minHeight: 80),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Colors.black, Colors.grey],
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  if (constraints.maxWidth < 340) {
-                    return Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        SizedBox(
-                          width: (constraints.maxWidth - 12) / 2,
-                          child: _buildStatCard(
-                            'Produtos',
-                            '${_produtos.length}',
-                            Icons.inventory,
-                            Colors.white,
-                          ),
-                        ),
-                        SizedBox(
-                          width: (constraints.maxWidth - 12) / 2,
-                          child: _buildStatCard(
-                            'Categorias',
-                            '${_categorias.length}',
-                            Icons.category,
-                            Colors.white,
-                          ),
-                        ),
-                        SizedBox(
-                          width: (constraints.maxWidth - 12) / 2,
-                          child: _buildStatCard(
-                            'Pedidos',
-                            '${_pedidos.length}',
-                            Icons.receipt_long,
-                            Colors.white,
-                          ),
-                        ),
-                        SizedBox(
-                          width: (constraints.maxWidth - 12) / 2,
-                          child: _buildStatCard(
-                            'Usuários',
-                            '${_usuarios.length}',
-                            Icons.people,
-                            Colors.white,
-                          ),
-                        ),
-                      ],
-                    );
-                  }
-                  return IntrinsicHeight(
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _buildStatCard(
-                            'Produtos',
-                            '${_produtos.length}',
-                            Icons.inventory,
-                            Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildStatCard(
-                            'Categorias',
-                            '${_categorias.length}',
-                            Icons.category,
-                            Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildStatCard(
-                            'Pedidos',
-                            '${_pedidos.length}',
-                            Icons.receipt_long,
-                            Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildStatCard(
-                            'Usuários',
-                            '${_usuarios.length}',
-                            Icons.people,
-                            Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-
-            // Toggle de Rastreamento de Localização com animação
-            ValueListenableBuilder<bool>(
-              valueListenable: _isTrackingLocationNotifier,
-              builder: (context, isTracking, child) {
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 400),
-                  curve: Curves.easeInOut,
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
+      child: SizedBox.expand(
+        child: ColoredBox(
+          color: Colors.white,
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: Column(
+              children: [
+                // Header com estatísticas
+                Container(
+                  margin: const EdgeInsets.all(16),
                   padding: const EdgeInsets.all(16),
+                  constraints: const BoxConstraints(minHeight: 80),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: isTracking
-                          ? [Colors.green[400]!, Colors.green[600]!]
-                          : [Colors.grey[400]!, Colors.grey[600]!],
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Colors.black, Colors.grey],
                     ),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: isTracking
-                            ? Colors.green.withValues(alpha: 0.3)
-                            : Colors.grey.withValues(alpha: 0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Row(
-                    children: [
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        transitionBuilder: (child, animation) {
-                          return RotationTransition(
-                            turns: animation,
-                            child: FadeTransition(
-                              opacity: animation,
-                              child: child,
-                            ),
-                          );
-                        },
-                        child: Icon(
-                          isTracking ? Icons.my_location : Icons.location_off,
-                          key: ValueKey(isTracking),
-                          color: Colors.white,
-                          size: 28,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final stats = [
+                        _AdminQuickStat(
+                          title: 'Produtos',
+                          value: '${_produtos.length}',
+                          icon: Icons.inventory,
+                          tabIndex: 2,
                         ),
+                        _AdminQuickStat(
+                          title: 'Categorias',
+                          value: '${_categorias.length}',
+                          icon: Icons.category,
+                          tabIndex: 3,
+                        ),
+                        _AdminQuickStat(
+                          title: 'Pedidos',
+                          value: '${_pedidos.length}',
+                          icon: Icons.receipt_long,
+                          tabIndex: 1,
+                        ),
+                        _AdminQuickStat(
+                          title: 'Usuários',
+                          value: '${_usuarios.length}',
+                          icon: Icons.people,
+                          tabIndex: 4,
+                        ),
+                      ];
+
+                      final gap = constraints.maxWidth < 420 ? 6.0 : 12.0;
+                      return SizedBox(
+                        height: constraints.maxWidth < 420 ? 74 : 80,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (var i = 0; i < stats.length; i++) ...[
+                              Expanded(
+                                child: _buildStatCard(
+                                  stats[i].title,
+                                  stats[i].value,
+                                  stats[i].icon,
+                                  Colors.white,
+                                  tabIndex: stats[i].tabIndex,
+                                ),
+                              ),
+                              if (i != stats.length - 1) SizedBox(width: gap),
+                            ],
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                // Toggle de Rastreamento de Localização com animação
+                ValueListenableBuilder<bool>(
+                  valueListenable: _isTrackingLocationNotifier,
+                  builder: (context, isTracking, child) {
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      curve: Curves.easeInOut,
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          child: Column(
-                            key: ValueKey(isTracking),
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: isTracking
+                              ? [Colors.green[400]!, Colors.green[600]!]
+                              : [Colors.grey[400]!, Colors.grey[600]!],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isTracking
+                                ? Colors.green.withValues(alpha: 0.3)
+                                : Colors.grey.withValues(alpha: 0.2),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 300),
+                            transitionBuilder: (child, animation) {
+                              return RotationTransition(
+                                turns: animation,
+                                child: FadeTransition(
+                                  opacity: animation,
+                                  child: child,
+                                ),
+                              );
+                            },
+                            child: Icon(
+                              isTracking
+                                  ? Icons.my_location
+                                  : Icons.location_off,
+                              key: ValueKey(isTracking),
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 300),
+                              child: Column(
+                                key: ValueKey(isTracking),
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isTracking
+                                        ? 'Kombi Online'
+                                        : 'Kombi Offline',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    isTracking
+                                        ? 'Compartilhando localização em tempo real'
+                                        : 'Rastreamento desativado',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Switch(
+                            value: isTracking,
+                            onChanged: (_) => _toggleLocationTracking(),
+                            activeThumbColor: Colors.white,
+                            activeTrackColor: Colors.green[300],
+                            inactiveThumbColor: Colors.white,
+                            inactiveTrackColor: Colors.grey[400],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+
+                // Tabs
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: TabBar(
+                    controller: _tabController,
+                    indicator: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.black,
+                    isScrollable:
+                        true, // Permite scroll horizontal para mostrar nomes completos
+                    tabAlignment: TabAlignment.start, // Alinha tabs à esquerda
+                    tabs: const [
+                      Tab(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                isTracking ? 'Kombi Online' : 'Kombi Offline',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                isTracking
-                                    ? 'Compartilhando localização em tempo real'
-                                    : 'Rastreamento desativado',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                ),
-                              ),
+                              Icon(Icons.dashboard, size: 18),
+                              SizedBox(width: 6),
+                              Text('Dashboard'),
                             ],
                           ),
                         ),
                       ),
-                      Switch(
-                        value: isTracking,
-                        onChanged: (_) => _toggleLocationTracking(),
-                        activeThumbColor: Colors.white,
-                        activeTrackColor: Colors.green[300],
-                        inactiveThumbColor: Colors.white,
-                        inactiveTrackColor: Colors.grey[400],
+                      Tab(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.receipt_long, size: 18),
+                              SizedBox(width: 6),
+                              Text('Pedidos'),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Tab(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.inventory_2, size: 18),
+                              SizedBox(width: 6),
+                              Text('Produtos'),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Tab(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.category, size: 18),
+                              SizedBox(width: 6),
+                              Text('Categorias'),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Tab(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.people, size: 18),
+                              SizedBox(width: 6),
+                              Text('Usuários'),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                );
-              },
-            ),
-
-            // Tabs
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: TabBar(
-                controller: _tabController,
-                indicator: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(12),
                 ),
-                indicatorSize: TabBarIndicatorSize.tab,
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.black,
-                isScrollable:
-                    true, // Permite scroll horizontal para mostrar nomes completos
-                tabAlignment: TabAlignment.start, // Alinha tabs à esquerda
-                tabs: const [
-                  Tab(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.dashboard, size: 18),
-                          SizedBox(width: 6),
-                          Text('Dashboard'),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Tab(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.receipt_long, size: 18),
-                          SizedBox(width: 6),
-                          Text('Pedidos'),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Tab(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.inventory_2, size: 18),
-                          SizedBox(width: 6),
-                          Text('Produtos'),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Tab(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.category, size: 18),
-                          SizedBox(width: 6),
-                          Text('Categorias'),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Tab(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.people, size: 18),
-                          SizedBox(width: 6),
-                          Text('Usuários'),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
 
-            // Tab Views
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildDashboardTab(),
-                        _buildPedidosTab(),
-                        _buildProdutosTab(),
-                        _buildCategoriasTab(),
-                        _buildUsuariosTab(),
-                      ],
-                    ),
+                // Tab Views
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : TabBarView(
+                          controller: _tabController,
+                          physics: const NeverScrollableScrollPhysics(),
+                          children: [
+                            _buildDashboardTab(),
+                            _buildPedidosTab(),
+                            _buildProdutosTab(),
+                            _buildCategoriasTab(),
+                            _buildUsuariosTab(),
+                          ],
+                        ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -881,34 +970,63 @@ class _AdminScreenState extends State<AdminScreen>
     String title,
     String value,
     IconData icon,
-    Color color,
-  ) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, color: color, size: 28),
-        const SizedBox(height: 6),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: color,
+    Color color, {
+    required int tabIndex,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 82;
+          final iconSize = compact ? 18.0 : 25.0;
+          final valueSize = compact ? 16.0 : 20.0;
+          final titleSize = compact ? 9.0 : 11.0;
+
+          return InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => _tabController.animateTo(tabIndex),
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 2 : 4,
+                  vertical: compact ? 2 : 4,
+                ),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon, color: color, size: iconSize),
+                      SizedBox(height: compact ? 2 : 4),
+                      Text(
+                        value,
+                        style: TextStyle(
+                          fontSize: valueSize,
+                          fontWeight: FontWeight.bold,
+                          color: color,
+                          height: 1,
+                        ),
+                      ),
+                      SizedBox(height: compact ? 1 : 2),
+                      Text(
+                        title,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: titleSize,
+                          color: color.withValues(alpha: 0.85),
+                          height: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          title,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 12, color: color.withValues(alpha: 0.8)),
-        ),
-      ],
+          );
+        },
+      ),
     );
   }
 
@@ -1577,6 +1695,34 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
+  DateTime? _parseLastAccess(dynamic rawValue) {
+    if (rawValue == null) return null;
+    return DateTime.tryParse(rawValue.toString())?.toLocal();
+  }
+
+  dynamic _lastAccessValue(Map<String, dynamic> usuario) {
+    return usuario['last_access_at'] ??
+        usuario['updated_at'] ??
+        usuario['last_sign_in_at'] ??
+        usuario['created_at'];
+  }
+
+  bool _isUserOnline(Map<String, dynamic> usuario) {
+    if (usuario['is_online'] != true) return false;
+
+    final lastAccess = _parseLastAccess(_lastAccessValue(usuario));
+    if (lastAccess == null) return true;
+
+    return DateTime.now().difference(lastAccess) < const Duration(seconds: 75);
+  }
+
+  String _formatLastAccess(dynamic rawValue) {
+    final lastAccess = _parseLastAccess(rawValue);
+    if (lastAccess == null) return 'Sem registro';
+
+    return '${lastAccess.day.toString().padLeft(2, '0')}/${lastAccess.month.toString().padLeft(2, '0')}/${lastAccess.year} ${lastAccess.hour.toString().padLeft(2, '0')}:${lastAccess.minute.toString().padLeft(2, '0')}:${lastAccess.second.toString().padLeft(2, '0')}';
+  }
+
   Widget _buildUsuariosTab() {
     return ValueListenableBuilder<String>(
       valueListenable: _userFilterNotifier,
@@ -1623,127 +1769,156 @@ class _AdminScreenState extends State<AdminScreen>
             ),
             const SizedBox(height: 12),
             Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: filteredUsuarios.isEmpty
-                    ? const Center(
-                        key: ValueKey('empty-users'),
-                        child: Text(
-                          'Nenhum usuário encontrado',
-                          style: TextStyle(fontSize: 16, color: Colors.grey),
-                        ),
-                      )
-                    : ListView.builder(
-                        key: ValueKey('users-$selectedFilter'),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: filteredUsuarios.length,
-                        itemBuilder: (context, index) {
-                          final usuario = filteredUsuarios[index];
-                          final isAdmin = usuario['role'] == 'admin';
-                          final isBanned = usuario['is_banned'] == true;
+              child: filteredUsuarios.isEmpty
+                  ? const Center(
+                      key: ValueKey('empty-users'),
+                      child: Text(
+                        'Nenhum usuário encontrado',
+                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                      ),
+                    )
+                  : ListView.builder(
+                      key: ValueKey('users-$selectedFilter'),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: filteredUsuarios.length,
+                      itemBuilder: (context, index) {
+                        final usuario = filteredUsuarios[index];
+                        final isAdmin = usuario['role'] == 'admin';
+                        final isBanned = usuario['is_banned'] == true;
+                        final isOnline = _isUserOnline(usuario);
+                        final lastAccess = _formatLastAccess(
+                          _lastAccessValue(usuario),
+                        );
 
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            child: ListTile(
-                              leading: _buildUserAvatar(usuario, isAdmin),
-                              title: Text(usuario['full_name'] ?? 'Usuário'),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(usuario['email'] ?? ''),
-                                  Text(
-                                    isAdmin ? 'Administrador' : 'Cliente',
-                                    style: TextStyle(
-                                      color: isAdmin ? Colors.red : Colors.blue,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: ListTile(
+                            leading: _buildUserAvatar(usuario, isAdmin),
+                            title: Text(usuario['full_name'] ?? 'Usuário'),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(usuario['email'] ?? ''),
+                                Text(
+                                  isAdmin ? 'Administrador' : 'Cliente',
+                                  style: TextStyle(
+                                    color: isAdmin ? Colors.red : Colors.blue,
+                                    fontWeight: FontWeight.bold,
                                   ),
-                                  if ((usuario['phone'] ?? '')
-                                      .toString()
-                                      .isNotEmpty)
-                                    Text(
-                                      usuario['phone'].toString(),
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 12,
-                                      ),
-                                    ),
+                                ),
+                                if ((usuario['phone'] ?? '')
+                                    .toString()
+                                    .isNotEmpty)
                                   Text(
-                                    isBanned ? 'Banido' : 'Ativo',
+                                    usuario['phone'].toString(),
                                     style: TextStyle(
-                                      color: isBanned
-                                          ? Colors.red
-                                          : Colors.green,
-                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey[600],
                                       fontSize: 12,
                                     ),
                                   ),
-                                ],
-                              ),
-                              trailing: PopupMenuButton(
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'edit_profile',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.edit, size: 20),
-                                        SizedBox(width: 8),
-                                        Text('Editar dados'),
-                                      ],
-                                    ),
+                                Text(
+                                  isBanned ? 'Banido' : 'Ativo',
+                                  style: TextStyle(
+                                    color: isBanned ? Colors.red : Colors.green,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
                                   ),
-                                  PopupMenuItem(
-                                    value: 'toggle_ban',
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          isBanned
-                                              ? Icons.verified_user
-                                              : Icons.block,
-                                          size: 20,
-                                          color: isBanned
-                                              ? Colors.green
-                                              : Colors.orange,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(isBanned ? 'Desbanir' : 'Banir'),
-                                      ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.circle,
+                                      size: 9,
+                                      color: isOnline
+                                          ? Colors.green
+                                          : Colors.grey,
                                     ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'delete_user',
-                                    child: Row(
-                                      children: [
-                                        Image.asset(
-                                          'assets/icons/menu/delete_button.png',
-                                          width: 20,
-                                          height: 20,
-                                          color: Colors.red,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        const Text(
-                                          'Excluir',
-                                          style: TextStyle(color: Colors.red),
-                                        ),
-                                      ],
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      isOnline ? 'Online' : 'Offline',
+                                      style: TextStyle(
+                                        color: isOnline
+                                            ? Colors.green[700]
+                                            : Colors.grey[700],
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                      ),
                                     ),
+                                  ],
+                                ),
+                                Text(
+                                  'Último acesso: $lastAccess',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 12,
                                   ),
-                                ],
-                                onSelected: (value) {
-                                  if (value == 'edit_profile') {
-                                    _showEditUserDialog(usuario);
-                                  } else if (value == 'toggle_ban') {
-                                    _toggleUserBan(usuario);
-                                  } else if (value == 'delete_user') {
-                                    _deleteUser(usuario);
-                                  }
-                                },
-                              ),
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                      ),
-              ),
+                            trailing: PopupMenuButton(
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'edit_profile',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.edit, size: 20),
+                                      SizedBox(width: 8),
+                                      Text('Editar dados'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'toggle_ban',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        isBanned
+                                            ? Icons.verified_user
+                                            : Icons.block,
+                                        size: 20,
+                                        color: isBanned
+                                            ? Colors.green
+                                            : Colors.orange,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(isBanned ? 'Desbanir' : 'Banir'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete_user',
+                                  child: Row(
+                                    children: [
+                                      Image.asset(
+                                        'assets/icons/menu/delete_button.png',
+                                        width: 20,
+                                        height: 20,
+                                        color: Colors.red,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'Excluir',
+                                        style: TextStyle(color: Colors.red),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              onSelected: (value) {
+                                if (value == 'edit_profile') {
+                                  _showEditUserDialog(usuario);
+                                } else if (value == 'toggle_ban') {
+                                  _toggleUserBan(usuario);
+                                } else if (value == 'delete_user') {
+                                  _deleteUser(usuario);
+                                }
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         );
@@ -4552,45 +4727,71 @@ class _AdminScreenState extends State<AdminScreen>
 
               // Cliente
               _buildDetailRow(
+                Icons.person_outline,
                 'Cliente:',
                 pedido['cliente_nome'] ?? cliente?['name'] ?? 'Não informado',
               ),
               _buildDetailRow(
+                Icons.phone_outlined,
                 'Telefone:',
                 pedido['cliente_telefone'] ??
                     cliente?['phone'] ??
                     'Não informado',
               ),
               _buildDetailRow(
+                Icons.home_outlined,
                 'Endereço:',
                 pedido['endereco_completo'] ?? 'Não informado',
               ),
-              _buildDetailRow('Bairro:', pedido['bairro'] ?? 'Não informado'),
-              _buildDetailRow('Cidade:', pedido['cidade'] ?? 'Não informado'),
-              _buildDetailRow('CEP:', pedido['cep'] ?? 'Não informado'),
               _buildDetailRow(
+                Icons.location_on_outlined,
+                'Bairro:',
+                pedido['bairro'] ?? 'Não informado',
+              ),
+              _buildDetailRow(
+                Icons.location_city_outlined,
+                'Cidade:',
+                pedido['cidade'] ?? 'Não informado',
+              ),
+              _buildDetailRow(
+                Icons.markunread_mailbox_outlined,
+                'CEP:',
+                pedido['cep'] ?? 'Não informado',
+              ),
+              _buildDetailRow(
+                Icons.payments_outlined,
                 'Pagamento:',
                 _getPaymentMethodName(pedido['metodo_pagamento']),
               ),
 
               if (pedido['valor_troco'] != null)
                 _buildDetailRow(
+                  Icons.request_quote_outlined,
                   'Troco para:',
                   'R\$ ${pedido['valor_troco'].toStringAsFixed(2)}',
                 ),
 
               if (pedido['observacoes'] != null &&
                   pedido['observacoes'].isNotEmpty)
-                _buildDetailRow('Observações:', pedido['observacoes']),
+                _buildDetailRow(
+                  Icons.notes_outlined,
+                  'Observações:',
+                  pedido['observacoes'],
+                ),
 
               if (dataEntregaAgendada != null)
                 _buildDetailRow(
+                  Icons.event_available_outlined,
                   'Entrega Agendada:',
                   '${dataEntregaAgendada.day.toString().padLeft(2, '0')}/${dataEntregaAgendada.month.toString().padLeft(2, '0')}/${dataEntregaAgendada.year}',
                 ),
 
               if (entregueEm != null)
-                _buildDetailRow('Entregue em:', _formatDateTime(entregueEm)),
+                _buildDetailRow(
+                  Icons.check_circle_outline,
+                  'Entregue em:',
+                  _formatDateTime(entregueEm),
+                ),
 
               const SizedBox(height: 16),
               const Divider(),
@@ -4607,6 +4808,7 @@ class _AdminScreenState extends State<AdminScreen>
                 final produto = item['produtos'];
                 final tamanho = item['tamanho_selecionado'];
                 final sabor = item['sabor_selecionado'];
+                final imageUrl = _firstOrderItemImageUrl(item, produto);
                 debugPrint('🔍 Admin - Item completo: $item');
                 debugPrint('🔍 Admin - Tamanho do item: $tamanho');
                 debugPrint(
@@ -4630,11 +4832,9 @@ class _AdminScreenState extends State<AdminScreen>
                             child: SizedBox(
                               width: 42,
                               height: 42,
-                              child:
-                                  item['imagem_url'] != null &&
-                                      item['imagem_url'].toString().isNotEmpty
+                              child: imageUrl != null
                                   ? Image.network(
-                                      item['imagem_url'],
+                                      imageUrl,
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, _, _) => Container(
                                         color: Colors.orange[50],
@@ -4796,12 +4996,14 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
+  Widget _buildDetailRow(IconData icon, String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Icon(icon, size: 18, color: Colors.grey[700]),
+          const SizedBox(width: 8),
           SizedBox(
             width: 80,
             child: Text(
@@ -4813,6 +5015,32 @@ class _AdminScreenState extends State<AdminScreen>
         ],
       ),
     );
+  }
+
+  String? _firstOrderItemImageUrl(dynamic item, dynamic produto) {
+    final itemImageUrl = item is Map
+        ? item['imagem_url']?.toString().trim()
+        : null;
+    if (itemImageUrl != null && itemImageUrl.isNotEmpty) {
+      return itemImageUrl;
+    }
+
+    if (produto is! Map) return null;
+
+    final productImageUrl = produto['imagem_url']?.toString().trim();
+    if (productImageUrl != null && productImageUrl.isNotEmpty) {
+      return productImageUrl;
+    }
+
+    final productImages = produto['imagens'];
+    if (productImages is List) {
+      for (final image in productImages) {
+        final imageUrl = image?.toString().trim();
+        if (imageUrl != null && imageUrl.isNotEmpty) return imageUrl;
+      }
+    }
+
+    return null;
   }
 
   Widget _buildOrderOptionChip(String text, Color color) {
@@ -5712,4 +5940,18 @@ class _AdminScreenState extends State<AdminScreen>
       }
     }
   }
+}
+
+class _AdminQuickStat {
+  final String title;
+  final String value;
+  final IconData icon;
+  final int tabIndex;
+
+  const _AdminQuickStat({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.tabIndex,
+  });
 }

@@ -32,7 +32,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   int _quantidade = 1;
   final _cartService = CartService();
   final _favoritesService = FavoritesService();
-  final PageController _pageController = PageController();
+  static const int _imageCarouselInitialPage = 10000;
+  late final PageController _pageController;
   final ScrollController _scrollController = ScrollController();
   int _currentImageIndex = 0;
   bool _showScrollIndicator = true;
@@ -103,6 +104,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     if (sabores.isNotEmpty) {
       _selectedFlavor = sabores.first;
     }
+    _pageController = PageController(
+      initialPage: _alignedImagePage(
+        ProductVariantUtils.productImages(
+          widget.produto,
+          selectedFlavor: _selectedFlavor,
+        ).length,
+      ),
+    );
     _favoritesService.addListener(_onFavoritesChanged);
     _favoritesService.loadFavorites();
     _catalogSyncListener = () {
@@ -281,6 +290,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       onViewCart: () => Navigator.of(context).pop('go_to_cart'),
       bottomSpacing: 8,
     );
+  }
+
+  static int _alignedImagePage(int imageCount, {int imageIndex = 0}) {
+    if (imageCount <= 1) return 0;
+    final safeIndex = imageIndex.clamp(0, imageCount - 1);
+    return _imageCarouselInitialPage -
+        (_imageCarouselInitialPage % imageCount) +
+        safeIndex;
   }
 
   Future<void> _toggleFavorite(Map<String, dynamic> produto) async {
@@ -480,7 +497,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     // Se houver apenas uma imagem, mostrar diretamente
     if (imagens.length == 1) {
       return GestureDetector(
-        onTap: () => _showImageFullScreen(imagens[0]),
+        onTap: () => _showImageFullScreen(imagens),
         child: Container(
           width: double.infinity,
           decoration: BoxDecoration(
@@ -492,7 +509,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
           ),
           child: Image.network(
             imagens[0],
-            fit: BoxFit.cover,
+            fit: BoxFit.contain,
             cacheWidth: 800,
             cacheHeight: 800,
             filterQuality: FilterQuality.medium,
@@ -504,19 +521,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     }
 
     // Se houver múltiplas imagens, usar PageView
+    final effectiveCurrentImageIndex = _currentImageIndex % imagens.length;
     return Stack(
       children: [
         PageView.builder(
           controller: _pageController,
           onPageChanged: (index) {
             setState(() {
-              _currentImageIndex = index;
+              _currentImageIndex = index % imagens.length;
             });
           },
-          itemCount: imagens.length,
           itemBuilder: (context, index) {
+            final imageIndex = index % imagens.length;
             return GestureDetector(
-              onTap: () => _showImageFullScreen(imagens[index]),
+              onTap: () =>
+                  _showImageFullScreen(imagens, initialIndex: imageIndex),
               child: Container(
                 width: double.infinity,
                 decoration: BoxDecoration(
@@ -527,8 +546,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                   ),
                 ),
                 child: Image.network(
-                  imagens[index],
-                  fit: BoxFit.cover,
+                  imagens[imageIndex],
+                  fit: BoxFit.contain,
                   cacheWidth: 800,
                   cacheHeight: 800,
                   filterQuality: FilterQuality.medium,
@@ -555,7 +574,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: _currentImageIndex == index
+                  color: effectiveCurrentImageIndex == index
                       ? Colors.white
                       : Colors.white.withValues(alpha: 0.5),
                   boxShadow: [
@@ -780,7 +799,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                   _currentImageIndex = 0;
                 });
                 if (_pageController.hasClients) {
-                  _pageController.jumpToPage(0);
+                  final imageCount = ProductVariantUtils.productImages(
+                    widget.produto,
+                    selectedFlavor: value,
+                  ).length;
+                  _pageController.jumpToPage(_alignedImagePage(imageCount));
                 }
               },
               buttonBuilder: (context, isOpen) =>
@@ -1526,7 +1549,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                               imagens[0],
                               height: 120,
                               width: double.infinity,
-                              fit: BoxFit.cover,
+                              fit: BoxFit.contain,
                               errorBuilder: (context, error, stackTrace) {
                                 return Container(
                                   height: 120,
@@ -2011,62 +2034,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     );
   }
 
-  void _showImageFullScreen(String imageUrl) {
+  void _showImageFullScreen(List<String> imageUrls, {int initialIndex = 0}) {
     showDialog(
       context: context,
       barrierColor: Colors.black87,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.zero,
-        child: Stack(
-          children: [
-            // Imagem em tela cheia
-            Center(
-              child: InteractiveViewer(
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: Image.network(
-                  imageUrl,
-                  fit: BoxFit.contain,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return Center(
-                      child: CircularProgressIndicator(
-                        value: loadingProgress.expectedTotalBytes != null
-                            ? loadingProgress.cumulativeBytesLoaded /
-                                  loadingProgress.expectedTotalBytes!
-                            : null,
-                        color: Colors.white,
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) => const Center(
-                    child: Icon(
-                      Icons.error_outline,
-                      color: Colors.white,
-                      size: 64,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            // Botão de fechar
-            Positioned(
-              top: 40,
-              right: 16,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.9),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.black87),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ),
-            ),
-          ],
-        ),
+      builder: (context) => _ProductImageViewerDialog(
+        imageUrls: imageUrls,
+        initialIndex: initialIndex,
       ),
     );
   }
@@ -2227,5 +2201,145 @@ Entre em contato conosco para fazer seu pedido!
         );
       }
     }
+  }
+}
+
+class _ProductImageViewerDialog extends StatefulWidget {
+  final List<String> imageUrls;
+  final int initialIndex;
+
+  const _ProductImageViewerDialog({
+    required this.imageUrls,
+    required this.initialIndex,
+  });
+
+  @override
+  State<_ProductImageViewerDialog> createState() =>
+      _ProductImageViewerDialogState();
+}
+
+class _ProductImageViewerDialogState extends State<_ProductImageViewerDialog> {
+  static const int _initialPageBase = 10000;
+  late final PageController _pageController;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    final safeInitialIndex = widget.imageUrls.isEmpty
+        ? 0
+        : widget.initialIndex % widget.imageUrls.length;
+    _currentIndex = safeInitialIndex;
+    _pageController = PageController(
+      initialPage: _alignedInitialPage(
+        widget.imageUrls.length,
+        safeInitialIndex,
+      ),
+    );
+  }
+
+  int _alignedInitialPage(int imageCount, int imageIndex) {
+    if (imageCount <= 1) return 0;
+    return _initialPageBase - (_initialPageBase % imageCount) + imageIndex;
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.imageUrls.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: EdgeInsets.zero,
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            onPageChanged: (page) {
+              setState(() {
+                _currentIndex = page % widget.imageUrls.length;
+              });
+            },
+            itemBuilder: (context, page) {
+              final imageIndex = page % widget.imageUrls.length;
+              return Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: Image.network(
+                    widget.imageUrls[imageIndex],
+                    fit: BoxFit.contain,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return Center(
+                        child: CircularProgressIndicator(
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                                    loadingProgress.expectedTotalBytes!
+                              : null,
+                          color: Colors.white,
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) => const Center(
+                      child: Icon(
+                        Icons.error_outline,
+                        color: Colors.white,
+                        size: 64,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          if (widget.imageUrls.length > 1)
+            Positioned(
+              bottom: 32,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  widget.imageUrls.length,
+                  (index) => AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: _currentIndex == index ? 18 : 8,
+                    height: 8,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: _currentIndex == index
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.45),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            top: 40,
+            right: 16,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.black87),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

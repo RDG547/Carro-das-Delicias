@@ -28,7 +28,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _isLoadingAdminStatus = true;
   bool _showNavbar = true; // Controla se a navbar deve ser exibida
   bool _keyboardVisible = false;
-  int _currentPageIndex = 0; // Rastreia o índice atual do PageView
   final GlobalKey<NotificationBellNavbarState> _notificationKey = GlobalKey();
 
   @override
@@ -153,7 +152,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     // PageView: 0=Início, 1=Descontos, 2=Pedidos, 3=Perfil, 4=Carrinho, 5=Rastrear Kombi, 6=Admin
     // NavBar: 0=Início, 1=Descontos, 2=Notificações(menu), 3=Pedidos, 4=Perfil
     setState(() {
-      _currentPageIndex = index; // Atualiza o índice da página atual
       if (index == 6) {
         // Admin (6): oculta navbar e desativa seleção
         _currentIndex = -1;
@@ -222,10 +220,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               child: PageView(
                 controller: _pageController,
                 onPageChanged: _onPageChanged,
-                // Desabilita swipe quando estiver na tela de Rastreamento (índice 5)
-                physics: _currentPageIndex == 5
-                    ? const NeverScrollableScrollPhysics()
-                    : const AlwaysScrollableScrollPhysics(),
+                // Evita o "vazamento" lateral entre telas; a navegação segue
+                // controlada pela navbar e pelo menu.
+                physics: const NeverScrollableScrollPhysics(),
                 children: [
                   HomeScreen(isGuestMode: widget.isGuestMode), // índice 0
                   const DescontosScreen(), // índice 1
