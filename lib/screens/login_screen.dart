@@ -4,6 +4,7 @@ import '../services/social_auth_service.dart';
 import '../widgets/base_screen.dart';
 import '../widgets/dynamic_password_field.dart';
 import '../widgets/google_auth_button.dart';
+import '../utils/auth_error_messages.dart';
 import '../utils/loading_manager.dart';
 import 'register_screen.dart';
 import 'main_screen.dart';
@@ -95,6 +96,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _signIn() async {
+    if (_loadingManager.isLoading('email_login')) return;
     if (!_formKey.currentState!.validate()) return;
 
     _loadingManager.setLoading('email_login', true);
@@ -136,14 +138,17 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     } on AuthException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(AuthErrorMessages.fromAuthException(error)),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro inesperado: $error'),
+            content: Text(AuthErrorMessages.fromObject(error)),
             backgroundColor: Colors.red,
           ),
         );
@@ -157,6 +162,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _signInWithGoogle() async {
+    if (_loadingManager.isLoading('google_login')) return;
     _loadingManager.setLoading('google_login', true);
 
     try {
@@ -167,7 +173,7 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
           SnackBar(
             content: Text(
               result.openedExternalBrowser
-                  ? 'Continue o login na janela do Google.'
+                  ? 'Conclua o login na janela segura do Google.'
                   : 'Login com Google realizado.',
             ),
             backgroundColor: Colors.black,
@@ -178,14 +184,17 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
     } on AuthException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(AuthErrorMessages.fromAuthException(error)),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao iniciar login com Google: $error'),
+            content: Text(AuthErrorMessages.fromObject(error)),
             backgroundColor: Colors.red,
           ),
         );

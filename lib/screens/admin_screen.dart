@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/app_settings_service.dart';
 import '../services/catalog_sync_service.dart';
@@ -1723,10 +1724,106 @@ class _AdminScreenState extends State<AdminScreen>
     return '${lastAccess.day.toString().padLeft(2, '0')}/${lastAccess.month.toString().padLeft(2, '0')}/${lastAccess.year} ${lastAccess.hour.toString().padLeft(2, '0')}:${lastAccess.minute.toString().padLeft(2, '0')}:${lastAccess.second.toString().padLeft(2, '0')}';
   }
 
+  String _phoneDigits(String? value) {
+    return (value ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+  }
+
+  String _formatPhoneBr(String? value) {
+    var digits = _phoneDigits(value);
+    if (digits.startsWith('55') && digits.length > 11) {
+      digits = digits.substring(2);
+    }
+    if (digits.isEmpty) return '';
+    if (digits.length <= 2) return '($digits';
+    if (digits.length <= 6) {
+      return '(${digits.substring(0, 2)}) ${digits.substring(2)}';
+    }
+    if (digits.length <= 10) {
+      return '(${digits.substring(0, 2)}) ${digits.substring(2, 6)}-${digits.substring(6)}';
+    }
+    return '(${digits.substring(0, 2)}) ${digits.substring(2, 7)}-${digits.substring(7)}';
+  }
+
+  String _phoneForUri(String value) {
+    final digits = _phoneDigits(value);
+    if (digits.length == 10 || digits.length == 11) return '55$digits';
+    return digits.startsWith('55') ? digits : digits;
+  }
+
+  Future<void> _openPhoneAction(Uri uri) async {
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível abrir essa ação.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showPhoneActions(String rawPhone) {
+    final phone = _phoneForUri(rawPhone);
+    if (phone.isEmpty) return;
+    final dialPhone = phone.startsWith('55') ? '+$phone' : phone;
+    final formatted = _formatPhoneBr(rawPhone);
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 14),
+              ListTile(
+                leading: const Icon(Icons.chat, color: Colors.green),
+                title: const Text('Chamar no WhatsApp'),
+                subtitle: Text(formatted),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  unawaited(
+                    _openPhoneAction(Uri.parse('https://wa.me/$phone')),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.call, color: Colors.blue),
+                title: const Text('Ligar'),
+                subtitle: Text(formatted),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  unawaited(
+                    _openPhoneAction(Uri(scheme: 'tel', path: dialPhone)),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildUsuariosTab() {
     return ValueListenableBuilder<String>(
       valueListenable: _userFilterNotifier,
       builder: (context, selectedFilter, child) {
+        final totalUsers = _usuarios.length;
+        final adminUsers = _usuarios.where((u) => u['role'] == 'admin').length;
+        final clientUsers = totalUsers - adminUsers;
         final filteredUsuarios =
             _usuarios.where((u) {
               if (selectedFilter == 'admin') return u['role'] == 'admin';
@@ -1748,6 +1845,7 @@ class _AdminScreenState extends State<AdminScreen>
                     label: 'Todos',
                     value: 'todos',
                     icon: Icons.people,
+                    count: totalUsers,
                     selectedFilter: selectedFilter,
                   ),
                   const SizedBox(width: 8),
@@ -1755,6 +1853,7 @@ class _AdminScreenState extends State<AdminScreen>
                     label: 'Admin',
                     value: 'admin',
                     icon: Icons.admin_panel_settings,
+                    count: adminUsers,
                     selectedFilter: selectedFilter,
                   ),
                   const SizedBox(width: 8),
@@ -1762,6 +1861,7 @@ class _AdminScreenState extends State<AdminScreen>
                     label: 'Usuário',
                     value: 'client',
                     icon: Icons.person,
+                    count: clientUsers,
                     selectedFilter: selectedFilter,
                   ),
                 ],
@@ -1809,11 +1909,36 @@ class _AdminScreenState extends State<AdminScreen>
                                 if ((usuario['phone'] ?? '')
                                     .toString()
                                     .isNotEmpty)
-                                  Text(
-                                    usuario['phone'].toString(),
-                                    style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 12,
+                                  InkWell(
+                                    onTap: () => _showPhoneActions(
+                                      usuario['phone'].toString(),
+                                    ),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 2,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.phone,
+                                            size: 13,
+                                            color: Colors.green[700],
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            _formatPhoneBr(
+                                              usuario['phone'].toString(),
+                                            ),
+                                            style: TextStyle(
+                                              color: Colors.green[700],
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 Text(
@@ -1988,6 +2113,7 @@ class _AdminScreenState extends State<AdminScreen>
     required String label,
     required String value,
     required IconData icon,
+    required int count,
     required String selectedFilter,
   }) {
     final isSelected = selectedFilter == value;
@@ -2009,11 +2135,42 @@ class _AdminScreenState extends State<AdminScreen>
                 color: isSelected ? Colors.white : Colors.black,
               ),
               const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.black,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : Colors.black,
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.normal,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 5),
+              Container(
+                constraints: const BoxConstraints(minWidth: 24),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? Colors.white.withValues(alpha: 0.18)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: isSelected
+                        ? Colors.white.withValues(alpha: 0.35)
+                        : Colors.black.withValues(alpha: 0.08),
+                  ),
+                ),
+                child: Text(
+                  count.toString(),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isSelected ? Colors.white : Colors.black87,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],
@@ -4652,6 +4809,8 @@ class _AdminScreenState extends State<AdminScreen>
   void _showPedidoDetails(Map<String, dynamic> pedido) {
     final itens = pedido['pedido_itens'] as List? ?? [];
     final cliente = pedido['profiles'];
+    final telefonePedido = (pedido['cliente_telefone'] ?? cliente?['phone'])
+        ?.toString();
     final dataEntregaAgendada = pedido['data_entrega'] != null
         ? DateTime.tryParse(pedido['data_entrega'].toString())
         : null;
@@ -4734,15 +4893,24 @@ class _AdminScreenState extends State<AdminScreen>
               _buildDetailRow(
                 Icons.phone_outlined,
                 'Telefone:',
-                pedido['cliente_telefone'] ??
-                    cliente?['phone'] ??
-                    'Não informado',
+                telefonePedido == null || telefonePedido.isEmpty
+                    ? 'Não informado'
+                    : _formatPhoneBr(telefonePedido),
+                onTap: telefonePedido == null || telefonePedido.isEmpty
+                    ? null
+                    : () => _showPhoneActions(telefonePedido),
               ),
               _buildDetailRow(
                 Icons.home_outlined,
                 'Endereço:',
                 pedido['endereco_completo'] ?? 'Não informado',
               ),
+              if ((pedido['complemento'] ?? '').toString().isNotEmpty)
+                _buildDetailRow(
+                  Icons.apartment_outlined,
+                  'Complemento:',
+                  pedido['complemento'].toString(),
+                ),
               _buildDetailRow(
                 Icons.location_on_outlined,
                 'Bairro:',
@@ -4996,7 +5164,21 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
-  Widget _buildDetailRow(IconData icon, String label, String value) {
+  Widget _buildDetailRow(
+    IconData icon,
+    String label,
+    String value, {
+    VoidCallback? onTap,
+  }) {
+    final valueWidget = Text(
+      value,
+      style: TextStyle(
+        color: onTap == null ? null : Colors.green[700],
+        fontWeight: onTap == null ? null : FontWeight.w700,
+        decoration: onTap == null ? null : TextDecoration.underline,
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -5011,7 +5193,18 @@ class _AdminScreenState extends State<AdminScreen>
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          Expanded(child: Text(value)),
+          Expanded(
+            child: onTap == null
+                ? valueWidget
+                : InkWell(
+                    onTap: onTap,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: valueWidget,
+                    ),
+                  ),
+          ),
         ],
       ),
     );
@@ -5421,7 +5614,10 @@ class _AdminScreenState extends State<AdminScreen>
               autocorrect: false,
               keyboardType: TextInputType.phone,
               textInputAction: TextInputAction.done,
-              decoration: buildUserInputDecoration('Telefone', Icons.phone),
+              decoration: buildUserInputDecoration(
+                'Telefone/WhatsApp',
+                Icons.phone,
+              ),
             ),
           ],
         ),

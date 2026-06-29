@@ -88,14 +88,15 @@ class _DPlusOneInfoDialogState extends State<DPlusOneInfoDialog> {
             const SizedBox(height: 12),
             _buildSectionTitle('Como funciona na prática?'),
             const Text(
-              'Se você comprar hoje, o produto será enviado no próximo dia útil.',
+              'Pedidos confirmados até 20:59 seguem D+1. Pedidos confirmados das 21:00 às 23:59 entram no próximo dia operacional e seguem D+2 em relação ao dia do pedido.',
             ),
             const SizedBox(height: 8),
             const Text(
-              'Exemplos de envio (D+1):',
+              'Exemplos de envio:',
               style: TextStyle(fontWeight: FontWeight.w800),
             ),
-            _buildExampleRow('Segunda-feira', 'Terça-feira'),
+            _buildExampleRow('Segunda até 20:59', 'Terça-feira'),
+            _buildExampleRow('Segunda 21:00-23:59', 'Quarta-feira'),
             _buildExampleRow('Terça-feira', 'Quarta-feira'),
             _buildExampleRow('Quinta-feira', 'Sexta-feira ou Sábado'),
             _buildExampleRow('Sexta/Sáb/Dom', 'Segunda-feira'),
@@ -129,7 +130,8 @@ class _DPlusOneInfoDialogState extends State<DPlusOneInfoDialog> {
                   Text(
                     '• Não realizamos entregas aos domingos.\n'
                     '• Pedidos feitos na quinta: entrega sexta ou sábado (você escolhe).\n'
-                    '• Pedidos feitos sexta, sábado ou domingo serão entregues na segunda-feira.',
+                    '• Pedidos feitos sexta, sábado ou domingo serão entregues na segunda-feira.\n'
+                    '• O corte das 21h também vale antes do fim de semana.',
                     style: TextStyle(fontSize: 12),
                   ),
                 ],
@@ -160,7 +162,7 @@ class _DPlusOneInfoDialogState extends State<DPlusOneInfoDialog> {
                     ),
                     TextSpan(
                       text:
-                          'O prazo começa a contar a partir da confirmação do pagamento.',
+                          'O prazo começa a contar a partir da confirmação do pagamento, sempre pelo horário de Brasília.',
                     ),
                   ],
                 ),

@@ -24,6 +24,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
+  final _complementController = TextEditingController();
   final _neighborhoodController = TextEditingController();
   final _cityController = TextEditingController();
   final _cepController = TextEditingController();
@@ -44,6 +45,21 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
 
     return value;
+  }
+
+  String _formatPhoneForDisplay(String value) {
+    var digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.startsWith('55') && digits.length > 11) {
+      digits = digits.substring(2);
+    }
+    return _PhoneInputFormatter.format(digits);
+  }
+
+  String _normalizePhoneForStorage(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 10 || digits.length == 11) return '+55$digits';
+    if (digits.startsWith('55')) return '+$digits';
+    return value.trim();
   }
 
   bool _isLoading = false;
@@ -132,6 +148,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     _nameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
+    _complementController.dispose();
     _neighborhoodController.dispose();
     _cityController.dispose();
     _cepController.dispose();
@@ -170,8 +187,11 @@ class _ProfileScreenState extends State<ProfileScreen>
           setState(() {
             _userProfile = response;
             _nameController.text = response['name'] ?? '';
-            _phoneController.text = response['phone'] ?? '';
+            _phoneController.text = _formatPhoneForDisplay(
+              response['phone'] ?? '',
+            );
             _addressController.text = response['address'] ?? '';
+            _complementController.text = response['complement'] ?? '';
             _neighborhoodController.text = response['neighborhood'] ?? '';
             _cityController.text = response['city'] ?? '';
             // Formatar CEP ao carregar do banco
@@ -191,7 +211,9 @@ class _ProfileScreenState extends State<ProfileScreen>
               'phone': user.userMetadata?['phone'] ?? '',
             };
             _nameController.text = user.userMetadata?['name'] ?? '';
-            _phoneController.text = user.userMetadata?['phone'] ?? '';
+            _phoneController.text = _formatPhoneForDisplay(
+              user.userMetadata?['phone'] ?? '',
+            );
           });
         }
       }
@@ -252,7 +274,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         final profileData = {
           'id': user.id,
           'name': _nameController.text.trim(),
-          'phone': _phoneController.text.trim(),
+          'phone': _normalizePhoneForStorage(_phoneController.text),
           'email': user.email,
           'updated_at': DateTime.now().toIso8601String(),
         };
@@ -267,6 +289,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           final profileDataWithAddress = {
             ...profileData,
             'address': _addressController.text.trim(),
+            'complement': _complementController.text.trim(),
             'neighborhood': _neighborhoodController.text.trim(),
             'city': _cityController.text.trim(),
             'cep': _cepController.text.replaceAll(RegExp(r'[^0-9]'), ''),
@@ -330,8 +353,11 @@ class _ProfileScreenState extends State<ProfileScreen>
     setState(() {
       _isEditing = false;
       _nameController.text = _userProfile?['name'] ?? '';
-      _phoneController.text = _userProfile?['phone'] ?? '';
+      _phoneController.text = _formatPhoneForDisplay(
+        _userProfile?['phone'] ?? '',
+      );
       _addressController.text = _userProfile?['address'] ?? '';
+      _complementController.text = _userProfile?['complement'] ?? '';
       _neighborhoodController.text = _userProfile?['neighborhood'] ?? '';
       _cityController.text = _userProfile?['city'] ?? '';
       final cepValue = _userProfile?['cep'] ?? '';
@@ -837,9 +863,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                 absorbing: !_isEditing,
                 child: AnimatedTextField(
                   controller: _phoneController,
-                  labelText: 'Telefone',
+                  labelText: 'Telefone/WhatsApp',
                   prefixIcon: Icons.phone,
                   keyboardType: TextInputType.phone,
+                  inputFormatters: [_PhoneInputFormatter()],
                 ),
               ),
               const SizedBox(height: 16),
@@ -851,6 +878,16 @@ class _ProfileScreenState extends State<ProfileScreen>
                   controller: _addressController,
                   labelText: 'Endereço Completo',
                   prefixIcon: Icons.home,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              AbsorbPointer(
+                absorbing: !_isEditing,
+                child: AnimatedTextField(
+                  controller: _complementController,
+                  labelText: 'Complemento',
+                  prefixIcon: Icons.apartment,
                 ),
               ),
               const SizedBox(height: 16),
@@ -981,6 +1018,58 @@ class _ProfileScreenState extends State<ProfileScreen>
         ],
       ),
     );
+  }
+}
+
+class _PhoneInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final text = newValue.text;
+    final digits = text.replaceAll(RegExp(r'[^0-9]'), '');
+    final capped = digits.length > 11 ? digits.substring(0, 11) : digits;
+    final formatted = format(capped);
+
+    var cursorPos = newValue.selection.baseOffset.clamp(0, text.length);
+    var digitsBeforeCursor = text
+        .substring(0, cursorPos)
+        .replaceAll(RegExp(r'[^0-9]'), '')
+        .length;
+    if (digitsBeforeCursor > capped.length) digitsBeforeCursor = capped.length;
+
+    final newPos = _mapDigitCountToOffset(formatted, digitsBeforeCursor);
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(
+        offset: newPos.clamp(0, formatted.length),
+      ),
+    );
+  }
+
+  static String format(String digits) {
+    if (digits.isEmpty) return '';
+    if (digits.length <= 2) return '($digits';
+    if (digits.length <= 6) {
+      return '(${digits.substring(0, 2)}) ${digits.substring(2)}';
+    }
+    if (digits.length <= 10) {
+      return '(${digits.substring(0, 2)}) ${digits.substring(2, 6)}-${digits.substring(6)}';
+    }
+    return '(${digits.substring(0, 2)}) ${digits.substring(2, 7)}-${digits.substring(7)}';
+  }
+
+  int _mapDigitCountToOffset(String formatted, int digitCount) {
+    var count = 0;
+    for (var i = 0; i < formatted.length; i++) {
+      if (RegExp(r'\d').hasMatch(formatted[i])) {
+        if (count == digitCount) return i;
+        count++;
+      }
+    }
+    return formatted.length;
   }
 }
 

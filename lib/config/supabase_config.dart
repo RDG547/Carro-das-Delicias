@@ -12,6 +12,12 @@ class SupabaseConfig {
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJscG5hdHN5Z2pkemlqcHdoZnhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4NzE5MjYsImV4cCI6MjA3MzQ0NzkyNn0.UzHldJo7CVJj2Kk-jgQRQ7IuF3ae0MomaO5HbxrjAPw',
   );
 
+  static String get projectRef {
+    final host = Uri.tryParse(url)?.host;
+    if (host == null || host.isEmpty) return 'desconhecido';
+    return host.split('.').first;
+  }
+
   // MAPBOX TOKEN: Token público do Mapbox para desenvolvimento
   // Para obter um novo token:
   // 1. Acesse: https://account.mapbox.com/access-tokens/
@@ -19,7 +25,6 @@ class SupabaseConfig {
   // 3. Substitua o valor abaixo
   static const String mapboxAccessToken = String.fromEnvironment(
     'MAPBOX_ACCESS_TOKEN',
-    defaultValue:
-        'pk.eyJ1IjoicmRnNTQ3IiwiYSI6ImNtaHNmY21zdDFpbXcyanB6N2w0Y2NyeWYifQ.RAwJc13MPekGYnD6js9g2A',
+    defaultValue: '',
   );
 }

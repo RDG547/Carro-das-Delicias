@@ -1,7 +1,8 @@
+import '../config/supabase_config.dart';
+
 // Configurações do Supabase
-const String supabaseUrl = 'https://jaoehwpvvcwfvcwmkznx.supabase.co';
-const String supabaseAnonKey =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imphb2Vod3B2dmN3ZnZjd21rem54Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc3OTQzMjQsImV4cCI6MjA3MzM3MDMyNH0.X2NtY0TIBOM_8JItUerG6vNvE0T3Mas_uSF_ErpxrVw';
+const String supabaseUrl = SupabaseConfig.url;
+const String supabaseAnonKey = SupabaseConfig.anonKey;
 
 // Regex para validações
 class ValidationRegex {

@@ -14,6 +14,10 @@ Future<void> main() async {
   await Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.pkce,
+      detectSessionInUri: true,
+    ),
   );
 
   // Inicializa o serviço de notificações

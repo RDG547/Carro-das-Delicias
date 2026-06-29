@@ -1153,8 +1153,8 @@ class _HomeScreenState extends State<HomeScreen>
   double _specialSectionHeight(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final cardWidth = _specialSectionCardWidth(context);
-    final height = cardWidth * (screenWidth < 380 ? 1.72 : 1.46);
-    return height.clamp(326.0, 362.0).toDouble();
+    final height = cardWidth * (screenWidth < 380 ? 1.62 : 1.36);
+    return height.clamp(306.0, 334.0).toDouble();
   }
 
   @override
@@ -2114,15 +2114,15 @@ class _HomeScreenState extends State<HomeScreen>
               builder: (context, constraints) {
                 final isCompactCard = constraints.maxWidth < 190;
                 final imageHeight = isCompactCard ? 124.0 : 138.0;
-                final contentPadding = isCompactCard ? 8.0 : 9.0;
+                final contentPadding = isCompactCard ? 7.0 : 8.0;
                 final titleFontSize = isCompactCard ? 12.5 : 13.0;
                 final descriptionFontSize = isCompactCard ? 9.5 : 10.0;
-                final buttonHeight = isCompactCard ? 34.0 : 36.0;
+                final buttonHeight = isCompactCard ? 32.0 : 34.0;
                 final iconSize = isCompactCard ? 13.0 : 14.0;
                 final buttonTextSize = isCompactCard ? 10.0 : 11.0;
-                final textBlockHeight = isCompactCard ? 56.0 : 62.0;
-                final contentToPriceSpacing = isCompactCard ? 6.0 : 8.0;
-                final priceToButtonsSpacing = isCompactCard ? 8.0 : 10.0;
+                final textBlockHeight = isCompactCard ? 52.0 : 56.0;
+                final contentToPriceSpacing = isCompactCard ? 4.0 : 6.0;
+                final priceToButtonsSpacing = isCompactCard ? 6.0 : 8.0;
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2303,27 +2303,48 @@ class _HomeScreenState extends State<HomeScreen>
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   // Nome
-                                  Text.rich(
-                                    TextSpan(
-                                      children: [
-                                        TextSpan(text: produto['nome'] ?? ''),
-                                        if (flavorCount > 1)
-                                          flavorCountBadgeSpan(
-                                            flavorCount,
-                                            fontSize: isCompactCard ? 9 : 10,
-                                            iconSize: isCompactCard ? 10 : 11,
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Text.rich(
+                                          TextSpan(
+                                            children: [
+                                              TextSpan(
+                                                text: produto['nome'] ?? '',
+                                              ),
+                                              if (flavorCount > 1)
+                                                flavorCountBadgeSpan(
+                                                  flavorCount,
+                                                  fontSize: isCompactCard
+                                                      ? 9
+                                                      : 10,
+                                                  iconSize: isCompactCard
+                                                      ? 10
+                                                      : 11,
+                                                ),
+                                            ],
                                           ),
+                                          style: TextStyle(
+                                            fontSize: titleFontSize,
+                                            fontWeight: FontWeight.bold,
+                                            decoration: isAvailable
+                                                ? TextDecoration.none
+                                                : TextDecoration.lineThrough,
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      if (_hasCategoryInfo(produto)) ...[
+                                        const SizedBox(width: 6),
+                                        _buildProductCategoryChip(
+                                          produto,
+                                          compact: isCompactCard,
+                                        ),
                                       ],
-                                    ),
-                                    style: TextStyle(
-                                      fontSize: titleFontSize,
-                                      fontWeight: FontWeight.bold,
-                                      decoration: isAvailable
-                                          ? TextDecoration.none
-                                          : TextDecoration.lineThrough,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                    ],
                                   ),
                                   // Descrição
                                   if (produto['descricao'] != null &&
@@ -2472,6 +2493,59 @@ class _HomeScreenState extends State<HomeScreen>
               },
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  bool _hasCategoryInfo(Map<String, dynamic> produto) {
+    return (produto['categoria_nome']?.toString().trim().isNotEmpty == true) ||
+        (produto['categoria_icone']?.toString().trim().isNotEmpty == true);
+  }
+
+  Widget _buildProductCategoryChip(
+    Map<String, dynamic> produto, {
+    required bool compact,
+  }) {
+    final categoryName = produto['categoria_nome']?.toString() ?? '';
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: compact ? 62 : 74),
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: compact ? 5 : 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: compact ? 12 : 13,
+              height: compact ? 12 : 13,
+              child: CategoryIconWidget(
+                icone: produto['categoria_icone'] ?? '🍰',
+                categoryName: categoryName,
+                size: compact ? 12 : 13,
+              ),
+            ),
+            if (categoryName.isNotEmpty) ...[
+              const SizedBox(width: 3),
+              Flexible(
+                child: Text(
+                  categoryName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: compact ? 8.5 : 9,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

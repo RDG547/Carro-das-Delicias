@@ -13,7 +13,10 @@ class ProductActionHelper {
     required Map<String, dynamic> produto,
     required VoidCallback onViewCart,
     bool avoidAdminFab = false,
+    int quantidade = 1,
+    bool useOverlaySnackBar = false,
   }) async {
+    final safeQuantity = quantidade < 1 ? 1 : quantidade;
     final tamanhos = ProductVariantUtils.extractSizes(produto['tamanhos']);
     final sabores = ProductVariantUtils.extractFlavors(produto['sabores']);
 
@@ -47,7 +50,10 @@ class ProductActionHelper {
               return;
             }
 
-            await cartService.addItem(produtoSelecionado);
+            await cartService.addItem(
+              produtoSelecionado,
+              quantidade: safeQuantity,
+            );
 
             if (!context.mounted) return;
 
@@ -62,9 +68,17 @@ class ProductActionHelper {
               flavorName: flavorName,
             );
 
-            AppSnackBar.showCartAdded(
-              context,
+            final messagePrefix = safeQuantity > 1 ? '${safeQuantity}x ' : '';
+            final messageSuffix = safeQuantity > 1
+                ? ' adicionados ao carrinho!'
+                : ' adicionado ao carrinho!';
+
+            _showCartAddedFeedback(
+              context: context,
+              useOverlaySnackBar: useOverlaySnackBar,
               message: '${produto['nome']}$suffix adicionado ao carrinho!',
+              quantityMessage:
+                  '$messagePrefix${produto['nome']}$suffix$messageSuffix',
               onViewCart: onViewCart,
               avoidAdminFab: avoidAdminFab,
             );
@@ -88,13 +102,45 @@ class ProductActionHelper {
       return;
     }
 
-    await cartService.addItem(produto, quantidade: 1);
+    await cartService.addItem(produto, quantidade: safeQuantity);
 
     if (!context.mounted) return;
 
+    final messagePrefix = safeQuantity > 1 ? '${safeQuantity}x ' : '';
+    final messageSuffix = safeQuantity > 1
+        ? ' adicionados ao carrinho!'
+        : ' adicionado ao carrinho!';
+
+    _showCartAddedFeedback(
+      context: context,
+      useOverlaySnackBar: useOverlaySnackBar,
+      message: '${produto['nome']} adicionado ao carrinho!',
+      quantityMessage: '$messagePrefix${produto['nome']}$messageSuffix',
+      onViewCart: onViewCart,
+      avoidAdminFab: avoidAdminFab,
+    );
+  }
+
+  static void _showCartAddedFeedback({
+    required BuildContext context,
+    required bool useOverlaySnackBar,
+    required String message,
+    required String quantityMessage,
+    required VoidCallback onViewCart,
+    required bool avoidAdminFab,
+  }) {
+    if (useOverlaySnackBar) {
+      AppSnackBar.showCartAddedOverlay(
+        context,
+        message: quantityMessage,
+        onViewCart: onViewCart,
+      );
+      return;
+    }
+
     AppSnackBar.showCartAdded(
       context,
-      message: '${produto['nome']} adicionado ao carrinho!',
+      message: message,
       onViewCart: onViewCart,
       avoidAdminFab: avoidAdminFab,
     );

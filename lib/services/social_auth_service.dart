@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../config/env_config.dart';
 
@@ -27,6 +28,7 @@ class SocialAuthService {
   ).trim();
 
   static const String _googleScopes = 'openid email profile';
+  static const String _oauthRedirectTo = 'carrodasdelicias://login-callback';
 
   static Future<SocialAuthResult> signInWithGoogle() async {
     if (kIsWeb) {
@@ -82,15 +84,43 @@ class SocialAuthService {
   }
 
   static Future<SocialAuthResult> _signInWithGoogleOAuth() async {
-    final launched = await Supabase.instance.client.auth.signInWithOAuth(
-      OAuthProvider.google,
+    final response = await Supabase.instance.client.auth.getOAuthSignInUrl(
+      provider: OAuthProvider.google,
+      redirectTo: _oauthRedirectTo,
       scopes: _googleScopes,
       queryParams: {'prompt': 'select_account'},
     );
+
+    final launched = await _launchOAuthUrl(Uri.parse(response.url));
     if (!launched) {
       throw Exception('Não foi possível abrir o login do Google.');
     }
     return const SocialAuthResult(SocialAuthLaunchMode.oauth);
+  }
+
+  static Future<bool> _launchOAuthUrl(Uri url) async {
+    if (kIsWeb) {
+      return launchUrl(
+        url,
+        mode: LaunchMode.platformDefault,
+        webOnlyWindowName: '_self',
+      );
+    }
+
+    try {
+      final launchedInApp = await launchUrl(
+        url,
+        mode: LaunchMode.inAppBrowserView,
+        browserConfiguration: const BrowserConfiguration(showTitle: true),
+      );
+      if (launchedInApp) return true;
+    } on PlatformException catch (error) {
+      debugPrint('Não foi possível abrir OAuth em aba interna: $error');
+    } on ArgumentError catch (error) {
+      debugPrint('URL OAuth inválida para aba interna: $error');
+    }
+
+    return launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
   static Future<void> _forgetPreviousGoogleAccount(

@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config/supabase_config.dart';
 import '../services/social_auth_service.dart';
 import '../widgets/base_screen.dart';
 import '../widgets/animated_widgets.dart';
 import '../widgets/dynamic_password_field.dart';
 import '../widgets/google_auth_button.dart';
+import '../utils/auth_error_messages.dart';
 import '../utils/loading_manager.dart';
 
 /// Formatador para números de celular brasileiro
@@ -57,6 +59,162 @@ class PhoneInputFormatter extends TextInputFormatter {
     return TextEditingValue(
       text: formatted,
       selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
+
+class _ConfirmEmailDialog extends StatefulWidget {
+  const _ConfirmEmailDialog({required this.email, required this.onDone});
+
+  final String email;
+  final VoidCallback onDone;
+
+  @override
+  State<_ConfirmEmailDialog> createState() => _ConfirmEmailDialogState();
+}
+
+class _ConfirmEmailDialogState extends State<_ConfirmEmailDialog> {
+  static const int _initialSeconds = 5;
+  Timer? _timer;
+  int _remainingSeconds = _initialSeconds;
+
+  bool get _canClose => _remainingSeconds <= 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      setState(() {
+        _remainingSeconds--;
+        if (_remainingSeconds <= 0) {
+          _remainingSeconds = 0;
+          timer.cancel();
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: _canClose,
+      child: AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+        contentPadding: const EdgeInsets.fromLTRB(24, 18, 24, 8),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+        title: Column(
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.mark_email_read_outlined,
+                color: Colors.green[700],
+                size: 34,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Confirme seu e-mail',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Enviamos um link de confirmação para:',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[700], height: 1.25),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Text(
+                widget.email,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.shade600),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.report_gmailerrorred_outlined,
+                    color: Colors.amber[900],
+                    size: 22,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Atenção: se não encontrar o e-mail na caixa de entrada, verifique também a pasta Spam ou Lixo eletrônico.',
+                      style: TextStyle(
+                        color: Colors.amber[900],
+                        fontWeight: FontWeight.w800,
+                        height: 1.25,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Após confirmar, volte ao app e faça login normalmente.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[700], height: 1.25),
+            ),
+          ],
+        ),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _canClose ? widget.onDone : null,
+              icon: Icon(_canClose ? Icons.check_circle : Icons.timer_outlined),
+              label: Text(_canClose ? 'OK' : 'OK ($_remainingSeconds s)'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey[300],
+                disabledForegroundColor: Colors.grey[700],
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -198,6 +356,7 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   Future<void> _signUp() async {
+    if (_loadingManager.isLoading('register')) return;
     if (!_formKey.currentState!.validate()) return;
 
     _loadingManager.setLoading('register', true);
@@ -250,87 +409,68 @@ class _RegisterScreenState extends State<RegisterScreen>
         'phone': formattedPhone,
       };
 
-      // Cadastro no Supabase Auth
-      final response = await supabase.auth.signUp(
+      final response = await _createAccount(
+        supabase: supabase,
         email: email,
         password: password,
-        data: userMetadata,
+        userMetadata: userMetadata,
       );
 
-      if (response.user != null) {
-        // O banco já tenta criar o perfil via trigger; o upsert mantém os dados sincronizados.
-        try {
-          await supabase.from('profiles').upsert({
-            'id': response.user!.id,
-            'name': name,
-            'phone': formattedPhone,
-            'email': email,
-            'updated_at': DateTime.now().toIso8601String(),
-          }, onConflict: 'id');
-        } catch (e) {
-          debugPrint('Erro ao salvar perfil: $e');
-        }
+      if (_isMaskedSignupResponse(response)) {
+        throw const AuthException(
+          'O Supabase não confirmou a criação da conta.',
+          code: 'signup_masked_response',
+        );
+      }
 
-        if (mounted) {
-          // Mostrar mensagem de sucesso
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Cadastro realizado com sucesso!'),
-              backgroundColor: Colors.green,
+      final createdUser = response.user;
+      if (createdUser == null) {
+        throw const AuthException(
+          'O Supabase não confirmou a criação do usuário. Tente novamente.',
+          code: 'signup_failed',
+        );
+      }
+
+      debugPrint(
+        '✅ Cadastro Auth criado no Supabase ${SupabaseConfig.projectRef}: ${createdUser.id}',
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              response.session == null
+                  ? 'Cadastro criado. Enviamos um link de confirmação para seu e-mail.'
+                  : 'Cadastro realizado com sucesso!',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+
+        if (response.session != null) {
+          _returnToAuthRoot();
+        } else {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => _ConfirmEmailDialog(
+              email: email,
+              onDone: () {
+                Navigator.of(context).pop();
+                if (Navigator.of(context).canPop()) {
+                  Navigator.of(context).pop();
+                }
+              },
             ),
           );
-
-          // Navegar para a tela home ou aguardar confirmação de email
-          if (response.session != null) {
-            _returnToAuthRoot();
-          } else {
-            // Se precisar confirmar email
-            showDialog(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: const Text('Confirme seu email'),
-                content: const Text(
-                  'Um link de confirmação foi enviado para seu email. '
-                  'Por favor, confirme seu email antes de fazer login.',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      if (Navigator.of(context).canPop()) {
-                        Navigator.of(context).pop();
-                      }
-                    },
-                    child: const Text('OK'),
-                  ),
-                ],
-              ),
-            );
-          }
         }
       }
     } on AuthException catch (error) {
       if (mounted) {
-        String message = error.message;
-
-        // Personalizar mensagens para casos específicos
-        if (message.toLowerCase().contains('email') &&
-            (message.toLowerCase().contains('already') ||
-                message.toLowerCase().contains('exists'))) {
-          message =
-              'Este email já está cadastrado. Tente fazer login ou use outro email.';
-        } else if (message.toLowerCase().contains('password')) {
-          message = 'A senha deve ter pelo menos 6 caracteres.';
-        } else if (message.toLowerCase().contains('saving new user') ||
-            message.toLowerCase().contains('unexpected_failure')) {
-          message =
-              'Não foi possível concluir o cadastro por uma configuração do servidor. '
-              'A correção do Supabase já foi preparada no projeto.';
-        }
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(message),
+            content: Text(AuthErrorMessages.fromAuthException(error)),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 4),
           ),
@@ -340,7 +480,7 @@ class _RegisterScreenState extends State<RegisterScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro inesperado: $error'),
+            content: Text(AuthErrorMessages.fromObject(error)),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 4),
           ),
@@ -353,7 +493,31 @@ class _RegisterScreenState extends State<RegisterScreen>
     }
   }
 
+  Future<AuthResponse> _createAccount({
+    required SupabaseClient supabase,
+    required String email,
+    required String password,
+    required Map<String, String> userMetadata,
+  }) async {
+    debugPrint(
+      '🔐 Criando cadastro no Supabase ${SupabaseConfig.projectRef}...',
+    );
+    return supabase.auth.signUp(
+      email: email,
+      password: password,
+      data: userMetadata,
+      emailRedirectTo: 'carrodasdelicias://auth-callback',
+    );
+  }
+
+  bool _isMaskedSignupResponse(AuthResponse response) {
+    if (response.session != null) return false;
+    final identities = response.user?.identities;
+    return identities != null && identities.isEmpty;
+  }
+
   Future<void> _signUpWithGoogle() async {
+    if (_loadingManager.isLoading('google_register')) return;
     _loadingManager.setLoading('google_register', true);
 
     try {
@@ -364,7 +528,7 @@ class _RegisterScreenState extends State<RegisterScreen>
           SnackBar(
             content: Text(
               result.openedExternalBrowser
-                  ? 'Continue o cadastro na janela do Google.'
+                  ? 'Conclua o cadastro na janela segura do Google.'
                   : 'Cadastro com Google realizado.',
             ),
             backgroundColor: Colors.black,
@@ -375,14 +539,17 @@ class _RegisterScreenState extends State<RegisterScreen>
     } on AuthException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(AuthErrorMessages.fromAuthException(error)),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao iniciar cadastro com Google: $error'),
+            content: Text(AuthErrorMessages.fromObject(error)),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 4),
           ),

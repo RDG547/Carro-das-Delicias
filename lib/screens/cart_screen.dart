@@ -20,6 +20,11 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
   bool _isAdmin = false;
   bool _keyboardVisible = false;
 
+  String get _cartItemCountLabel {
+    final count = _cartService.totalItems;
+    return '$count ${count == 1 ? 'item' : 'itens'}';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -626,12 +631,17 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
                 'Total do Pedido:',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
-              Text(
-                CurrencyFormatter.format(_cartService.total),
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.green[700],
+              Flexible(
+                child: Text(
+                  '${CurrencyFormatter.format(_cartService.total)} / $_cartItemCountLabel',
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[700],
+                  ),
                 ),
               ),
             ],

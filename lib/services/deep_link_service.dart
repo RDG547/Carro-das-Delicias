@@ -19,11 +19,14 @@ class DeepLinkService {
 
   void _listenForDeepLinks() {
     // Escutar deep links quando o app já está aberto
-    _appLinks.uriLinkStream.listen((uri) {
-      _handleDeepLink(uri);
-    }, onError: (err) {
-      debugPrint('Erro ao processar deep link: $err');
-    });
+    _appLinks.uriLinkStream.listen(
+      (uri) {
+        _handleDeepLink(uri);
+      },
+      onError: (err) {
+        debugPrint('Erro ao processar deep link: $err');
+      },
+    );
   }
 
   Future<void> checkInitialLink() async {
@@ -40,11 +43,40 @@ class DeepLinkService {
   void _handleDeepLink(Uri uri) async {
     debugPrint('Deep link recebido: $uri');
 
+    if (await _handleAuthCallback(uri)) {
+      return;
+    }
+
     // Verificar se é um link de produto: https://carrodasdelicias.app/produto/[id]
     if (uri.pathSegments.length >= 2 && uri.pathSegments[0] == 'produto') {
       final produtoId = uri.pathSegments[1];
       await _openProduct(produtoId);
     }
+  }
+
+  Future<bool> _handleAuthCallback(Uri uri) async {
+    final isAppCallback =
+        uri.scheme == 'carrodasdelicias' &&
+        (uri.host == 'login-callback' ||
+            uri.queryParameters.containsKey('code') ||
+            uri.fragment.contains('access_token') ||
+            uri.fragment.contains('error_description'));
+
+    if (!isAppCallback) return false;
+
+    if (Supabase.instance.client.auth.currentSession != null) {
+      return true;
+    }
+
+    try {
+      await Supabase.instance.client.auth.getSessionFromUrl(uri);
+    } on AuthException catch (error) {
+      debugPrint('Erro no retorno de login OAuth: ${error.message}');
+    } catch (error) {
+      debugPrint('Erro ao processar retorno de login OAuth: $error');
+    }
+
+    return true;
   }
 
   Future<void> _openProduct(String produtoId) async {

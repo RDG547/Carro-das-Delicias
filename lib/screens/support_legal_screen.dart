@@ -3,10 +3,18 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../widgets/base_screen.dart';
 
-class SupportLegalScreen extends StatelessWidget {
+enum _SupportLegalTab { support, privacy, terms }
+
+class SupportLegalScreen extends StatefulWidget {
   const SupportLegalScreen({super.key});
 
+  @override
+  State<SupportLegalScreen> createState() => _SupportLegalScreenState();
+}
+
+class _SupportLegalScreenState extends State<SupportLegalScreen> {
   static const _supportEmail = 'contato@carrodasdelicias.com.br';
+  _SupportLegalTab _selectedTab = _SupportLegalTab.support;
 
   Future<void> _openSupportEmail(BuildContext context) async {
     final uri = Uri(
@@ -39,79 +47,167 @@ class SupportLegalScreen extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Colors.black, Colors.grey],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.policy_outlined, color: Colors.white, size: 32),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Suporte, termos de uso e privacidade em um só lugar.',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      height: 1.2,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          _LegalSegmentedControl(
+            selectedTab: _selectedTab,
+            onChanged: (tab) => setState(() => _selectedTab = tab),
           ),
-          const SizedBox(height: 18),
-          _InfoSection(
-            icon: Icons.support_agent,
-            title: 'Ajuda e Suporte',
-            color: Colors.green,
-            paragraphs: const [
-              'Se precisar de ajuda com login, cadastro, pedidos, pagamentos, entrega ou rastreamento da Kombi, entre em contato com o suporte.',
-              'Para agilizar o atendimento, informe o nome cadastrado no app, e-mail da conta e o número do pedido quando existir.',
-            ],
-            action: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => _openSupportEmail(context),
-                icon: const Icon(Icons.email_outlined),
-                label: const Text('Entrar em contato'),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          const _InfoSection(
-            icon: Icons.privacy_tip_outlined,
-            title: 'Política de Privacidade',
-            color: Colors.purple,
-            paragraphs: [
-              'Coletamos dados de cadastro como nome, e-mail, telefone, endereço e foto de perfil para login, identificação, atendimento e entrega dos pedidos.',
-              'Dados de pedidos, pagamento e entrega são usados para processar compras, confirmar informações e prestar suporte. Não armazenamos dados completos de cartão de crédito.',
-              'A localização da Kombi é usada para mostrar o rastreamento quando o recurso estiver ativo. A localização do usuário só é usada quando necessária para recursos do app e permissões concedidas.',
-              'Podemos compartilhar dados estritamente necessários com serviços de autenticação, banco de dados, notificações, pagamentos e entrega, sempre para funcionamento do aplicativo.',
-              'Você pode solicitar correção, atualização ou exclusão dos seus dados pelo suporte.',
-            ],
-          ),
-          const SizedBox(height: 14),
-          const _InfoSection(
-            icon: Icons.description_outlined,
-            title: 'Termos de Uso',
-            color: Colors.blue,
-            paragraphs: [
-              'Ao usar o Carro das Delícias, você concorda em informar dados verdadeiros e atualizados para cadastro, contato, entrega e pagamento.',
-              'Produtos, preços, promoções, categorias, disponibilidade e prazos podem mudar conforme estoque, operação da Kombi e região atendida.',
-              'Pedidos dependem da confirmação de pagamento e da disponibilidade operacional. Dados incorretos de contato ou endereço podem impedir a entrega.',
-              'É proibido usar o app para fraude, acesso indevido, tentativa de burlar pagamentos ou prejudicar a operação do serviço.',
-              'O uso contínuo do aplicativo após atualizações indica concordância com a versão vigente destes termos.',
-            ],
+          const SizedBox(height: 16),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: _buildSelectedSection(context),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedSection(BuildContext context) {
+    switch (_selectedTab) {
+      case _SupportLegalTab.support:
+        return _InfoSection(
+          key: const ValueKey('support'),
+          icon: Icons.support_agent,
+          title: 'Ajuda e Suporte',
+          color: Colors.green,
+          paragraphs: const [
+            'Se precisar de ajuda com login, cadastro, pedidos, pagamentos, entrega ou rastreamento da Kombi, entre em contato com o suporte.',
+            'Para agilizar o atendimento, informe o nome cadastrado no app, e-mail da conta e o número do pedido quando existir.',
+          ],
+          action: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _openSupportEmail(context),
+              icon: const Icon(Icons.email_outlined),
+              label: const Text('Entrar em contato'),
+            ),
+          ),
+        );
+      case _SupportLegalTab.privacy:
+        return const _InfoSection(
+          key: ValueKey('privacy'),
+          icon: Icons.privacy_tip_outlined,
+          title: 'Política de Privacidade',
+          color: Colors.purple,
+          paragraphs: [
+            'Coletamos dados de cadastro como nome, e-mail, telefone, endereço e foto de perfil para login, identificação, atendimento e entrega dos pedidos.',
+            'Dados de pedidos, pagamento e entrega são usados para processar compras, confirmar informações e prestar suporte. Não armazenamos dados completos de cartão de crédito.',
+            'A localização da Kombi é usada para mostrar o rastreamento quando o recurso estiver ativo. A localização do usuário só é usada quando necessária para recursos do app e permissões concedidas.',
+            'Podemos compartilhar dados estritamente necessários com serviços de autenticação, banco de dados, notificações, pagamentos e entrega, sempre para funcionamento do aplicativo.',
+            'Você pode solicitar correção, atualização ou exclusão dos seus dados pelo suporte.',
+          ],
+        );
+      case _SupportLegalTab.terms:
+        return const _InfoSection(
+          key: ValueKey('terms'),
+          icon: Icons.description_outlined,
+          title: 'Termos de Uso',
+          color: Colors.blue,
+          paragraphs: [
+            'Ao usar o Carro das Delícias, você concorda em informar dados verdadeiros e atualizados para cadastro, contato, entrega e pagamento.',
+            'Produtos, preços, promoções, categorias, disponibilidade e prazos podem mudar conforme estoque, operação da Kombi e região atendida.',
+            'Pedidos dependem da confirmação de pagamento e da disponibilidade operacional. Dados incorretos de contato ou endereço podem impedir a entrega.',
+            'É proibido usar o app para fraude, acesso indevido, tentativa de burlar pagamentos ou prejudicar a operação do serviço.',
+            'O uso contínuo do aplicativo após atualizações indica concordância com a versão vigente destes termos.',
+          ],
+        );
+    }
+  }
+}
+
+class _LegalSegmentedControl extends StatelessWidget {
+  final _SupportLegalTab selectedTab;
+  final ValueChanged<_SupportLegalTab> onChanged;
+
+  const _LegalSegmentedControl({
+    required this.selectedTab,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _LegalTabButton(
+              selected: selectedTab == _SupportLegalTab.support,
+              icon: Icons.support_agent,
+              label: 'Ajuda',
+              onTap: () => onChanged(_SupportLegalTab.support),
+            ),
+          ),
+          Expanded(
+            child: _LegalTabButton(
+              selected: selectedTab == _SupportLegalTab.privacy,
+              icon: Icons.privacy_tip_outlined,
+              label: 'Privacidade',
+              onTap: () => onChanged(_SupportLegalTab.privacy),
+            ),
+          ),
+          Expanded(
+            child: _LegalTabButton(
+              selected: selectedTab == _SupportLegalTab.terms,
+              icon: Icons.description_outlined,
+              label: 'Termos',
+              onTap: () => onChanged(_SupportLegalTab.terms),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegalTabButton extends StatelessWidget {
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _LegalTabButton({
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? Colors.black : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? Colors.white : Colors.black,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? Colors.white : Colors.black,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -125,6 +221,7 @@ class _InfoSection extends StatelessWidget {
   final Widget? action;
 
   const _InfoSection({
+    super.key,
     required this.icon,
     required this.title,
     required this.color,
