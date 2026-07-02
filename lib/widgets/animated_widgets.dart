@@ -429,77 +429,11 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         final percentualDesconto =
             ((previousPrice - menorPreco) / previousPrice * 100).toInt();
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.orange,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '$percentualDesconto% OFF',
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              CurrencyFormatter.format(previousPrice),
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[600],
-                decoration: TextDecoration.lineThrough,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              temMultiplosPrecos ? 'A partir de' : 'Preço',
-              style: const TextStyle(
-                fontSize: 10,
-                color: Colors.grey,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Colors.orange, Colors.deepOrange],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.orange.withValues(alpha: 0.3),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Text(
-                CurrencyFormatter.format(menorPreco),
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Colors.white,
-                  shadows: [
-                    Shadow(
-                      color: Colors.black26,
-                      offset: Offset(0, 1),
-                      blurRadius: 2,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+        return _buildDiscountPriceColumn(
+          discountPercent: percentualDesconto,
+          previousPrice: previousPrice,
+          currentPrice: menorPreco,
+          label: temMultiplosPrecos ? 'A partir de' : 'Preço',
         );
       }
 
@@ -580,71 +514,10 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
       final percentualDesconto =
           ((previousPrice - precoAtual) / previousPrice * 100).toInt();
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // Badge de desconto
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.orange,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              '$percentualDesconto% OFF',
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          // Preço anterior riscado
-          Text(
-            CurrencyFormatter.format(previousPrice),
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-              decoration: TextDecoration.lineThrough,
-            ),
-          ),
-          const SizedBox(height: 2),
-          // Preço com desconto
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Colors.orange, Colors.deepOrange],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.orange.withValues(alpha: 0.3),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Text(
-              CurrencyFormatter.format(precoAtual),
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: Colors.white,
-                shadows: [
-                  Shadow(
-                    color: Colors.black26,
-                    offset: Offset(0, 1),
-                    blurRadius: 2,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+      return _buildDiscountPriceColumn(
+        discountPercent: percentualDesconto,
+        previousPrice: previousPrice,
+        currentPrice: precoAtual,
       );
     }
 
@@ -736,6 +609,101 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
             Shadow(color: Colors.black26, offset: Offset(0, 1), blurRadius: 2),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDiscountPriceColumn({
+    required int discountPercent,
+    required double previousPrice,
+    required double currentPrice,
+    String? label,
+  }) {
+    return SizedBox(
+      width: 88,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Align(
+            alignment: Alignment.center,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.orange,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$discountPercent% OFF',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            CurrencyFormatter.format(previousPrice),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[600],
+              decoration: TextDecoration.lineThrough,
+            ),
+          ),
+          if (label != null) ...[
+            const SizedBox(height: 1),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 10,
+                color: Colors.grey,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+          const SizedBox(height: 3),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Colors.orange, Colors.deepOrange],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.orange.withValues(alpha: 0.3),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                CurrencyFormatter.format(currentPrice),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.white,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black26,
+                      offset: Offset(0, 1),
+                      blurRadius: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1297,10 +1265,8 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                     );
 
                                     // Mostrar feedback visual
-                                    AppSnackBar.showTop(
+                                    AppSnackBar.showBottom(
                                       context,
-                                      toolbarHeight: 48,
-                                      topSpacing: 36,
                                       duration: const Duration(seconds: 2),
                                       backgroundColor: wasFavorite
                                           ? Colors.grey.shade700

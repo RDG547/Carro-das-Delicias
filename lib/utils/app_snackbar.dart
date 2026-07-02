@@ -112,6 +112,38 @@ class AppSnackBar {
     });
   }
 
+  static void showBottom(
+    BuildContext context, {
+    required Widget content,
+    Color backgroundColor = Colors.black87,
+    Duration duration = const Duration(seconds: 2),
+    bool avoidAdminFab = false,
+    double bottomSpacing = 110,
+  }) {
+    final mediaQuery = MediaQuery.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: content,
+          backgroundColor: backgroundColor,
+          duration: duration,
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.fromLTRB(
+            16,
+            0,
+            avoidAdminFab ? 92 : 16,
+            mediaQuery.padding.bottom + bottomSpacing,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      );
+  }
+
   static void showCartAddedOverlay(
     BuildContext context, {
     required String message,

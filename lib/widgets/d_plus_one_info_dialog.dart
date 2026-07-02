@@ -91,9 +91,12 @@ class _DPlusOneInfoDialogState extends State<DPlusOneInfoDialog> {
               'Pedidos confirmados até 20:59 seguem D+1. Pedidos confirmados das 21:00 às 23:59 entram no próximo dia operacional e seguem D+2 em relação ao dia do pedido.',
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Exemplos de envio:',
-              style: TextStyle(fontWeight: FontWeight.w800),
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: Colors.blue[700],
+              ),
             ),
             _buildExampleRow('Segunda até 20:59', 'Terça-feira'),
             _buildExampleRow('Segunda 21:00-23:59', 'Quarta-feira'),
@@ -262,22 +265,24 @@ class _DPlusOneInfoDialogState extends State<DPlusOneInfoDialog> {
   Widget _buildExampleRow(String diaD, String diaEnvio) {
     return Padding(
       padding: const EdgeInsets.only(left: 8, bottom: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.arrow_right, size: 16, color: Colors.grey),
-          Text(diaD, style: const TextStyle(fontSize: 13)),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
-            child: Icon(Icons.arrow_forward, size: 12, color: Colors.grey),
-          ),
-          Expanded(
-            child: Text(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Icon(Icons.arrow_right, size: 16, color: Colors.grey),
+            Text(diaD, style: const TextStyle(fontSize: 13)),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Icon(Icons.arrow_forward, size: 12, color: Colors.grey),
+            ),
+            Text(
               diaEnvio,
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -3,9 +3,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mapbox;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config/supabase_config.dart';
 import '../services/cart_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/delivery_geofence_service.dart';
 import '../services/main_navigation_service.dart';
 import '../services/notification_service.dart';
 import '../services/order_payment_service.dart';
@@ -52,6 +56,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _cartService = CartService();
+  final _geofenceService = DeliveryGeofenceService.instance;
   final _scrollController = ScrollController();
   late AnimationController _scrollIndicatorController;
   bool _showScrollIndicator = true;
@@ -78,6 +83,12 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   DateTime? _dataEntrega; // Data agendada para entrega (null = D+1 padrão)
   bool _isPedidoTeste = false; // Pedido de teste (somente admin)
   bool _isAdmin = false; // Se o usuário logado é admin
+  Timer? _deliveryAreaDebounce;
+  bool _isCheckingDeliveryArea = false;
+  bool _isUsingCurrentLocation = false;
+  bool _isSelectingLocationOnMap = false;
+  bool _isApplyingLocationAddress = false;
+  DeliveryAddressValidation? _deliveryAreaValidation;
   CashPaymentSettings _cashPaymentSettings =
       const CashPaymentSettings.defaults();
 
@@ -156,6 +167,8 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     WidgetsBinding.instance.addObserver(this);
     _keyboardVisible = _isKeyboardVisibleFromWindow();
     _cartService.addListener(_onCartChanged);
+    _addDeliveryAddressListeners();
+    unawaited(_geofenceService.inicializarAreas());
     _loadUserData();
     _loadReputacao();
     _loadCashPaymentSettings();
@@ -186,6 +199,8 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _deliveryAreaDebounce?.cancel();
+    _removeDeliveryAddressListeners();
     _cartService.removeListener(_onCartChanged);
     _scrollController.dispose();
     _scrollIndicatorController.dispose();
@@ -228,6 +243,438 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     }
 
     setState(() {});
+  }
+
+  void _addDeliveryAddressListeners() {
+    _enderecoController.addListener(_scheduleDeliveryAreaValidation);
+    _bairroController.addListener(_scheduleDeliveryAreaValidation);
+    _cidadeController.addListener(_scheduleDeliveryAreaValidation);
+    _cepController.addListener(_scheduleDeliveryAreaValidation);
+  }
+
+  void _removeDeliveryAddressListeners() {
+    _enderecoController.removeListener(_scheduleDeliveryAreaValidation);
+    _bairroController.removeListener(_scheduleDeliveryAreaValidation);
+    _cidadeController.removeListener(_scheduleDeliveryAreaValidation);
+    _cepController.removeListener(_scheduleDeliveryAreaValidation);
+  }
+
+  bool _hasEnoughAddressForDeliveryAreaValidation() {
+    final cepDigits = _cepController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    return _enderecoController.text.trim().isNotEmpty &&
+        _bairroController.text.trim().isNotEmpty &&
+        _cidadeController.text.trim().isNotEmpty &&
+        cepDigits.length == 8;
+  }
+
+  String _deliveryAreaAddressQuery() {
+    final cepDigits = _cepController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    return [
+      _enderecoController.text.trim(),
+      _bairroController.text.trim(),
+      _cidadeController.text.trim(),
+      cepDigits,
+    ].where((part) => part.isNotEmpty).join(', ');
+  }
+
+  void _scheduleDeliveryAreaValidation() {
+    if (_isApplyingLocationAddress) return;
+
+    _deliveryAreaDebounce?.cancel();
+
+    if (!_hasEnoughAddressForDeliveryAreaValidation()) {
+      if (_deliveryAreaValidation != null || _isCheckingDeliveryArea) {
+        setState(() {
+          _deliveryAreaValidation = null;
+          _isCheckingDeliveryArea = false;
+        });
+      }
+      return;
+    }
+
+    final currentQuery = _deliveryAreaAddressQuery();
+    if (_deliveryAreaValidation?.addressQuery != currentQuery && mounted) {
+      setState(() => _deliveryAreaValidation = null);
+    }
+
+    _deliveryAreaDebounce = Timer(const Duration(milliseconds: 900), () {
+      unawaited(_validateDeliveryArea());
+    });
+  }
+
+  Future<bool> _validateDeliveryArea({bool showDialogOnFailure = false}) async {
+    if (_isPedidoTeste) return true;
+
+    if (!_hasEnoughAddressForDeliveryAreaValidation()) {
+      if (showDialogOnFailure && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Preencha endereço, bairro, cidade e CEP para validar a área de entrega.',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+
+    final currentQuery = _deliveryAreaAddressQuery();
+    final cachedValidation = _deliveryAreaValidation;
+    if (cachedValidation != null &&
+        cachedValidation.addressQuery == currentQuery &&
+        cachedValidation.atende) {
+      return true;
+    }
+
+    if (mounted) {
+      setState(() => _isCheckingDeliveryArea = true);
+    }
+
+    final rawValidation = await _geofenceService.validarEndereco(
+      endereco: _enderecoController.text,
+      bairro: _bairroController.text,
+      cidade: _cidadeController.text,
+      cep: _cepController.text,
+    );
+    final validation = DeliveryAddressValidation(
+      atende: rawValidation.atende,
+      addressQuery: currentQuery,
+      areaName: rawValidation.areaName,
+      message: rawValidation.message,
+      latitude: rawValidation.latitude,
+      longitude: rawValidation.longitude,
+    );
+
+    if (!mounted) return false;
+
+    setState(() {
+      _deliveryAreaValidation = validation;
+      _isCheckingDeliveryArea = false;
+    });
+
+    if (!validation.atende && showDialogOnFailure) {
+      await _showDeliveryAreaUnavailableDialog(validation);
+    }
+
+    return validation.atende;
+  }
+
+  Future<void> _validateCurrentDeviceLocation() async {
+    if (_isUsingCurrentLocation || _isCheckingDeliveryArea) return;
+
+    setState(() => _isUsingCurrentLocation = true);
+
+    try {
+      final position = await _getCurrentDeliveryPosition();
+      if (position == null) return;
+
+      await _applyDeliveryCoordinates(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        insideMessage: 'Localização atual dentro da área de entrega.',
+        outsideMessage: 'Sua localização atual está fora da área de entrega.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isUsingCurrentLocation = false);
+      }
+    }
+  }
+
+  Future<void> _openDeliveryMapPicker() async {
+    if (_isSelectingLocationOnMap || _isCheckingDeliveryArea) return;
+
+    final initialCenter = _initialDeliveryMapCenter();
+    final selection = await Navigator.of(context).push<_DeliveryMapSelection>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _DeliveryLocationPickerPage(
+          initialLatitude: initialCenter.latitude,
+          initialLongitude: initialCenter.longitude,
+        ),
+      ),
+    );
+    if (selection == null || !mounted) return;
+
+    setState(() => _isSelectingLocationOnMap = true);
+    try {
+      await _applyDeliveryCoordinates(
+        latitude: selection.latitude,
+        longitude: selection.longitude,
+        insideMessage: 'Ponto selecionado dentro da área de entrega.',
+        outsideMessage: 'O ponto selecionado está fora da área de entrega.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSelectingLocationOnMap = false);
+      }
+    }
+  }
+
+  _DeliveryMapSelection _initialDeliveryMapCenter() {
+    final validation = _deliveryAreaValidation;
+    final latitude = validation?.latitude;
+    final longitude = validation?.longitude;
+    if (latitude != null && longitude != null) {
+      return _DeliveryMapSelection(latitude: latitude, longitude: longitude);
+    }
+
+    return const _DeliveryMapSelection(latitude: -22.8809, longitude: -43.4656);
+  }
+
+  Future<void> _applyDeliveryCoordinates({
+    required double latitude,
+    required double longitude,
+    required String insideMessage,
+    required String outsideMessage,
+  }) async {
+    if (!mounted) return;
+
+    setState(() {
+      _isCheckingDeliveryArea = true;
+      _deliveryAreaValidation = null;
+    });
+
+    try {
+      await _geofenceService.inicializarAreas();
+      final areaResult = _geofenceService.verificarCoordenada(
+        latitude,
+        longitude,
+      );
+
+      final reverseAddress = await _geofenceService.reverseGeocodeCoordinates(
+        latitude: latitude,
+        longitude: longitude,
+      );
+      if (reverseAddress?.hasAnyValue == true) {
+        _applyReverseAddress(reverseAddress!);
+      }
+
+      if (!mounted) return;
+
+      final validation = DeliveryAddressValidation(
+        atende: areaResult.atende,
+        addressQuery: _hasEnoughAddressForDeliveryAreaValidation()
+            ? _deliveryAreaAddressQuery()
+            : 'coord:$latitude,$longitude',
+        areaName: areaResult.areaName,
+        latitude: latitude,
+        longitude: longitude,
+        message: areaResult.atende ? insideMessage : outsideMessage,
+      );
+
+      setState(() {
+        _deliveryAreaValidation = validation;
+      });
+
+      if (!validation.atende) {
+        await _showDeliveryAreaUnavailableDialog(validation);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao validar a localização: $error'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingDeliveryArea = false);
+      }
+    }
+  }
+
+  Future<Position?> _getCurrentDeliveryPosition() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ative a localização do dispositivo para continuar.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return null;
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Permissão de localização negada.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return null;
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Permissão de localização bloqueada'),
+            content: const Text(
+              'Ative a permissão de localização nas configurações do aplicativo para usar sua posição atual.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  unawaited(Geolocator.openAppSettings());
+                },
+                child: const Text('Abrir configurações'),
+              ),
+            ],
+          ),
+        );
+      }
+      return null;
+    }
+
+    return Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: 15),
+      ),
+    );
+  }
+
+  void _applyReverseAddress(DeliveryReverseAddress address) {
+    _isApplyingLocationAddress = true;
+    try {
+      if (address.endereco?.trim().isNotEmpty == true) {
+        _enderecoController.text = address.endereco!.trim();
+      }
+      if (address.bairro?.trim().isNotEmpty == true) {
+        _bairroController.text = address.bairro!.trim();
+      }
+      if (address.cidade?.trim().isNotEmpty == true) {
+        _cidadeController.text = address.cidade!.trim();
+      }
+      if (address.cep?.trim().isNotEmpty == true) {
+        _cepController.text = _formatCep(address.cep!.trim());
+      }
+    } finally {
+      _isApplyingLocationAddress = false;
+      _deliveryAreaDebounce?.cancel();
+    }
+  }
+
+  Future<void> _showDeliveryAreaUnavailableDialog(
+    DeliveryAddressValidation validation,
+  ) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.location_off, color: Colors.red[700]),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Fora da área de entrega')),
+          ],
+        ),
+        content: Text(
+          validation.message ??
+              'Ainda não atendemos este endereço. Confira os dados informados ou escolha outro endereço.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Editar endereço'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeliveryAreaValidationStatus() {
+    final validation = _deliveryAreaValidation;
+
+    Color color;
+    IconData icon;
+    String text;
+
+    if (_isCheckingDeliveryArea) {
+      color = Colors.blue;
+      icon = Icons.sync;
+      text = 'Verificando área de entrega...';
+    } else if (validation == null) {
+      color = Colors.grey;
+      icon = Icons.info_outline;
+      text =
+          'Digite endereço, bairro, cidade e CEP para confirmar se atendemos à região.';
+    } else if (validation.atende) {
+      color = Colors.green;
+      icon = Icons.check_circle_outline;
+      final areaName = validation.areaName;
+      text = areaName == null || areaName.isEmpty
+          ? 'Endereço dentro da área de entrega.'
+          : 'Endereço dentro da área de entrega: $areaName.';
+    } else {
+      color = Colors.red;
+      icon = Icons.location_off_outlined;
+      text = validation.message ?? 'Ainda não entregamos neste endereço.';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _isCheckingDeliveryArea
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: color,
+                  ),
+                )
+              : Icon(icon, color: color, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: color == Colors.grey ? Colors.grey[700] : color,
+                fontSize: 12,
+                fontWeight: validation?.atende == true
+                    ? FontWeight.w700
+                    : FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _leaveCheckoutForProducts() {
@@ -828,6 +1275,18 @@ class _CheckoutScreenState extends State<CheckoutScreen>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
+                  'Quantidade',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                _buildCheckoutQuantityControls(item),
+                const SizedBox(height: 6),
+                Text(
                   CurrencyFormatter.format(item.subtotal),
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -836,8 +1295,6 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                     color: Colors.green[700],
                   ),
                 ),
-                const SizedBox(height: 6),
-                _buildCheckoutQuantityControls(item),
               ],
             ),
           ),
@@ -1046,7 +1503,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
             Row(
               children: [
                 Expanded(
-                  flex: 3,
+                  flex: 5,
                   child: TextFormField(
                     controller: _bairroController,
                     decoration: const InputDecoration(
@@ -1064,7 +1521,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  flex: 2,
+                  flex: 4,
                   child: TextFormField(
                     controller: _cepController,
                     decoration: const InputDecoration(
@@ -1109,6 +1566,84 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                 return null;
               },
             ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: _isUsingCurrentLocation
+                          ? null
+                          : _validateCurrentDeviceLocation,
+                      icon: _isUsingCurrentLocation
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.my_location, size: 20),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _isUsingCurrentLocation
+                              ? 'Obtendo...'
+                              : 'Usar localização',
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orange[700],
+                        side: BorderSide(color: Colors.orange[300]!),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          _isSelectingLocationOnMap || _isCheckingDeliveryArea
+                          ? null
+                          : _openDeliveryMapPicker,
+                      icon: _isSelectingLocationOnMap
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(
+                              Icons.add_location_alt_outlined,
+                              size: 20,
+                            ),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _isSelectingLocationOnMap
+                              ? 'Validando...'
+                              : 'Selecionar no mapa',
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orange[700],
+                        side: BorderSide(color: Colors.orange[300]!),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildDeliveryAreaValidationStatus(),
           ],
         ),
       ),
@@ -1615,9 +2150,17 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     return DateTime(minDate.year, minDate.month, minDate.day);
   }
 
-  // Verifica se uma data é válida para entrega (não domingo)
+  DateTime _proximaDataEntregaValida(DateTime date) {
+    var result = DateTime(date.year, date.month, date.day);
+    while (!_isDataEntregaValida(result)) {
+      result = result.add(const Duration(days: 1));
+    }
+    return result;
+  }
+
+  // Verifica se uma data é válida para entrega (sem entregas no fim de semana)
   bool _isDataEntregaValida(DateTime date) {
-    return date.weekday != DateTime.sunday;
+    return date.weekday != DateTime.saturday && date.weekday != DateTime.sunday;
   }
 
   String _formatDate(DateTime date) {
@@ -1714,9 +2257,15 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
+                      var initialDate = _proximaDataEntregaValida(
+                        _dataEntrega ?? dataMinima,
+                      );
+                      if (initialDate.isBefore(dataMinima)) {
+                        initialDate = _proximaDataEntregaValida(dataMinima);
+                      }
                       final picked = await showDatePicker(
                         context: context,
-                        initialDate: _dataEntrega ?? dataMinima,
+                        initialDate: initialDate,
                         firstDate: dataMinima,
                         lastDate: DateTime.now().add(const Duration(days: 60)),
                         selectableDayPredicate: _isDataEntregaValida,
@@ -2082,6 +2631,11 @@ class _CheckoutScreenState extends State<CheckoutScreen>
       );
       return;
     }
+
+    final atendeAreaEntrega = await _validateDeliveryArea(
+      showDialogOnFailure: true,
+    );
+    if (!atendeAreaEntrega) return;
 
     setState(() {
       _isLoading = true;
@@ -3162,6 +3716,219 @@ class _CheckoutAddItemsSheetState extends State<_CheckoutAddItemsSheet> {
       child: Text(
         'Nenhum produto nessa categoria',
         style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+      ),
+    );
+  }
+}
+
+class _DeliveryMapSelection {
+  const _DeliveryMapSelection({
+    required this.latitude,
+    required this.longitude,
+  });
+
+  final double latitude;
+  final double longitude;
+}
+
+class _DeliveryLocationPickerPage extends StatefulWidget {
+  const _DeliveryLocationPickerPage({
+    required this.initialLatitude,
+    required this.initialLongitude,
+  });
+
+  final double initialLatitude;
+  final double initialLongitude;
+
+  @override
+  State<_DeliveryLocationPickerPage> createState() =>
+      _DeliveryLocationPickerPageState();
+}
+
+class _DeliveryLocationPickerPageState
+    extends State<_DeliveryLocationPickerPage> {
+  late double _selectedLatitude;
+  late double _selectedLongitude;
+  String? _mapError;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedLatitude = widget.initialLatitude;
+    _selectedLongitude = widget.initialLongitude;
+
+    final mapboxToken = SupabaseConfig.mapboxAccessToken.trim();
+    if (mapboxToken.isNotEmpty) {
+      mapbox.MapboxOptions.setAccessToken(mapboxToken);
+    }
+  }
+
+  void _onCameraChanged(mapbox.CameraChangedEventData data) {
+    final coordinates = data.cameraState.center.coordinates;
+    _selectedLatitude = coordinates.lat.toDouble();
+    _selectedLongitude = coordinates.lng.toDouble();
+  }
+
+  void _confirmSelection() {
+    Navigator.of(context).pop(
+      _DeliveryMapSelection(
+        latitude: _selectedLatitude,
+        longitude: _selectedLongitude,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final initialCenter = mapbox.Point(
+      coordinates: mapbox.Position(
+        widget.initialLongitude,
+        widget.initialLatitude,
+      ),
+    );
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Selecionar no mapa'),
+        centerTitle: true,
+        actions: [
+          TextButton(
+            onPressed: _confirmSelection,
+            child: const Text(
+              'OK',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: mapbox.MapWidget(
+              key: const ValueKey('delivery-location-picker-map'),
+              viewport: mapbox.CameraViewportState(
+                center: initialCenter,
+                zoom: 16,
+              ),
+              onCameraChangeListener: _onCameraChanged,
+              onMapLoadErrorListener: (data) {
+                if (!mounted) return;
+                setState(() {
+                  _mapError =
+                      'Não foi possível carregar o mapa. Confira sua conexão e o token do Mapbox.';
+                });
+              },
+            ),
+          ),
+          Center(
+            child: Transform.translate(
+              offset: const Offset(0, -22),
+              child: Icon(
+                Icons.location_pin,
+                size: 54,
+                color: Colors.red[700],
+                shadows: const [
+                  Shadow(
+                    blurRadius: 8,
+                    color: Colors.black45,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            top: 16,
+            child: Material(
+              color: Colors.white,
+              elevation: 4,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.add_location_alt, color: Colors.orange[700]),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Posicione o pin no endereço de entrega.',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_mapError != null)
+            Positioned(
+              left: 16,
+              right: 16,
+              top: 86,
+              child: Material(
+                color: Colors.red[50],
+                elevation: 2,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.red[700]),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _mapError!,
+                          style: TextStyle(
+                            color: Colors.red[800],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 16,
+            child: SafeArea(
+              top: false,
+              child: ElevatedButton.icon(
+                onPressed: _confirmSelection,
+                icon: const Icon(Icons.check_circle),
+                label: const Text('Confirmar localização'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -459,11 +459,68 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  void _removeProfileImage() {
+  void _discardSelectedProfileImage() {
     setState(() {
       _selectedImage = null;
-      _uploadedImageUrl = null;
     });
+  }
+
+  Future<void> _removeProfileImage() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    final currentImageUrl = _uploadedImageUrl;
+    if ((_selectedImage == null) &&
+        (currentImageUrl == null || currentImageUrl.isEmpty)) {
+      return;
+    }
+
+    setState(() {
+      _isUploadingImage = true;
+    });
+
+    try {
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'avatar_url': null})
+          .eq('id', user.id);
+
+      if (currentImageUrl != null && currentImageUrl.isNotEmpty) {
+        await ImageService.deleteProfileImage(currentImageUrl);
+      }
+
+      setState(() {
+        _selectedImage = null;
+        _uploadedImageUrl = null;
+        if (_userProfile != null) {
+          _userProfile = {..._userProfile!, 'avatar_url': null};
+        }
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Foto de perfil removida com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao remover foto: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingImage = false;
+        });
+      }
+    }
   }
 
   @override
@@ -641,7 +698,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton.icon(
-                      onPressed: _isUploadingImage ? null : _removeProfileImage,
+                      onPressed: _isUploadingImage
+                          ? null
+                          : _discardSelectedProfileImage,
                       icon: const Icon(Icons.close, size: 18),
                       label: const Text('Cancelar'),
                       style: ElevatedButton.styleFrom(
@@ -654,6 +713,28 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ),
                     ),
                   ],
+                ),
+              ] else if (_uploadedImageUrl != null &&
+                  _uploadedImageUrl!.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: _isUploadingImage ? null : _removeProfileImage,
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text('Remover foto'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: Colors.black.withValues(alpha: 0.25),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.45),
+                      ),
+                    ),
+                  ),
                 ),
               ],
 
@@ -751,10 +832,13 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Widget _buildStatisticsTab() {
     final keyboardVisible = _keyboardVisible;
+    final bottomPadding = keyboardVisible
+        ? 140.0
+        : 132.0 + MediaQuery.viewPaddingOf(context).bottom;
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 140 : 100),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPadding),
       child: Card(
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -804,10 +888,13 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Widget _buildPersonalInfoTab(User? user) {
     final keyboardVisible = _keyboardVisible;
+    final bottomPadding = keyboardVisible
+        ? 140.0
+        : 132.0 + MediaQuery.viewPaddingOf(context).bottom;
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: EdgeInsets.fromLTRB(16, 16, 16, keyboardVisible ? 140 : 100),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPadding),
       child: Card(
         elevation: 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

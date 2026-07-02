@@ -324,7 +324,7 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
               top: 16,
               bottom: _keyboardVisible
                   ? 0
-                  : 220, // Espaço para o botão de finalizar (120px) + navbar (80px) + margem (20px)
+                  : 152 + MediaQuery.viewPaddingOf(context).bottom,
             ),
             itemCount: _cartService.items.length,
             itemBuilder: (context, index) {
@@ -601,8 +601,9 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildCheckoutButton() {
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + bottomInset),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../widgets/base_screen.dart';
+import '../widgets/main_navigation_provider.dart';
 
 enum _SupportLegalTab { support, privacy, terms }
 
@@ -40,12 +41,16 @@ class _SupportLegalScreenState extends State<SupportLegalScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final navigation = MainNavigationProvider.of(context);
+    final bottomPadding = 132.0 + MediaQuery.viewPaddingOf(context).bottom;
+
     return BaseScreen(
       title: 'Ajuda e Políticas',
       showBackButton: true,
+      onBackPressed: navigation?.navigateToHome,
       padding: EdgeInsets.zero,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPadding),
         children: [
           _LegalSegmentedControl(
             selectedTab: _selectedTab,

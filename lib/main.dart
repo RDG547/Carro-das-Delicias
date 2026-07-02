@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
 import 'services/notification_service.dart';
+import 'services/remote_push_service.dart';
 import 'auth_wrapper.dart';
 import 'screens/checkout_screen.dart';
 
@@ -19,6 +20,9 @@ Future<void> main() async {
       detectSessionInUri: true,
     ),
   );
+
+  // Inicializa Firebase Messaging para push remoto (se configurado via dart-define).
+  await RemotePushService.initialize();
 
   // Inicializa o serviço de notificações
   await NotificationService.initialize();
@@ -37,15 +41,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Carro das Delícias',
       debugShowCheckedModeBanner: false,
-      builder: (context, child) {
-        final mediaQuery = MediaQuery.of(context);
-        final data = mediaQuery.copyWith(
-          padding: mediaQuery.padding.copyWith(bottom: 0),
-          viewPadding: mediaQuery.viewPadding.copyWith(bottom: 0),
-        );
-
-        return MediaQuery(data: data, child: child ?? const SizedBox.shrink());
-      },
+      builder: (context, child) => child ?? const SizedBox.shrink(),
       locale: const Locale('pt', 'BR'),
       supportedLocales: const [Locale('pt', 'BR')],
       localizationsDelegates: const [

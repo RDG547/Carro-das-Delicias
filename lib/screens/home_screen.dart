@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -200,6 +201,14 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _hideScrollIndicator() {
     if (!_showScrollIndicator) return;
+
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _hideScrollIndicator();
+      });
+      return;
+    }
 
     _scrollIndicatorController.stop(canceled: true);
     _scrollIndicatorController.value = 0;
@@ -1153,8 +1162,8 @@ class _HomeScreenState extends State<HomeScreen>
   double _specialSectionHeight(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final cardWidth = _specialSectionCardWidth(context);
-    final height = cardWidth * (screenWidth < 380 ? 1.62 : 1.36);
-    return height.clamp(306.0, 334.0).toDouble();
+    final height = cardWidth * (screenWidth < 380 ? 1.62 : 1.38);
+    return height.clamp(306.0, 326.0).toDouble();
   }
 
   @override
@@ -2113,7 +2122,7 @@ class _HomeScreenState extends State<HomeScreen>
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final isCompactCard = constraints.maxWidth < 190;
-                final imageHeight = isCompactCard ? 124.0 : 138.0;
+                final baseImageHeight = isCompactCard ? 124.0 : 138.0;
                 final contentPadding = isCompactCard ? 7.0 : 8.0;
                 final titleFontSize = isCompactCard ? 12.5 : 13.0;
                 final descriptionFontSize = isCompactCard ? 9.5 : 10.0;
@@ -2123,6 +2132,20 @@ class _HomeScreenState extends State<HomeScreen>
                 final textBlockHeight = isCompactCard ? 52.0 : 56.0;
                 final contentToPriceSpacing = isCompactCard ? 4.0 : 6.0;
                 final priceToButtonsSpacing = isCompactCard ? 6.0 : 8.0;
+                final priceBlockHeight = isCompactCard ? 52.0 : 56.0;
+                final contentMinHeight =
+                    (contentPadding * 2) +
+                    textBlockHeight +
+                    contentToPriceSpacing +
+                    priceBlockHeight +
+                    priceToButtonsSpacing +
+                    buttonHeight;
+                final availableImageHeight = constraints.maxHeight.isFinite
+                    ? constraints.maxHeight - contentMinHeight
+                    : baseImageHeight;
+                final imageHeight = availableImageHeight
+                    .clamp(isCompactCard ? 112.0 : 122.0, baseImageHeight)
+                    .toDouble();
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2232,18 +2255,34 @@ class _HomeScreenState extends State<HomeScreen>
                               }
 
                               if (mounted) {
-                                AppSnackBar.showTop(
+                                AppSnackBar.showBottom(
                                   this.context,
-                                  toolbarHeight: 48,
-                                  topSpacing: 36,
                                   duration: const Duration(seconds: 1),
                                   backgroundColor: wasFavorite
                                       ? Colors.grey.shade700
                                       : Colors.pink,
-                                  content: Text(
-                                    wasFavorite
-                                        ? 'Removido dos favoritos'
-                                        : 'Adicionado aos favoritos',
+                                  avoidAdminFab:
+                                      !widget.isGuestMode && _isAdmin,
+                                  content: Row(
+                                    children: [
+                                      Icon(
+                                        wasFavorite
+                                            ? Icons.heart_broken
+                                            : Icons.favorite,
+                                        color: Colors.white,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          wasFavorite
+                                              ? 'Removido dos favoritos'
+                                              : 'Adicionado aos favoritos',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 );
                               }
@@ -2369,6 +2408,7 @@ class _HomeScreenState extends State<HomeScreen>
                             SizedBox(height: contentToPriceSpacing),
                             _buildProductPrice(produto, compact: isCompactCard),
                             SizedBox(height: priceToButtonsSpacing),
+                            const Spacer(),
                             // Botões
                             Row(
                               children: [
@@ -3226,16 +3266,19 @@ class _HomeScreenState extends State<HomeScreen>
           const SizedBox(height: 2),
           Text(hasMultiplePrices ? 'A partir de' : 'Preço', style: labelStyle),
           const SizedBox(height: 4),
-          Wrap(
-            spacing: compact ? 6 : 8,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                CurrencyFormatter.format(currentPrice),
-                style: currentPriceStyle,
+              Flexible(
+                child: Text(
+                  CurrencyFormatter.format(currentPrice),
+                  style: currentPriceStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               if (discountPercentage != null) ...[
+                SizedBox(width: compact ? 6 : 8),
                 _buildDiscountChip(discountPercentage, compact: compact),
               ],
             ],
@@ -3306,6 +3349,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildDiscountChip(int discountPercentage, {bool compact = false}) {
     return Container(
+      alignment: Alignment.center,
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 8 : 10,
         vertical: compact ? 3 : 4,

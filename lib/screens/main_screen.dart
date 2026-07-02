@@ -10,6 +10,7 @@ import 'pedidos_screen.dart';
 import 'profile_screen.dart';
 import 'kombi_tracking_screen.dart';
 import 'admin_screen.dart';
+import 'support_legal_screen.dart';
 import '../widgets/notification_bell_navbar.dart';
 
 class MainScreen extends StatefulWidget {
@@ -149,15 +150,20 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _onPageChanged(int index) {
     // Ajustar índice ao mudar página
-    // PageView: 0=Início, 1=Descontos, 2=Pedidos, 3=Perfil, 4=Carrinho, 5=Rastrear Kombi, 6=Admin
+    // PageView: 0=Início, 1=Descontos, 2=Pedidos, 3=Perfil, 4=Carrinho, 5=Rastrear Kombi, 6=Admin, 7=Ajuda
     // NavBar: 0=Início, 1=Descontos, 2=Notificações(menu), 3=Pedidos, 4=Perfil
     setState(() {
       if (index == 6) {
         // Admin (6): oculta navbar e desativa seleção
         _currentIndex = -1;
         _showNavbar = false;
-      } else if (index == 4 || index == 5) {
-        // Carrinho (4) e Rastrear Kombi (5): mostra navbar mas sem seleção (não está na navbar)
+      } else if (index == 4) {
+        // Carrinho (4): oculta navbar para não cobrir controles próprios.
+        _currentIndex = -1;
+        _showNavbar = false;
+      } else if (index == 5 || index == 7) {
+        // Rastreamento e Ajuda/Políticas ficam fora das abas principais,
+        // mas mantêm a navbar como atalho global.
         _currentIndex = -1;
         _showNavbar = true;
       } else {
@@ -181,6 +187,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final view = View.of(context);
     final rawBottomInset = view.viewPadding.bottom / view.devicePixelRatio;
     final navbarBottomOffset = _keyboardVisible ? 16.0 : 16.0 + rawBottomInset;
+    final shouldShowNavbar =
+        _showNavbar && !(_keyboardVisible && _currentIndex == 4);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -229,14 +237,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   const PedidosScreen(), // índice 2
                   ProfileScreen(isGuestMode: widget.isGuestMode), // índice 3
                   const CartScreen(), // índice 4 (sem navbar)
-                  const KombiTrackingScreen(), // índice 5 (sem navbar)
+                  const KombiTrackingScreen(), // índice 5 (com navbar)
                   const AdminScreen(), // índice 6 (apenas para admin, sem navbar)
+                  const SupportLegalScreen(), // índice 7 (com navbar)
                 ],
               ),
             ),
           ),
-          // Navbar - só esconde na tela de Rastreamento (5)
-          if (_showNavbar)
+          // Navbar principal
+          if (shouldShowNavbar)
             Positioned(
               bottom: 0,
               left: 0,
@@ -270,85 +279,60 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(20),
-                    child: BottomNavigationBar(
-                      currentIndex: _currentIndex < 0
-                          ? 0
-                          : _currentIndex, // Garante índice válido
-                      onTap: _onTabTapped,
-                      type: BottomNavigationBarType.fixed,
-                      backgroundColor: Colors.white,
-                      selectedItemColor: _currentIndex < 0
-                          ? Colors.grey[600]
-                          : Colors.black,
-                      unselectedItemColor: Colors.grey[600],
-                      selectedLabelStyle: TextStyle(
-                        fontWeight: _currentIndex < 0
-                            ? FontWeight.w400
-                            : FontWeight.w600,
-                        fontSize: _currentIndex < 0 ? 10 : 11,
-                        height: 1.2,
+                    child: SizedBox(
+                      height: 66,
+                      child: BottomNavigationBar(
+                        currentIndex: _currentIndex < 0
+                            ? 0
+                            : _currentIndex, // Garante índice válido
+                        onTap: _onTabTapped,
+                        type: BottomNavigationBarType.fixed,
+                        backgroundColor: Colors.white,
+                        selectedItemColor: _currentIndex < 0
+                            ? Colors.grey[600]
+                            : Colors.black,
+                        unselectedItemColor: Colors.grey[600],
+                        selectedFontSize: _currentIndex < 0 ? 10 : 11,
+                        unselectedFontSize: 10,
+                        iconSize: 24,
+                        selectedLabelStyle: TextStyle(
+                          fontWeight: _currentIndex < 0
+                              ? FontWeight.w400
+                              : FontWeight.w600,
+                          height: 1.2,
+                        ),
+                        unselectedLabelStyle: const TextStyle(
+                          fontWeight: FontWeight.w400,
+                          height: 1.2,
+                        ),
+                        elevation: 0,
+                        items: [
+                          const BottomNavigationBarItem(
+                            icon: Icon(Icons.home_outlined),
+                            activeIcon: Icon(Icons.home),
+                            label: 'Início',
+                          ),
+                          const BottomNavigationBarItem(
+                            icon: Icon(Icons.local_offer_outlined),
+                            activeIcon: Icon(Icons.local_offer),
+                            label: 'Descontos',
+                          ),
+                          BottomNavigationBarItem(
+                            icon: NotificationBellNavbar(key: _notificationKey),
+                            label: 'Notificações',
+                          ),
+                          const BottomNavigationBarItem(
+                            icon: Icon(Icons.shopping_bag_outlined),
+                            activeIcon: Icon(Icons.shopping_bag),
+                            label: 'Pedidos',
+                          ),
+                          const BottomNavigationBarItem(
+                            icon: Icon(Icons.person_outline),
+                            activeIcon: Icon(Icons.person),
+                            label: 'Perfil',
+                          ),
+                        ],
                       ),
-                      unselectedLabelStyle: const TextStyle(
-                        fontWeight: FontWeight.w400,
-                        fontSize: 10,
-                        height: 1.2,
-                      ),
-                      elevation: 0,
-                      items: [
-                        BottomNavigationBarItem(
-                          icon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Icon(Icons.home_outlined),
-                          ),
-                          activeIcon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Icon(Icons.home),
-                          ),
-                          label: 'Início',
-                        ),
-                        BottomNavigationBarItem(
-                          icon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Icon(Icons.local_offer_outlined),
-                          ),
-                          activeIcon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Icon(Icons.local_offer),
-                          ),
-                          label: 'Descontos',
-                        ),
-                        BottomNavigationBarItem(
-                          icon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: NotificationBellNavbar(
-                              key: _notificationKey,
-                            ),
-                          ),
-                          label: 'Notificações',
-                        ),
-                        BottomNavigationBarItem(
-                          icon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Icon(Icons.shopping_bag_outlined),
-                          ),
-                          activeIcon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Icon(Icons.shopping_bag),
-                          ),
-                          label: 'Pedidos',
-                        ),
-                        BottomNavigationBarItem(
-                          icon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Icon(Icons.person_outline),
-                          ),
-                          activeIcon: Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: Icon(Icons.person),
-                          ),
-                          label: 'Perfil',
-                        ),
-                      ],
                     ),
                   ),
                 ),

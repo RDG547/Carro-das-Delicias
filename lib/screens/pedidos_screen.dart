@@ -1620,13 +1620,18 @@ class _DetalhesDialog extends StatefulWidget {
 class _DetalhesDialogState extends State<_DetalhesDialog> {
   List<Map<String, dynamic>> _historico = [];
   bool _isLoadingHistorico = true;
+  bool _isSavingObservacao = false;
   StreamSubscription<List<Map<String, dynamic>>>? _historicoSubscription;
   late Map<String, dynamic> _pedidoAtual;
+  late final TextEditingController _observacaoController;
 
   @override
   void initState() {
     super.initState();
     _pedidoAtual = widget.pedido;
+    _observacaoController = TextEditingController(
+      text: widget.pedido['observacoes']?.toString() ?? '',
+    );
     _carregarHistorico();
     _setupHistoricoRealtimeSubscription();
     _setupPedidoRealtimeSubscription();
@@ -1635,6 +1640,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
   @override
   void dispose() {
     _historicoSubscription?.cancel();
+    _observacaoController.dispose();
     super.dispose();
   }
 
@@ -1677,7 +1683,12 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                   ..._pedidoAtual,
                   'status': data[0]['status'],
                   'payment_status': data[0]['payment_status'],
+                  'observacoes': data[0]['observacoes'],
                 };
+                if (!_isSavingObservacao) {
+                  _observacaoController.text =
+                      data[0]['observacoes']?.toString() ?? '';
+                }
               });
             }
           },
@@ -1913,6 +1924,66 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     }
   }
 
+  Future<void> _salvarObservacaoPedido() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    final nextObservation = _observacaoController.text.trim();
+    setState(() => _isSavingObservacao = true);
+
+    try {
+      try {
+        await Supabase.instance.client.rpc(
+          'update_order_observation',
+          params: {
+            'p_order_id': widget.pedido['id'],
+            'p_observacoes': nextObservation,
+          },
+        );
+      } catch (rpcError) {
+        final message = rpcError.toString().toLowerCase();
+        final missingRpc =
+            message.contains('function') && message.contains('does not exist');
+        if (!missingRpc) rethrow;
+
+        await Supabase.instance.client
+            .from('pedidos')
+            .update({
+              'observacoes': nextObservation.isEmpty ? null : nextObservation,
+            })
+            .eq('id', widget.pedido['id'])
+            .eq('user_id', user.id);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _pedidoAtual = {
+          ..._pedidoAtual,
+          'observacoes': nextObservation.isEmpty ? null : nextObservation,
+        };
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Observação do pedido atualizada.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Não foi possível salvar a observação: $error'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSavingObservacao = false);
+      }
+    }
+  }
+
   Widget? _getPaymentMethodIconWidget(String metodo, {double size = 20}) {
     switch (metodo.toLowerCase()) {
       case 'pix':
@@ -2067,17 +2138,37 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                 ),
               ],
 
-              // Observações
-              if (widget.pedido['observacoes'] != null &&
-                  widget.pedido['observacoes'].toString().isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _buildDetailRow(
-                  Icons.note,
-                  'Observações',
-                  widget.pedido['observacoes'],
-                  Colors.grey[700]!,
+              const SizedBox(height: 12),
+              TextField(
+                controller: _observacaoController,
+                minLines: 2,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  labelText: 'Observação do pedido',
+                  hintText: 'Ex: Corrigir complemento, referência, contato...',
+                  prefixIcon: const Icon(Icons.edit_note),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
-              ],
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  onPressed: _isSavingObservacao
+                      ? null
+                      : _salvarObservacaoPedido,
+                  icon: _isSavingObservacao
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save_outlined),
+                  label: Text(_isSavingObservacao ? 'Salvando...' : 'Salvar'),
+                ),
+              ),
 
               const Divider(height: 24),
 

@@ -8,6 +8,7 @@ import 'services/auth_profile_sync_service.dart';
 import 'services/notification_service.dart';
 import 'services/deep_link_service.dart';
 import 'services/order_payment_service.dart';
+import 'services/remote_push_service.dart';
 import 'services/user_presence_service.dart';
 
 class AuthWrapper extends StatefulWidget {
@@ -55,6 +56,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
           // Usuário fez logout - parar escuta de notificações
           _authenticatedServicesUserId = null;
           _authenticatedServicesFuture = null;
+          unawaited(RemotePushService.stop());
           unawaited(UserPresenceService.instance.stop(markOffline: true));
           NotificationService.stopListeningToNotifications();
         }
@@ -130,6 +132,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
 
       if (isBanned) {
         await UserPresenceService.instance.stop(markOffline: true);
+        await RemotePushService.unregisterCurrentDevice();
         await supabase.auth.signOut();
         if (mounted) {
           setState(() {
@@ -144,6 +147,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     }
 
     await AuthProfileSyncService.syncCurrentUserProfile();
+    unawaited(RemotePushService.registerCurrentDevice(user));
     unawaited(UserPresenceService.instance.start(user));
     unawaited(OrderPaymentService.syncPendingPaymentsForCurrentUser());
     NotificationService.startListeningToNotifications();
@@ -156,6 +160,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     _authSubscription?.cancel();
     // Parar escuta ao destruir o widget
     unawaited(UserPresenceService.instance.stop(markOffline: true));
+    unawaited(RemotePushService.stop());
     NotificationService.stopListeningToNotifications();
     super.dispose();
   }

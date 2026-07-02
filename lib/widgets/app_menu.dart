@@ -8,6 +8,7 @@ import '../screens/profile_screen.dart';
 import '../screens/support_legal_screen.dart';
 import '../services/cart_service.dart';
 import '../services/location_tracking_service.dart';
+import '../services/remote_push_service.dart';
 import '../services/user_presence_service.dart';
 import '../utils/realtime_auth_utils.dart';
 
@@ -32,6 +33,7 @@ class AppMenu extends StatefulWidget {
 
 class _AppMenuState extends State<AppMenu> {
   String? _avatarUrl;
+  String? _profileName;
   bool _isLoadingAvatar = false;
   static bool _isListeningToKombi =
       false; // Garante apenas uma subscription ativa
@@ -269,16 +271,22 @@ class _AppMenuState extends State<AppMenu> {
       if (user != null) {
         final response = await Supabase.instance.client
             .from('profiles')
-            .select('avatar_url')
+            .select('name, avatar_url')
             .eq('id', user.id)
             .maybeSingle();
 
         if (mounted && response != null) {
           setState(() {
-            _avatarUrl = response['avatar_url'];
+            _avatarUrl = response['avatar_url']?.toString();
+            final profileName = response['name']?.toString().trim();
+            _profileName = profileName?.isNotEmpty == true ? profileName : null;
             _isLoadingAvatar = false;
           });
+        } else if (mounted) {
+          setState(() => _isLoadingAvatar = false);
         }
+      } else if (mounted) {
+        setState(() => _isLoadingAvatar = false);
       }
     } catch (e) {
       if (_isConnectionError(e)) {
@@ -295,8 +303,10 @@ class _AppMenuState extends State<AppMenu> {
   String _getUserDisplayName(User? user) {
     if (user == null) return 'Usuário';
 
-    // Tenta pegar o nome do metadata primeiro
-    String? fullName = user.userMetadata?['name'] as String?;
+    String? fullName = _profileName;
+    fullName ??= (user.userMetadata?['full_name'] ?? user.userMetadata?['name'])
+        ?.toString()
+        .trim();
     if (fullName != null && fullName.isNotEmpty) {
       // Retorna apenas o primeiro nome
       return fullName.split(' ').first;
@@ -316,6 +326,7 @@ class _AppMenuState extends State<AppMenu> {
   void _signOut(BuildContext context) async {
     try {
       await UserPresenceService.instance.stop(markOffline: true);
+      await RemotePushService.unregisterCurrentDevice();
       await Supabase.instance.client.auth.signOut();
       if (context.mounted) {
         // Voltar para a tela inicial (AuthWrapper vai redirecionar para LoginScreen)
@@ -334,8 +345,6 @@ class _AppMenuState extends State<AppMenu> {
   }
 
   Widget _buildAvatar({double radius = 18, double fontSize = 16}) {
-    final user = Supabase.instance.client.auth.currentUser;
-
     if (_avatarUrl != null && _avatarUrl!.isNotEmpty) {
       return CircleAvatar(
         radius: radius,
@@ -348,18 +357,21 @@ class _AppMenuState extends State<AppMenu> {
       );
     }
 
-    // Fallback: mostrar inicial do nome
+    // Fallback visual padronizado do perfil.
     return CircleAvatar(
       radius: radius,
-      backgroundColor: widget.isGuestMode ? Colors.grey[200] : Colors.black,
-      child: Text(
-        widget.isGuestMode
-            ? 'V'
-            : _getUserDisplayName(user).substring(0, 1).toUpperCase(),
-        style: TextStyle(
-          color: widget.isGuestMode ? Colors.grey[600] : Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: fontSize,
+      backgroundColor: Colors.grey[100],
+      child: ClipOval(
+        child: Image.asset(
+          'assets/icons/appbar/profile.png',
+          width: radius * 2,
+          height: radius * 2,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => Icon(
+            widget.isGuestMode ? Icons.visibility_rounded : Icons.person,
+            size: radius,
+            color: Colors.grey[700],
+          ),
         ),
       ),
     );
@@ -383,6 +395,11 @@ class _AppMenuState extends State<AppMenu> {
       offset: const Offset(0, 50),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 8,
+      onOpened: () {
+        if (!widget.isGuestMode) {
+          unawaited(_loadUserAvatar());
+        }
+      },
       onSelected: (value) {
         if (value == 'logout') {
           _signOut(context);
@@ -456,7 +473,13 @@ class _AppMenuState extends State<AppMenu> {
             });
           }
         } else if (value == 'support_legal') {
-          BaseScreen.push(context, const SupportLegalScreen());
+          final provider = MainNavigationProvider.of(context);
+          if (provider?.navigateToPageDirect != null) {
+            // Navega diretamente para índice 7 do PageView (Ajuda e Políticas)
+            provider!.navigateToPageDirect!(7);
+          } else {
+            BaseScreen.push(context, const SupportLegalScreen());
+          }
         }
       },
       itemBuilder: (context) => [

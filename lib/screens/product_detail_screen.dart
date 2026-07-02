@@ -313,11 +313,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         isFavoriting: !wasFavorite,
       );
 
-      AppSnackBar.showTop(
+      AppSnackBar.showBottom(
         context,
         duration: const Duration(seconds: 2),
         backgroundColor: wasFavorite ? Colors.grey.shade700 : Colors.pink,
-        topSpacing: 36,
+        bottomSpacing: 8,
         content: Row(
           children: [
             Icon(

@@ -38,10 +38,13 @@ class _AdminScreenState extends State<AdminScreen>
   List<Map<String, dynamic>> _pedidos = [];
   bool _isLoading = false;
   final ValueNotifier<String> _userFilterNotifier = ValueNotifier('todos');
+  final ValueNotifier<String> _userSearchNotifier = ValueNotifier('');
 
   StreamSubscription<List<Map<String, dynamic>>>? _pedidosSubscription;
   RealtimeChannel? _catalogChannel;
+  RealtimeChannel? _profilesChannel;
   Timer? _catalogRefreshDebounce;
+  Timer? _usersRefreshDebounce;
   Timer? _presenceRefreshTimer;
   late final VoidCallback _catalogSyncListener;
   bool _isRecoveringPedidosRealtimeAuth = false;
@@ -51,6 +54,7 @@ class _AdminScreenState extends State<AdminScreen>
 
   final TextEditingController _searchCategoryController =
       TextEditingController();
+  final TextEditingController _searchUserController = TextEditingController();
   List<Map<String, dynamic>> _filteredCategorias = [];
 
   final LocationTrackingService _locationService = LocationTrackingService();
@@ -75,6 +79,9 @@ class _AdminScreenState extends State<AdminScreen>
       _scheduleCatalogRefresh();
     };
     CatalogSyncService.instance.addListener(_catalogSyncListener);
+    _searchUserController.addListener(() {
+      _userSearchNotifier.value = _searchUserController.text;
+    });
     _setupRealtimeSubscription();
     _checkTrackingStatus();
     _presenceRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
@@ -136,15 +143,21 @@ class _AdminScreenState extends State<AdminScreen>
     _tabController.dispose();
     _fadeController.dispose();
     _searchCategoryController.dispose();
+    _searchUserController.dispose();
     _pedidosSubscription?.cancel();
     _catalogRefreshDebounce?.cancel();
+    _usersRefreshDebounce?.cancel();
     _presenceRefreshTimer?.cancel();
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
     if (_catalogChannel != null) {
       Supabase.instance.client.removeChannel(_catalogChannel!);
     }
+    if (_profilesChannel != null) {
+      Supabase.instance.client.removeChannel(_profilesChannel!);
+    }
     _isTrackingLocationNotifier.dispose();
     _userFilterNotifier.dispose();
+    _userSearchNotifier.dispose();
     super.dispose();
   }
 
@@ -206,118 +219,7 @@ class _AdminScreenState extends State<AdminScreen>
           .select()
           .order('ordem', ascending: true);
 
-      List<dynamic> usuariosResponse = [];
-      try {
-        debugPrint('👥 Tentando carregar usuários via RPC get_all_users...');
-        usuariosResponse = await Supabase.instance.client.rpc('get_all_users');
-        debugPrint('✅ Usuários carregados via RPC: ${usuariosResponse.length}');
-        for (var u in usuariosResponse.take(3)) {
-          debugPrint('   - ${u['email']} (${u['role']})');
-        }
-      } catch (rpcError) {
-        debugPrint('⚠️ RPC get_all_users falhou: $rpcError');
-        final rpcErrorStr = rpcError.toString().toLowerCase();
-
-        if (rpcErrorStr.contains('function') &&
-            rpcErrorStr.contains('does not exist')) {
-          debugPrint(
-            '⚠️ Função get_all_users não existe, tentando auth.admin.listUsers...',
-          );
-        }
-
-        try {
-          debugPrint('👥 Tentando carregar via auth.admin.listUsers...');
-          final authUsers = await Supabase.instance.client.auth.admin
-              .listUsers();
-          usuariosResponse = authUsers
-              .map(
-                (u) => {
-                  'id': u.id,
-                  'email': u.email,
-                  'avatar_url': u.userMetadata?['avatar_url'],
-                  'full_name':
-                      u.userMetadata?['full_name'] ??
-                      u.userMetadata?['name'] ??
-                      'Usuário',
-                  'role': u.userMetadata?['role'] ?? 'user',
-                  'created_at': u.createdAt is DateTime
-                      ? (u.createdAt as DateTime).toIso8601String()
-                      : u.createdAt.toString(),
-                  'updated_at': u.updatedAt,
-                  'last_sign_in_at': u.lastSignInAt,
-                },
-              )
-              .toList();
-          debugPrint(
-            '✅ Usuários carregados via auth.admin: ${usuariosResponse.length}',
-          );
-        } catch (authError) {
-          debugPrint('⚠️ auth.admin.listUsers falhou: $authError');
-          // Fallback final: select normal (pode retornar apenas o usuário logado devido ao RLS)
-          debugPrint('👥 Tentando select normal na tabela profiles...');
-          try {
-            usuariosResponse = await Supabase.instance.client
-                .from('profiles')
-                .select()
-                .order('created_at', ascending: false);
-            debugPrint(
-              '✅ Usuários carregados via select: ${usuariosResponse.length}',
-            );
-          } catch (selectError) {
-            debugPrint('❌ Select profiles também falhou: $selectError');
-            usuariosResponse = [];
-          }
-        }
-      }
-
-      final usuarioIds = usuariosResponse
-          .map((u) => u['id'])
-          .whereType<String>()
-          .toSet();
-      final usuariosProfilesResponse = usuarioIds.isNotEmpty
-          ? await Supabase.instance.client
-                .from('profiles')
-                .select()
-                .inFilter('id', usuarioIds.toList())
-          : <Map<String, dynamic>>[];
-      final usuariosProfilesMap = Map<String, Map<String, dynamic>>.fromEntries(
-        usuariosProfilesResponse.map(
-          (profile) => MapEntry(
-            profile['id'].toString(),
-            Map<String, dynamic>.from(profile),
-          ),
-        ),
-      );
-      final mergedUsuarios = usuariosResponse.map((usuario) {
-        final usuarioMap = Map<String, dynamic>.from(usuario);
-        final profile = usuariosProfilesMap[usuarioMap['id']?.toString()];
-        return {
-          ...usuarioMap,
-          'full_name':
-              usuarioMap['full_name'] ??
-              profile?['name'] ??
-              usuarioMap['name'] ??
-              'Usuário',
-          'email': usuarioMap['email'] ?? profile?['email'] ?? '',
-          'phone': usuarioMap['phone'] ?? profile?['phone'] ?? '',
-          'role': usuarioMap['role'] ?? profile?['role'] ?? 'user',
-          'avatar_url': usuarioMap['avatar_url'] ?? profile?['avatar_url'],
-          'is_banned':
-              usuarioMap['is_banned'] ??
-              usuarioMap['banned'] ??
-              profile?['is_banned'] ??
-              false,
-          'banned_until':
-              usuarioMap['banned_until'] ?? profile?['banned_until'],
-          'is_online':
-              usuarioMap['is_online'] ?? profile?['is_online'] ?? false,
-          'last_access_at':
-              usuarioMap['last_access_at'] ?? profile?['last_access_at'],
-          'updated_at': usuarioMap['updated_at'] ?? profile?['updated_at'],
-          'last_sign_in_at':
-              usuarioMap['last_sign_in_at'] ?? profile?['last_sign_in_at'],
-        };
-      }).toList();
+      final mergedUsuarios = await _fetchUsuarios();
 
       // Carregar pedidos com itens
       final pedidosResponse = await Supabase.instance.client
@@ -396,6 +298,127 @@ class _AdminScreenState extends State<AdminScreen>
     }
   }
 
+  Future<List<Map<String, dynamic>>> _fetchUsuarios() async {
+    List<dynamic> usuariosResponse = [];
+    try {
+      debugPrint('👥 Tentando carregar usuários via RPC get_all_users...');
+      usuariosResponse = await Supabase.instance.client.rpc('get_all_users');
+      debugPrint('✅ Usuários carregados via RPC: ${usuariosResponse.length}');
+    } catch (rpcError) {
+      debugPrint('⚠️ RPC get_all_users falhou: $rpcError');
+      final rpcErrorStr = rpcError.toString().toLowerCase();
+
+      if (rpcErrorStr.contains('function') &&
+          rpcErrorStr.contains('does not exist')) {
+        debugPrint(
+          '⚠️ Função get_all_users não existe, tentando auth.admin.listUsers...',
+        );
+      }
+
+      try {
+        debugPrint('👥 Tentando carregar via auth.admin.listUsers...');
+        final authUsers = await Supabase.instance.client.auth.admin.listUsers();
+        usuariosResponse = authUsers
+            .map(
+              (u) => {
+                'id': u.id,
+                'email': u.email,
+                'avatar_url': u.userMetadata?['avatar_url'],
+                'full_name':
+                    u.userMetadata?['full_name'] ??
+                    u.userMetadata?['name'] ??
+                    'Usuário',
+                'role': u.userMetadata?['role'] ?? 'user',
+                'created_at': u.createdAt is DateTime
+                    ? (u.createdAt as DateTime).toIso8601String()
+                    : u.createdAt.toString(),
+                'updated_at': u.updatedAt,
+                'last_sign_in_at': u.lastSignInAt,
+              },
+            )
+            .toList();
+        debugPrint(
+          '✅ Usuários carregados via auth.admin: ${usuariosResponse.length}',
+        );
+      } catch (authError) {
+        debugPrint('⚠️ auth.admin.listUsers falhou: $authError');
+        debugPrint('👥 Tentando select normal na tabela profiles...');
+        try {
+          usuariosResponse = await Supabase.instance.client
+              .from('profiles')
+              .select()
+              .order('created_at', ascending: false);
+          debugPrint(
+            '✅ Usuários carregados via select: ${usuariosResponse.length}',
+          );
+        } catch (selectError) {
+          debugPrint('❌ Select profiles também falhou: $selectError');
+          usuariosResponse = [];
+        }
+      }
+    }
+
+    final usuarioIds = usuariosResponse
+        .map((u) => u['id'])
+        .whereType<String>()
+        .toSet();
+    final usuariosProfilesResponse = usuarioIds.isNotEmpty
+        ? await Supabase.instance.client
+              .from('profiles')
+              .select()
+              .inFilter('id', usuarioIds.toList())
+        : <Map<String, dynamic>>[];
+    final usuariosProfilesMap = Map<String, Map<String, dynamic>>.fromEntries(
+      usuariosProfilesResponse.map(
+        (profile) => MapEntry(
+          profile['id'].toString(),
+          Map<String, dynamic>.from(profile),
+        ),
+      ),
+    );
+
+    return usuariosResponse.map<Map<String, dynamic>>((usuario) {
+      final usuarioMap = Map<String, dynamic>.from(usuario);
+      final profile = usuariosProfilesMap[usuarioMap['id']?.toString()];
+      return {
+        ...usuarioMap,
+        'full_name':
+            usuarioMap['full_name'] ??
+            profile?['name'] ??
+            usuarioMap['name'] ??
+            'Usuário',
+        'email': usuarioMap['email'] ?? profile?['email'] ?? '',
+        'phone': usuarioMap['phone'] ?? profile?['phone'] ?? '',
+        'role': usuarioMap['role'] ?? profile?['role'] ?? 'user',
+        'avatar_url': usuarioMap['avatar_url'] ?? profile?['avatar_url'],
+        'is_banned':
+            usuarioMap['is_banned'] ??
+            usuarioMap['banned'] ??
+            profile?['is_banned'] ??
+            false,
+        'banned_until': usuarioMap['banned_until'] ?? profile?['banned_until'],
+        'is_online': usuarioMap['is_online'] ?? profile?['is_online'] ?? false,
+        'last_access_at':
+            usuarioMap['last_access_at'] ?? profile?['last_access_at'],
+        'updated_at': usuarioMap['updated_at'] ?? profile?['updated_at'],
+        'last_sign_in_at':
+            usuarioMap['last_sign_in_at'] ?? profile?['last_sign_in_at'],
+      };
+    }).toList();
+  }
+
+  Future<void> _loadUsuariosOnly() async {
+    try {
+      final usuarios = await _fetchUsuarios();
+      if (!mounted) return;
+      setState(() {
+        _usuarios = usuarios;
+      });
+    } catch (error) {
+      debugPrint('Erro ao atualizar usuários: $error');
+    }
+  }
+
   /// Configurar listener em tempo real para pedidos
   void _setupRealtimeSubscription() {
     _pedidosSubscription?.cancel();
@@ -432,11 +455,15 @@ class _AdminScreenState extends State<AdminScreen>
           table: 'categorias',
           callback: (_) => _scheduleCatalogRefresh(),
         )
+        .subscribe();
+
+    _profilesChannel = Supabase.instance.client
+        .channel('admin-profile-changes')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'profiles',
-          callback: (_) => _scheduleCatalogRefresh(),
+          callback: (_) => _scheduleUsersRefresh(),
         )
         .subscribe();
   }
@@ -473,6 +500,15 @@ class _AdminScreenState extends State<AdminScreen>
     _catalogRefreshDebounce = Timer(const Duration(milliseconds: 500), () {
       if (mounted) {
         _loadData();
+      }
+    });
+  }
+
+  void _scheduleUsersRefresh() {
+    _usersRefreshDebounce?.cancel();
+    _usersRefreshDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) {
+        unawaited(_loadUsuariosOnly());
       }
     });
   }
@@ -856,11 +892,8 @@ class _AdminScreenState extends State<AdminScreen>
 
                 // Tabs
                 Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  width: double.infinity,
+                  decoration: BoxDecoration(color: Colors.grey[100]),
                   child: TabBar(
                     controller: _tabController,
                     indicator: BoxDecoration(
@@ -1708,6 +1741,46 @@ class _AdminScreenState extends State<AdminScreen>
         usuario['created_at'];
   }
 
+  List<Map<String, dynamic>> _filteredAndSortedUsuarios({
+    required String selectedFilter,
+    required String searchQuery,
+  }) {
+    final normalizedQuery = searchQuery.trim().toLowerCase();
+    final usuarios = _usuarios.where((usuario) {
+      if (selectedFilter == 'admin' && usuario['role'] != 'admin') {
+        return false;
+      }
+      if (selectedFilter == 'client' && usuario['role'] == 'admin') {
+        return false;
+      }
+
+      if (normalizedQuery.isEmpty) return true;
+
+      final name = (usuario['full_name'] ?? usuario['name'] ?? '')
+          .toString()
+          .toLowerCase();
+      final email = (usuario['email'] ?? '').toString().toLowerCase();
+      return name.contains(normalizedQuery) || email.contains(normalizedQuery);
+    }).toList();
+
+    usuarios.sort((a, b) {
+      final adminCompare = (a['role'] == 'admin' ? 0 : 1).compareTo(
+        b['role'] == 'admin' ? 0 : 1,
+      );
+      if (adminCompare != 0) return adminCompare;
+
+      final aDate =
+          _parseLastAccess(_lastAccessValue(a)) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final bDate =
+          _parseLastAccess(_lastAccessValue(b)) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return bDate.compareTo(aDate);
+    });
+
+    return usuarios;
+  }
+
   bool _isUserOnline(Map<String, dynamic> usuario) {
     if (usuario['is_online'] != true) return false;
 
@@ -1817,235 +1890,332 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
+  String _cleanAddressPart(dynamic value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty || text.toLowerCase() == 'não informado') return '';
+    return text;
+  }
+
+  String _buildOrderMapAddress(Map<String, dynamic> pedido) {
+    final parts = [
+      _cleanAddressPart(pedido['endereco_completo']),
+      _cleanAddressPart(pedido['complemento']),
+      _cleanAddressPart(pedido['bairro']),
+      _cleanAddressPart(pedido['cidade']),
+      _cleanAddressPart(pedido['cep']),
+    ].where((part) => part.isNotEmpty).toList();
+
+    return parts.join(', ');
+  }
+
+  Future<void> _openOrderAddressInMaps(Map<String, dynamic> pedido) async {
+    final address = _buildOrderMapAddress(pedido);
+    if (address.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Endereço indisponível para abrir o mapa.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    final encodedAddress = Uri.encodeComponent(address);
+    final candidates = [
+      Uri.parse('waze://?q=$encodedAddress&navigate=yes'),
+      Uri.parse('google.navigation:q=$encodedAddress&mode=d'),
+      Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$encodedAddress&travelmode=driving',
+      ),
+    ];
+
+    for (final uri in candidates) {
+      try {
+        if (uri.scheme == 'https' || await canLaunchUrl(uri)) {
+          final opened = await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
+          );
+          if (opened) return;
+        }
+      } catch (error) {
+        debugPrint('Erro ao abrir mapa com $uri: $error');
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível abrir o mapa neste dispositivo.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Widget _buildUsuariosTab() {
     return ValueListenableBuilder<String>(
       valueListenable: _userFilterNotifier,
       builder: (context, selectedFilter, child) {
-        final totalUsers = _usuarios.length;
-        final adminUsers = _usuarios.where((u) => u['role'] == 'admin').length;
-        final clientUsers = totalUsers - adminUsers;
-        final filteredUsuarios =
-            _usuarios.where((u) {
-              if (selectedFilter == 'admin') return u['role'] == 'admin';
-              if (selectedFilter == 'client') return u['role'] != 'admin';
-              return true;
-            }).toList()..sort((a, b) {
-              final aAdmin = a['role'] == 'admin' ? 0 : 1;
-              final bAdmin = b['role'] == 'admin' ? 0 : 1;
-              return aAdmin.compareTo(bAdmin);
-            });
+        return ValueListenableBuilder<String>(
+          valueListenable: _userSearchNotifier,
+          builder: (context, searchQuery, _) {
+            final totalUsers = _usuarios.length;
+            final adminUsers = _usuarios
+                .where((u) => u['role'] == 'admin')
+                .length;
+            final clientUsers = totalUsers - adminUsers;
+            final filteredUsuarios = _filteredAndSortedUsuarios(
+              selectedFilter: selectedFilter,
+              searchQuery: searchQuery,
+            );
 
-        return Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  _buildUserFilter(
-                    label: 'Todos',
-                    value: 'todos',
-                    icon: Icons.people,
-                    count: totalUsers,
-                    selectedFilter: selectedFilter,
-                  ),
-                  const SizedBox(width: 8),
-                  _buildUserFilter(
-                    label: 'Admin',
-                    value: 'admin',
-                    icon: Icons.admin_panel_settings,
-                    count: adminUsers,
-                    selectedFilter: selectedFilter,
-                  ),
-                  const SizedBox(width: 8),
-                  _buildUserFilter(
-                    label: 'Usuário',
-                    value: 'client',
-                    icon: Icons.person,
-                    count: clientUsers,
-                    selectedFilter: selectedFilter,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: filteredUsuarios.isEmpty
-                  ? const Center(
-                      key: ValueKey('empty-users'),
-                      child: Text(
-                        'Nenhum usuário encontrado',
-                        style: TextStyle(fontSize: 16, color: Colors.grey),
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: TextField(
+                    controller: _searchUserController,
+                    decoration: InputDecoration(
+                      hintText: 'Pesquisar por nome ou email',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: searchQuery.trim().isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Limpar busca',
+                              icon: const Icon(Icons.close),
+                              onPressed: _searchUserController.clear,
+                            ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                    )
-                  : ListView.builder(
-                      key: ValueKey('users-$selectedFilter'),
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: filteredUsuarios.length,
-                      itemBuilder: (context, index) {
-                        final usuario = filteredUsuarios[index];
-                        final isAdmin = usuario['role'] == 'admin';
-                        final isBanned = usuario['is_banned'] == true;
-                        final isOnline = _isUserOnline(usuario);
-                        final lastAccess = _formatLastAccess(
-                          _lastAccessValue(usuario),
-                        );
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    children: [
+                      _buildUserFilter(
+                        label: 'Todos',
+                        value: 'todos',
+                        icon: Icons.people,
+                        count: totalUsers,
+                        selectedFilter: selectedFilter,
+                      ),
+                      const SizedBox(width: 8),
+                      _buildUserFilter(
+                        label: 'Admin',
+                        value: 'admin',
+                        icon: Icons.admin_panel_settings,
+                        count: adminUsers,
+                        selectedFilter: selectedFilter,
+                      ),
+                      const SizedBox(width: 8),
+                      _buildUserFilter(
+                        label: 'Usuário',
+                        value: 'client',
+                        icon: Icons.person,
+                        count: clientUsers,
+                        selectedFilter: selectedFilter,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: filteredUsuarios.isEmpty
+                      ? const Center(
+                          key: ValueKey('empty-users'),
+                          child: Text(
+                            'Nenhum usuário encontrado',
+                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                          ),
+                        )
+                      : ListView.builder(
+                          key: ValueKey('users-$selectedFilter-$searchQuery'),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: filteredUsuarios.length,
+                          itemBuilder: (context, index) {
+                            final usuario = filteredUsuarios[index];
+                            final isAdmin = usuario['role'] == 'admin';
+                            final isBanned = usuario['is_banned'] == true;
+                            final isOnline = _isUserOnline(usuario);
+                            final lastAccess = _formatLastAccess(
+                              _lastAccessValue(usuario),
+                            );
 
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          child: ListTile(
-                            leading: _buildUserAvatar(usuario, isAdmin),
-                            title: Text(usuario['full_name'] ?? 'Usuário'),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(usuario['email'] ?? ''),
-                                Text(
-                                  isAdmin ? 'Administrador' : 'Cliente',
-                                  style: TextStyle(
-                                    color: isAdmin ? Colors.red : Colors.blue,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                if ((usuario['phone'] ?? '')
-                                    .toString()
-                                    .isNotEmpty)
-                                  InkWell(
-                                    onTap: () => _showPhoneActions(
-                                      usuario['phone'].toString(),
-                                    ),
-                                    borderRadius: BorderRadius.circular(6),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 2,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.phone,
-                                            size: 13,
-                                            color: Colors.green[700],
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            _formatPhoneBr(
-                                              usuario['phone'].toString(),
-                                            ),
-                                            style: TextStyle(
-                                              color: Colors.green[700],
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                Text(
-                                  isBanned ? 'Banido' : 'Ativo',
-                                  style: TextStyle(
-                                    color: isBanned ? Colors.red : Colors.green,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              child: ListTile(
+                                leading: _buildUserAvatar(usuario, isAdmin),
+                                title: Text(usuario['full_name'] ?? 'Usuário'),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Icon(
-                                      Icons.circle,
-                                      size: 9,
-                                      color: isOnline
-                                          ? Colors.green
-                                          : Colors.grey,
-                                    ),
-                                    const SizedBox(width: 6),
+                                    Text(usuario['email'] ?? ''),
                                     Text(
-                                      isOnline ? 'Online' : 'Offline',
+                                      isAdmin ? 'Administrador' : 'Cliente',
                                       style: TextStyle(
-                                        color: isOnline
-                                            ? Colors.green[700]
-                                            : Colors.grey[700],
-                                        fontWeight: FontWeight.w700,
+                                        color: isAdmin
+                                            ? Colors.red
+                                            : Colors.blue,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if ((usuario['phone'] ?? '')
+                                        .toString()
+                                        .isNotEmpty)
+                                      InkWell(
+                                        onTap: () => _showPhoneActions(
+                                          usuario['phone'].toString(),
+                                        ),
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 2,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.phone,
+                                                size: 13,
+                                                color: Colors.green[700],
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                _formatPhoneBr(
+                                                  usuario['phone'].toString(),
+                                                ),
+                                                style: TextStyle(
+                                                  color: Colors.green[700],
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    Text(
+                                      isBanned ? 'Banido' : 'Ativo',
+                                      style: TextStyle(
+                                        color: isBanned
+                                            ? Colors.red
+                                            : Colors.green,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.circle,
+                                          size: 9,
+                                          color: isOnline
+                                              ? Colors.green
+                                              : Colors.grey,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          isOnline ? 'Online' : 'Offline',
+                                          style: TextStyle(
+                                            color: isOnline
+                                                ? Colors.green[700]
+                                                : Colors.grey[700],
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Text(
+                                      'Último acesso: $lastAccess',
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
                                         fontSize: 12,
                                       ),
                                     ),
                                   ],
                                 ),
-                                Text(
-                                  'Último acesso: $lastAccess',
-                                  style: TextStyle(
-                                    color: Colors.grey[600],
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            trailing: PopupMenuButton(
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  value: 'edit_profile',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.edit, size: 20),
-                                      SizedBox(width: 8),
-                                      Text('Editar dados'),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'toggle_ban',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        isBanned
-                                            ? Icons.verified_user
-                                            : Icons.block,
-                                        size: 20,
-                                        color: isBanned
-                                            ? Colors.green
-                                            : Colors.orange,
+                                trailing: PopupMenuButton(
+                                  itemBuilder: (context) => [
+                                    const PopupMenuItem(
+                                      value: 'edit_profile',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.edit, size: 20),
+                                          SizedBox(width: 8),
+                                          Text('Editar dados'),
+                                        ],
                                       ),
-                                      const SizedBox(width: 8),
-                                      Text(isBanned ? 'Desbanir' : 'Banir'),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete_user',
-                                  child: Row(
-                                    children: [
-                                      Image.asset(
-                                        'assets/icons/menu/delete_button.png',
-                                        width: 20,
-                                        height: 20,
-                                        color: Colors.red,
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'toggle_ban',
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            isBanned
+                                                ? Icons.verified_user
+                                                : Icons.block,
+                                            size: 20,
+                                            color: isBanned
+                                                ? Colors.green
+                                                : Colors.orange,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(isBanned ? 'Desbanir' : 'Banir'),
+                                        ],
                                       ),
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        'Excluir',
-                                        style: TextStyle(color: Colors.red),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'delete_user',
+                                      child: Row(
+                                        children: [
+                                          Image.asset(
+                                            'assets/icons/menu/delete_button.png',
+                                            width: 20,
+                                            height: 20,
+                                            color: Colors.red,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          const Text(
+                                            'Excluir',
+                                            style: TextStyle(color: Colors.red),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
+                                  onSelected: (value) {
+                                    if (value == 'edit_profile') {
+                                      _showEditUserDialog(usuario);
+                                    } else if (value == 'toggle_ban') {
+                                      _toggleUserBan(usuario);
+                                    } else if (value == 'delete_user') {
+                                      _deleteUser(usuario);
+                                    }
+                                  },
                                 ),
-                              ],
-                              onSelected: (value) {
-                                if (value == 'edit_profile') {
-                                  _showEditUserDialog(usuario);
-                                } else if (value == 'toggle_ban') {
-                                  _toggleUserBan(usuario);
-                                } else if (value == 'delete_user') {
-                                  _deleteUser(usuario);
-                                }
-                              },
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -4889,6 +5059,7 @@ class _AdminScreenState extends State<AdminScreen>
                 Icons.person_outline,
                 'Cliente:',
                 pedido['cliente_nome'] ?? cliente?['name'] ?? 'Não informado',
+                iconColor: Colors.blueGrey,
               ),
               _buildDetailRow(
                 Icons.phone_outlined,
@@ -4896,6 +5067,7 @@ class _AdminScreenState extends State<AdminScreen>
                 telefonePedido == null || telefonePedido.isEmpty
                     ? 'Não informado'
                     : _formatPhoneBr(telefonePedido),
+                iconColor: Colors.green,
                 onTap: telefonePedido == null || telefonePedido.isEmpty
                     ? null
                     : () => _showPhoneActions(telefonePedido),
@@ -4904,32 +5076,38 @@ class _AdminScreenState extends State<AdminScreen>
                 Icons.home_outlined,
                 'Endereço:',
                 pedido['endereco_completo'] ?? 'Não informado',
+                iconColor: Colors.deepOrange,
               ),
               if ((pedido['complemento'] ?? '').toString().isNotEmpty)
                 _buildDetailRow(
                   Icons.apartment_outlined,
                   'Complemento:',
                   pedido['complemento'].toString(),
+                  iconColor: Colors.teal,
                 ),
               _buildDetailRow(
                 Icons.location_on_outlined,
                 'Bairro:',
                 pedido['bairro'] ?? 'Não informado',
+                iconColor: Colors.red,
               ),
               _buildDetailRow(
                 Icons.location_city_outlined,
                 'Cidade:',
                 pedido['cidade'] ?? 'Não informado',
+                iconColor: Colors.indigo,
               ),
               _buildDetailRow(
                 Icons.markunread_mailbox_outlined,
                 'CEP:',
                 pedido['cep'] ?? 'Não informado',
+                iconColor: Colors.purple,
               ),
               _buildDetailRow(
                 Icons.payments_outlined,
                 'Pagamento:',
                 _getPaymentMethodName(pedido['metodo_pagamento']),
+                iconColor: Colors.green,
               ),
 
               if (pedido['valor_troco'] != null)
@@ -4937,6 +5115,7 @@ class _AdminScreenState extends State<AdminScreen>
                   Icons.request_quote_outlined,
                   'Troco para:',
                   'R\$ ${pedido['valor_troco'].toStringAsFixed(2)}',
+                  iconColor: Colors.amber[800],
                 ),
 
               if (pedido['observacoes'] != null &&
@@ -4945,6 +5124,7 @@ class _AdminScreenState extends State<AdminScreen>
                   Icons.notes_outlined,
                   'Observações:',
                   pedido['observacoes'],
+                  iconColor: Colors.blueGrey,
                 ),
 
               if (dataEntregaAgendada != null)
@@ -4952,6 +5132,7 @@ class _AdminScreenState extends State<AdminScreen>
                   Icons.event_available_outlined,
                   'Entrega Agendada:',
                   '${dataEntregaAgendada.day.toString().padLeft(2, '0')}/${dataEntregaAgendada.month.toString().padLeft(2, '0')}/${dataEntregaAgendada.year}',
+                  iconColor: Colors.blue,
                 ),
 
               if (entregueEm != null)
@@ -4959,6 +5140,7 @@ class _AdminScreenState extends State<AdminScreen>
                   Icons.check_circle_outline,
                   'Entregue em:',
                   _formatDateTime(entregueEm),
+                  iconColor: Colors.green,
                 ),
 
               const SizedBox(height: 16),
@@ -5141,20 +5323,39 @@ class _AdminScreenState extends State<AdminScreen>
                   ),
                 if (pedido['is_teste'] == true || pedido['status'] == 'teste')
                   const SizedBox(height: 8),
-                Center(
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close, size: 18),
-                    label: const Text('Fechar'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 10,
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close, size: 18),
+                      label: const Text('Fechar'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
                       ),
                     ),
-                  ),
+                    ElevatedButton.icon(
+                      onPressed: () =>
+                          unawaited(_openOrderAddressInMaps(pedido)),
+                      icon: const Icon(Icons.map_outlined, size: 18),
+                      label: const Text('Ver no mapa'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[700],
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -5168,6 +5369,7 @@ class _AdminScreenState extends State<AdminScreen>
     IconData icon,
     String label,
     String value, {
+    Color? iconColor,
     VoidCallback? onTap,
   }) {
     final valueWidget = Text(
@@ -5184,7 +5386,7 @@ class _AdminScreenState extends State<AdminScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: Colors.grey[700]),
+          Icon(icon, size: 18, color: iconColor ?? Colors.grey[700]),
           const SizedBox(width: 8),
           SizedBox(
             width: 80,
@@ -5193,6 +5395,7 @@ class _AdminScreenState extends State<AdminScreen>
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
+          const SizedBox(width: 8),
           Expanded(
             child: onTap == null
                 ? valueWidget

@@ -17,6 +17,15 @@ class AuthProfileSyncService {
           .trim();
       final phone = metadata['phone']?.toString().trim();
 
+      final existingProfile = await supabase
+          .from('profiles')
+          .select('id, name, phone, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+      final existingName = existingProfile?['name']?.toString().trim();
+      final existingPhone = existingProfile?['phone']?.toString().trim();
+      final existingAvatar = existingProfile?['avatar_url']?.toString().trim();
+
       final payload = <String, dynamic>{
         'updated_at': DateTime.now().toIso8601String(),
       };
@@ -26,16 +35,27 @@ class AuthProfileSyncService {
         payload['email'] = email;
       }
 
-      if (displayName != null && displayName.isNotEmpty) {
+      if ((existingName == null || existingName.isEmpty) &&
+          displayName != null &&
+          displayName.isNotEmpty) {
         payload['name'] = displayName;
       }
 
-      if (phone != null && phone.isNotEmpty) {
+      if ((existingPhone == null || existingPhone.isEmpty) &&
+          phone != null &&
+          phone.isNotEmpty) {
         payload['phone'] = phone;
       }
 
-      if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      if ((existingAvatar == null || existingAvatar.isEmpty) &&
+          avatarUrl != null &&
+          avatarUrl.isNotEmpty) {
         payload['avatar_url'] = avatarUrl;
+      }
+
+      if (existingProfile != null) {
+        await supabase.from('profiles').update(payload).eq('id', user.id);
+        return;
       }
 
       final updated = await supabase

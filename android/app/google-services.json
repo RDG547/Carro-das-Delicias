@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "819234415642",
+    "project_id": "carro-delicias",
+    "storage_bucket": "carro-delicias.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:819234415642:android:d7a401de952c62a44b1da3",
+        "android_client_info": {
+          "package_name": "com.rdtech.carrodasdelicias"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxR92T_tJOZOx6Zv6u0gdetGoCMUEw3zs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

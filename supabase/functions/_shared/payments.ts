@@ -262,6 +262,23 @@ export async function markOrderPaid(
   orderId: number,
   extraUpdates: Record<string, unknown> = {},
 ): Promise<void> {
+  const { data: currentOrder, error: currentOrderError } = await admin
+    .from("pedidos")
+    .select("id, cliente_nome, total, status, payment_status")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (currentOrderError) {
+    throw new HttpError(
+      500,
+      "Erro ao buscar pedido antes de confirmar pagamento.",
+      currentOrderError,
+    );
+  }
+
+  const wasAlreadyPaid =
+    currentOrder?.status === "pago" || currentOrder?.payment_status === "paid";
+
   const { error } = await admin
     .from("pedidos")
     .update({
@@ -275,6 +292,53 @@ export async function markOrderPaid(
 
   if (error) {
     throw new HttpError(500, "Erro ao confirmar pagamento.", error);
+  }
+
+  if (!wasAlreadyPaid && currentOrder) {
+    await notifyAdminsNewOrder(admin, currentOrder);
+  }
+}
+
+async function notifyAdminsNewOrder(
+  admin: SupabaseClient,
+  order: Record<string, unknown>,
+): Promise<void> {
+  const { data: admins, error: adminsError } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("role", "admin");
+
+  if (adminsError) {
+    console.warn("Nao foi possivel buscar admins para notificar", adminsError);
+    return;
+  }
+
+  if (!admins || admins.length === 0) return;
+
+  const orderId = Number(order.id);
+  const customerName = stringValue(order.cliente_nome) ?? "Cliente";
+  const total = Number(order.total ?? 0);
+  const title = "🔔 Novo Pedido!";
+  const message =
+    `Pedido #${String(orderId).padStart(4, "0")} de ${customerName} - R$ ${
+      total.toFixed(2)
+    }`;
+
+  const notifications = admins.map((adminProfile) => ({
+    user_id: adminProfile.id,
+    title,
+    message,
+    type: "order",
+    data: {
+      order_id: orderId,
+      customer_name: customerName,
+      total,
+    },
+  }));
+
+  const { error } = await admin.from("notifications").insert(notifications);
+  if (error) {
+    console.warn("Nao foi possivel notificar admins sobre novo pedido", error);
   }
 }
 
