@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -1835,6 +1836,75 @@ class _AdminScreenState extends State<AdminScreen>
     }
   }
 
+  Future<void> _openEmailAction(Uri uri) async {
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível abrir o app de e-mail.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showEmailActions(String rawEmail) {
+    final email = rawEmail.trim();
+    if (email.isEmpty) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 14),
+              ListTile(
+                leading: const Icon(Icons.email_outlined, color: Colors.blue),
+                title: const Text('Enviar e-mail'),
+                subtitle: Text(email),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  unawaited(
+                    _openEmailAction(Uri(scheme: 'mailto', path: email)),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy, color: Colors.black87),
+                title: const Text('Copiar e-mail'),
+                subtitle: Text(email),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Clipboard.setData(ClipboardData(text: email));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('E-mail copiado.'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showPhoneActions(String rawPhone) {
     final phone = _phoneForUri(rawPhone);
     if (phone.isEmpty) return;
@@ -1896,9 +1966,23 @@ class _AdminScreenState extends State<AdminScreen>
     return text;
   }
 
+  String _streetWithNumber(Map<String, dynamic> pedido) {
+    final street = _cleanAddressPart(pedido['endereco_completo']);
+    final number = _cleanAddressPart(pedido['numero']);
+    if (street.isEmpty || number.isEmpty) return street;
+
+    final escapedNumber = RegExp.escape(number);
+    final alreadyHasNumber = RegExp(
+      '(?:,\\s*|\\s+)$escapedNumber\$',
+      caseSensitive: false,
+    ).hasMatch(street);
+
+    return alreadyHasNumber ? street : '$street, $number';
+  }
+
   String _buildOrderMapAddress(Map<String, dynamic> pedido) {
     final parts = [
-      _cleanAddressPart(pedido['endereco_completo']),
+      _streetWithNumber(pedido),
       _cleanAddressPart(pedido['complemento']),
       _cleanAddressPart(pedido['bairro']),
       _cleanAddressPart(pedido['cidade']),
@@ -2062,7 +2146,43 @@ class _AdminScreenState extends State<AdminScreen>
                                 subtitle: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(usuario['email'] ?? ''),
+                                    if ((usuario['email'] ?? '')
+                                        .toString()
+                                        .isNotEmpty)
+                                      InkWell(
+                                        onTap: () => _showEmailActions(
+                                          usuario['email'].toString(),
+                                        ),
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 2,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.max,
+                                            children: [
+                                              Icon(
+                                                Icons.email_outlined,
+                                                size: 13,
+                                                color: Colors.blue[700],
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Flexible(
+                                                child: Text(
+                                                  usuario['email'].toString(),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    color: Colors.blue[700],
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
                                     Text(
                                       isAdmin ? 'Administrador' : 'Cliente',
                                       style: TextStyle(
@@ -4539,28 +4659,29 @@ class _AdminScreenState extends State<AdminScreen>
               const SizedBox(height: 16),
               _buildStatusActions(pedido),
 
-              // Botão excluir para pedidos de teste
-              if (pedido['is_teste'] == true || status == 'teste') ...[
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _excluirPedidoTeste(pedido),
-                    icon: Image.asset(
-                      'assets/icons/menu/delete_button.png',
-                      width: 16,
-                      height: 16,
-                      color: Colors.black,
-                    ),
-                    label: const Text('Excluir Pedido de Teste'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red,
-                      side: const BorderSide(color: Colors.red),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _excluirPedidoAdmin(pedido),
+                  icon: Image.asset(
+                    'assets/icons/menu/delete_button.png',
+                    width: 16,
+                    height: 16,
+                    color: Colors.black,
+                  ),
+                  label: Text(
+                    pedido['is_teste'] == true || status == 'teste'
+                        ? 'Excluir Pedido de Teste'
+                        : 'Excluir Pedido',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                   ),
                 ),
-              ],
+              ),
             ],
           ),
         ),
@@ -4979,6 +5100,9 @@ class _AdminScreenState extends State<AdminScreen>
   void _showPedidoDetails(Map<String, dynamic> pedido) {
     final itens = pedido['pedido_itens'] as List? ?? [];
     final cliente = pedido['profiles'];
+    final statusColor = _getStatusColor(pedido['status']);
+    final statusLabel = _getStatusLabel(pedido['status']);
+    final statusIcon = _getStatusIcon(pedido['status']);
     final telefonePedido = (pedido['cliente_telefone'] ?? cliente?['phone'])
         ?.toString();
     final dataEntregaAgendada = pedido['data_entrega'] != null
@@ -4990,70 +5114,69 @@ class _AdminScreenState extends State<AdminScreen>
       context: context,
       builder: (context) => AlertDialog(
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        title: Row(
-          children: [
-            Icon(Icons.receipt_long, color: Colors.blue[700], size: 28),
-            const SizedBox(width: 12),
-            Text('Pedido #${pedido['id'].toString().padLeft(4, '0')}'),
-            if (pedido['is_teste'] == true || pedido['status'] == 'teste') ...[
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.receipt_long, color: Colors.blue[700], size: 28),
+              const SizedBox(width: 12),
+              Text('Pedido #${pedido['id'].toString().padLeft(4, '0')}'),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurple,
-                  borderRadius: BorderRadius.circular(8),
+                  color: statusColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: statusColor),
                 ),
-                child: const Text(
-                  'TESTE',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, color: statusColor, size: 14),
+                    const SizedBox(width: 4),
+                    Text(
+                      statusLabel,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ),
               ),
+              if (pedido['is_teste'] == true ||
+                  pedido['status'] == 'teste') ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'TESTE',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Status
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: _getStatusColor(
-                    pedido['status'],
-                  ).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _getStatusColor(pedido['status'])),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _getStatusIcon(pedido['status']),
-                      color: _getStatusColor(pedido['status']),
-                      size: 16,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _getStatusLabel(pedido['status']),
-                      style: TextStyle(
-                        color: _getStatusColor(pedido['status']),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
               // Cliente
               _buildDetailRow(
                 Icons.person_outline,
@@ -5075,7 +5198,9 @@ class _AdminScreenState extends State<AdminScreen>
               _buildDetailRow(
                 Icons.home_outlined,
                 'Endereço:',
-                pedido['endereco_completo'] ?? 'Não informado',
+                _streetWithNumber(pedido).isEmpty
+                    ? 'Não informado'
+                    : _streetWithNumber(pedido),
                 iconColor: Colors.deepOrange,
               ),
               if ((pedido['complemento'] ?? '').toString().isNotEmpty)
@@ -5298,64 +5423,36 @@ class _AdminScreenState extends State<AdminScreen>
         actions: [
           SizedBox(
             width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              runSpacing: 8,
               children: [
-                if (pedido['is_teste'] == true || pedido['status'] == 'teste')
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        _excluirPedidoTeste(pedido);
-                      },
-                      icon: Image.asset(
-                        'assets/icons/menu/delete_button.png',
-                        width: 18,
-                        height: 18,
-                        color: Colors.red,
-                      ),
-                      label: const Text(
-                        'Excluir',
-                        style: TextStyle(color: Colors.red),
-                      ),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close, size: 18),
+                  label: const Text('Fechar'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
                     ),
                   ),
-                if (pedido['is_teste'] == true || pedido['status'] == 'teste')
-                  const SizedBox(height: 8),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 10,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close, size: 18),
-                      label: const Text('Fechar'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 10,
-                        ),
-                      ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () => unawaited(_openOrderAddressInMaps(pedido)),
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                  label: const Text('Ver no mapa'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[700],
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
                     ),
-                    ElevatedButton.icon(
-                      onPressed: () =>
-                          unawaited(_openOrderAddressInMaps(pedido)),
-                      icon: const Icon(Icons.map_outlined, size: 18),
-                      label: const Text('Ver no mapa'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue[700],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 10,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
@@ -5594,18 +5691,19 @@ class _AdminScreenState extends State<AdminScreen>
     }
   }
 
-  Future<void> _excluirPedidoTeste(Map<String, dynamic> pedido) async {
+  Future<void> _excluirPedidoAdmin(Map<String, dynamic> pedido) async {
     final pedidoId = pedido['id'];
+    final isTeste = pedido['is_teste'] == true || pedido['status'] == 'teste';
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text(
-          'Excluir Pedido de Teste',
+        title: Text(
+          isTeste ? 'Excluir Pedido de Teste' : 'Excluir Pedido',
           textAlign: TextAlign.center,
         ),
         content: Text(
-          'Tem certeza que deseja excluir o pedido de teste #${pedidoId.toString().padLeft(4, '0')}?\n\nEsta ação não pode ser desfeita.',
+          'Tem certeza que deseja excluir o pedido #${pedidoId.toString().padLeft(4, '0')}?\n\nEsta ação remove o pedido e seus itens do painel e não pode ser desfeita.',
           textAlign: TextAlign.center,
         ),
         actionsAlignment: MainAxisAlignment.center,
@@ -5651,34 +5749,37 @@ class _AdminScreenState extends State<AdminScreen>
     try {
       final idInt = pedidoId is int ? pedidoId : int.parse(pedidoId.toString());
 
-      // Tentar excluir itens do pedido primeiro
-      // Tentar excluir itens do pedido primeiro
-      await Supabase.instance.client
-          .from('pedido_itens')
-          .delete()
-          .eq('pedido_id', idInt)
-          .select();
-
-      // Tentar excluir o pedido diretamente
-      final deleteResult = await Supabase.instance.client
-          .from('pedidos')
-          .delete()
-          .eq('id', idInt)
-          .select();
-
-      // Se o delete direto retornou vazio, possível bloqueio RLS - tentar via RPC
-      if (deleteResult.isEmpty) {
-        debugPrint(
-          '⚠️ Delete direto do pedido retornou vazio - tentando via RPC',
+      try {
+        await Supabase.instance.client.rpc(
+          'delete_pedido_admin',
+          params: {'p_pedido_id': idInt},
         );
+      } catch (rpcError) {
+        debugPrint('❌ RPC delete_pedido_admin falhou: $rpcError');
         try {
-          await Supabase.instance.client.rpc(
-            'delete_pedido_teste_admin',
-            params: {'p_pedido_id': idInt},
-          );
-          debugPrint('✅ Delete via RPC bem-sucedido');
-        } catch (rpcError) {
-          debugPrint('❌ RPC delete_pedido_teste_admin falhou: $rpcError');
+          if (isTeste) {
+            await Supabase.instance.client.rpc(
+              'delete_pedido_teste_admin',
+              params: {'p_pedido_id': idInt},
+            );
+          } else {
+            await Supabase.instance.client
+                .from('pedido_itens')
+                .delete()
+                .eq('pedido_id', idInt)
+                .select();
+
+            final deleteResult = await Supabase.instance.client
+                .from('pedidos')
+                .delete()
+                .eq('id', idInt)
+                .select();
+
+            if (deleteResult.isEmpty) {
+              rethrow;
+            }
+          }
+        } catch (_) {
           rethrow;
         }
       }
@@ -5691,7 +5792,7 @@ class _AdminScreenState extends State<AdminScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Pedido de teste #${pedidoId.toString().padLeft(4, '0')} excluído com sucesso!',
+              'Pedido #${pedidoId.toString().padLeft(4, '0')} excluído com sucesso!',
             ),
             backgroundColor: Colors.green,
           ),
@@ -5714,6 +5815,45 @@ class _AdminScreenState extends State<AdminScreen>
   bool _isCurrentUser(Map<String, dynamic> usuario) {
     return usuario['id']?.toString() ==
         Supabase.instance.client.auth.currentUser?.id;
+  }
+
+  Widget _buildUserEditActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 72,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          elevation: 2,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 22),
+            const SizedBox(height: 6),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showEditUserDialog(Map<String, dynamic> usuario) async {
@@ -5757,42 +5897,50 @@ class _AdminScreenState extends State<AdminScreen>
               ),
             ),
             const SizedBox(height: 16),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 8,
-              runSpacing: 8,
+            Row(
               children: [
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      unawaited(_changeUserPhoto(usuario));
-                    });
-                  },
-                  icon: const Icon(Icons.photo_camera),
-                  label: const Text('Alterar foto'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      unawaited(_showResetPasswordDialog(usuario));
-                    });
-                  },
-                  icon: const Icon(Icons.lock_reset),
-                  label: const Text('Resetar senha'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      unawaited(_toggleUserRole(usuario));
-                    });
-                  },
-                  icon: Icon(
-                    isAdmin ? Icons.person_outline : Icons.admin_panel_settings,
+                Expanded(
+                  child: _buildUserEditActionButton(
+                    icon: Icons.photo_camera,
+                    label: 'Alterar foto',
+                    color: Colors.blue,
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        unawaited(_changeUserPhoto(usuario));
+                      });
+                    },
                   ),
-                  label: Text(isAdmin ? 'Tornar usuário' : 'Tornar admin'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildUserEditActionButton(
+                    icon: Icons.lock_reset,
+                    label: 'Resetar senha',
+                    color: Colors.orange,
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        unawaited(_showResetPasswordDialog(usuario));
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildUserEditActionButton(
+                    icon: isAdmin
+                        ? Icons.person_outline
+                        : Icons.admin_panel_settings,
+                    label: isAdmin ? 'Tornar usuário' : 'Tornar admin',
+                    color: isAdmin ? Colors.blueGrey : Colors.deepPurple,
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        unawaited(_toggleUserRole(usuario));
+                      });
+                    },
+                  ),
                 ),
               ],
             ),
@@ -6112,6 +6260,7 @@ class _AdminScreenState extends State<AdminScreen>
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Image.asset(
             'assets/icons/menu/cancel_button.png',
@@ -6119,7 +6268,7 @@ class _AdminScreenState extends State<AdminScreen>
             height: 18,
           ),
           const SizedBox(width: 6),
-          Expanded(
+          Flexible(
             child: Text(label, textAlign: TextAlign.center, maxLines: 2),
           ),
         ],
@@ -6144,10 +6293,11 @@ class _AdminScreenState extends State<AdminScreen>
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 18),
           const SizedBox(width: 6),
-          Expanded(
+          Flexible(
             child: Text(
               label,
               textAlign: TextAlign.center,

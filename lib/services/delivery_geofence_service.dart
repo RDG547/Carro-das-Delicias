@@ -35,21 +35,42 @@ class DeliveryAddressValidation {
 class DeliveryReverseAddress {
   const DeliveryReverseAddress({
     this.endereco,
+    this.numero,
+    this.complemento,
     this.bairro,
     this.cidade,
     this.cep,
   });
 
   final String? endereco;
+  final String? numero;
+  final String? complemento;
   final String? bairro;
   final String? cidade;
   final String? cep;
 
   bool get hasAnyValue =>
       _hasText(endereco) ||
+      _hasText(numero) ||
+      _hasText(complemento) ||
       _hasText(bairro) ||
       _hasText(cidade) ||
       _hasText(cep);
+
+  bool get hasStreetAddress => _hasText(endereco) || _hasText(numero);
+
+  DeliveryReverseAddress mergeMissing(DeliveryReverseAddress? fallback) {
+    if (fallback == null) return this;
+
+    return DeliveryReverseAddress(
+      endereco: _hasText(endereco) ? endereco : fallback.endereco,
+      numero: _hasText(numero) ? numero : fallback.numero,
+      complemento: _hasText(complemento) ? complemento : fallback.complemento,
+      bairro: _hasText(bairro) ? bairro : fallback.bairro,
+      cidade: _hasText(cidade) ? cidade : fallback.cidade,
+      cep: _hasText(cep) ? cep : fallback.cep,
+    );
+  }
 
   static bool _hasText(String? value) => value?.trim().isNotEmpty == true;
 }
@@ -385,20 +406,42 @@ class DeliveryGeofenceService {
     required double latitude,
     required double longitude,
   }) async {
+    DeliveryReverseAddress? mapboxAddress;
     final token = SupabaseConfig.mapboxAccessToken.trim();
     if (token.isNotEmpty) {
-      final mapboxAddress = await _reverseGeocodeWithMapbox(
+      mapboxAddress = await _reverseGeocodeWithMapbox(
         latitude: latitude,
         longitude: longitude,
         token: token,
       );
-      if (mapboxAddress?.hasAnyValue == true) return mapboxAddress;
+      final needsBetterNumber =
+          mapboxAddress?.hasStreetAddress != true ||
+          mapboxAddress?.numero?.trim().isEmpty == true;
+      if (needsBetterNumber) {
+        final mapboxV6Address = await _reverseGeocodeWithMapboxV6(
+          latitude: latitude,
+          longitude: longitude,
+          token: token,
+        );
+        mapboxAddress =
+            mapboxAddress?.mergeMissing(mapboxV6Address) ?? mapboxV6Address;
+      }
     }
 
-    return _reverseGeocodeWithNominatim(
+    final nominatimAddress = await _reverseGeocodeWithNominatim(
       latitude: latitude,
       longitude: longitude,
     );
+
+    if (mapboxAddress?.hasStreetAddress == true) {
+      return mapboxAddress!.mergeMissing(nominatimAddress);
+    }
+
+    if (nominatimAddress?.hasStreetAddress == true) {
+      return nominatimAddress!.mergeMissing(mapboxAddress);
+    }
+
+    return mapboxAddress?.mergeMissing(nominatimAddress) ?? nominatimAddress;
   }
 
   Future<DeliveryReverseAddress?> _reverseGeocodeWithMapbox({
@@ -414,7 +457,7 @@ class DeliveryGeofenceService {
             'access_token': token,
             'country': 'br',
             'language': 'pt',
-            'limit': '1',
+            'limit': '5',
             'types': 'address,place,postcode,locality,neighborhood',
           },
         );
@@ -432,13 +475,9 @@ class DeliveryGeofenceService {
       final features = data['features'] as List<dynamic>?;
       if (features == null || features.isEmpty) return null;
 
-      final feature = features.first as Map<String, dynamic>;
+      final feature = _bestMapboxAddressFeature(features);
       final text = feature['text']?.toString().trim();
-      final number = feature['address']?.toString().trim();
-      final endereco = [
-        text,
-        number,
-      ].where((part) => part?.isNotEmpty == true).join(', ');
+      final number = _extractNumberFromFeature(feature, text);
 
       String? bairro;
       String? cidade;
@@ -463,13 +502,76 @@ class DeliveryGeofenceService {
       }
 
       return DeliveryReverseAddress(
-        endereco: endereco.isEmpty ? null : endereco,
+        endereco: text == null || text.isEmpty ? null : text,
+        numero: number == null || number.isEmpty ? null : number,
+        complemento: _mapboxComplement(feature),
         bairro: bairro,
         cidade: cidade,
         cep: cep,
       );
     } catch (error) {
       debugPrint('Erro ao fazer reverse geocoding Mapbox: $error');
+      return null;
+    }
+  }
+
+  Future<DeliveryReverseAddress?> _reverseGeocodeWithMapboxV6({
+    required double latitude,
+    required double longitude,
+    required String token,
+  }) async {
+    final url = Uri.https('api.mapbox.com', '/search/geocode/v6/reverse', {
+      'access_token': token,
+      'longitude': longitude.toString(),
+      'latitude': latitude.toString(),
+      'country': 'br',
+      'language': 'pt',
+      'limit': '5',
+      'types': 'address,street,place,postcode,locality,neighborhood',
+    });
+
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) {
+        debugPrint(
+          'Erro Mapbox v6 reverse geocoding ${response.statusCode}: ${response.body}',
+        );
+        return null;
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final features = data['features'] as List<dynamic>?;
+      if (features == null || features.isEmpty) return null;
+
+      final feature = _bestMapboxAddressFeature(features);
+      final properties = feature['properties'];
+      final props = properties is Map<String, dynamic>
+          ? properties
+          : <String, dynamic>{};
+      final fullAddress =
+          props['full_address']?.toString().trim() ??
+          props['place_formatted']?.toString().trim() ??
+          props['name']?.toString().trim();
+      final name =
+          props['name']?.toString().trim() ??
+          feature['text']?.toString().trim();
+      final number = _extractNumberFromFeature(feature, name);
+      final street = _streetFromAddressText(fullAddress, number) ?? name;
+
+      return DeliveryReverseAddress(
+        endereco: street == null || street.isEmpty ? null : street,
+        numero: number == null || number.isEmpty ? null : number,
+        complemento: _mapboxComplement(feature),
+        bairro: _nestedString(feature, const {
+          'neighborhood',
+          'locality',
+          'district',
+        }),
+        cidade: _nestedString(feature, const {'place', 'city', 'locality'}),
+        cep: _nestedString(feature, const {'postcode', 'postal_code'}),
+      );
+    } catch (error) {
+      debugPrint('Erro ao fazer reverse geocoding Mapbox v6: $error');
       return null;
     }
   }
@@ -516,10 +618,6 @@ class DeliveryGeofenceService {
         'footway',
       ]);
       final number = _firstAddressValue(address, const ['house_number']);
-      final endereco = [
-        road,
-        number,
-      ].where((part) => part?.isNotEmpty == true).join(', ');
 
       final bairro = _firstAddressValue(address, const [
         'suburb',
@@ -535,7 +633,15 @@ class DeliveryGeofenceService {
       final cep = _firstAddressValue(address, const ['postcode']);
 
       return DeliveryReverseAddress(
-        endereco: endereco.isEmpty ? null : endereco,
+        endereco: road,
+        numero: number,
+        complemento: _firstAddressValue(address, const [
+          'building',
+          'house',
+          'amenity',
+          'shop',
+          'office',
+        ]),
         bairro: bairro,
         cidade: cidade,
         cep: cep,
@@ -544,6 +650,208 @@ class DeliveryGeofenceService {
       debugPrint('Erro ao fazer reverse geocoding Nominatim: $error');
       return null;
     }
+  }
+
+  Map<String, dynamic> _bestMapboxAddressFeature(List<dynamic> features) {
+    for (final rawFeature in features) {
+      if (rawFeature is! Map<String, dynamic>) continue;
+
+      final placeTypes = rawFeature['place_type'];
+      final isAddress =
+          placeTypes is List &&
+          placeTypes.any((type) => type?.toString() == 'address');
+      final hasNumber =
+          rawFeature['address']?.toString().trim().isNotEmpty == true;
+      final text = rawFeature['text']?.toString();
+      final hasStreetAndNumber =
+          text?.trim().isNotEmpty == true &&
+          _extractNumberFromPlaceName(rawFeature, text) != null;
+
+      if (isAddress || hasNumber || hasStreetAndNumber) return rawFeature;
+    }
+
+    for (final rawFeature in features) {
+      if (rawFeature is Map<String, dynamic>) return rawFeature;
+    }
+
+    return <String, dynamic>{};
+  }
+
+  String? _mapboxComplement(Map<String, dynamic> feature) {
+    final properties = feature['properties'];
+    if (properties is Map<String, dynamic>) {
+      for (final key in const ['unit', 'suite', 'building', 'name']) {
+        final value = properties[key]?.toString().trim();
+        if (value != null && value.isNotEmpty) return value;
+      }
+    }
+    return null;
+  }
+
+  String? _extractNumberFromFeature(
+    Map<String, dynamic> feature,
+    String? streetName,
+  ) {
+    for (final value in [
+      feature['address'],
+      feature['address_number'],
+      _nestedString(feature, const {'address_number', 'house_number'}),
+      (feature['properties'] is Map<String, dynamic>)
+          ? (feature['properties'] as Map<String, dynamic>)['address']
+          : null,
+      (feature['properties'] is Map<String, dynamic>)
+          ? (feature['properties'] as Map<String, dynamic>)['address_number']
+          : null,
+      (feature['properties'] is Map<String, dynamic>)
+          ? (feature['properties'] as Map<String, dynamic>)['house_number']
+          : null,
+    ]) {
+      final number = _normalizeAddressNumber(value?.toString());
+      if (number != null) return number;
+    }
+
+    for (final value in [
+      feature['place_name'],
+      feature['matching_place_name'],
+      feature['text'],
+      feature['matching_text'],
+    ]) {
+      final number = _extractNumberFromAddressText(
+        value?.toString(),
+        streetName,
+      );
+      if (number != null) return number;
+    }
+
+    return null;
+  }
+
+  String? _streetFromAddressText(String? value, String? number) {
+    final text = value?.trim();
+    if (text == null || text.isEmpty) return null;
+
+    final parts = text
+        .split(',')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return null;
+
+    final numberText = number?.trim();
+    for (final part in parts.take(3)) {
+      if (numberText != null && part == numberText) continue;
+      final withoutNumber = numberText == null
+          ? part
+          : part
+                .replaceFirst(
+                  RegExp(
+                    '^${RegExp.escape(numberText)}\\s+',
+                    caseSensitive: false,
+                  ),
+                  '',
+                )
+                .replaceFirst(
+                  RegExp(
+                    '\\s*,?\\s*${RegExp.escape(numberText)}\$',
+                    caseSensitive: false,
+                  ),
+                  '',
+                )
+                .trim();
+      if (withoutNumber.isNotEmpty &&
+          RegExp(
+            r'\b(rua|avenida|av\.?|estrada|travessa|praça|rodovia|alameda)\b',
+            caseSensitive: false,
+          ).hasMatch(withoutNumber)) {
+        return withoutNumber;
+      }
+    }
+
+    return parts.first;
+  }
+
+  String? _nestedString(dynamic value, Set<String> keys, [int depth = 0]) {
+    if (depth > 4) return null;
+    if (value is Map) {
+      for (final entry in value.entries) {
+        final key = entry.key?.toString().toLowerCase();
+        if (key != null && keys.contains(key)) {
+          final text = entry.value?.toString().trim();
+          if (text != null && text.isNotEmpty && text != '{}') return text;
+        }
+      }
+      for (final entry in value.entries) {
+        final found = _nestedString(entry.value, keys, depth + 1);
+        if (found != null) return found;
+      }
+    }
+    if (value is List) {
+      for (final item in value) {
+        final found = _nestedString(item, keys, depth + 1);
+        if (found != null) return found;
+      }
+    }
+    return null;
+  }
+
+  String? _extractNumberFromPlaceName(
+    Map<String, dynamic> feature,
+    String? streetName,
+  ) {
+    return _extractNumberFromAddressText(
+      feature['place_name']?.toString(),
+      streetName,
+    );
+  }
+
+  String? _extractNumberFromAddressText(String? value, String? streetName) {
+    final placeName = value?.trim();
+    if (placeName == null || placeName.isEmpty) return null;
+
+    final street = streetName?.trim();
+    if (street != null && street.isNotEmpty) {
+      final escapedStreet = RegExp.escape(street);
+      for (final pattern in [
+        '$escapedStreet\\s*,\\s*([^,]+)',
+        '$escapedStreet\\s+(\\d{1,5}[a-zA-Z]?(?:[-/]\\d{1,5})?)\\b',
+        '\\b(\\d{1,5}[a-zA-Z]?(?:[-/]\\d{1,5})?)\\s+$escapedStreet\\b',
+      ]) {
+        final match = RegExp(
+          pattern,
+          caseSensitive: false,
+        ).firstMatch(placeName);
+        final number = _normalizeAddressNumber(match?.group(1));
+        if (number != null) return number;
+      }
+    }
+
+    final parts = placeName.split(',').map((part) => part.trim()).take(3);
+    for (final part in parts) {
+      final number = _normalizeAddressNumber(part);
+      if (number != null) return number;
+    }
+
+    final firstNumber = RegExp(
+      r'\b\d{1,5}[a-zA-Z]?(?:[-/]\d{1,5})?\b',
+    ).firstMatch(placeName);
+    return _normalizeAddressNumber(firstNumber?.group(0));
+  }
+
+  String? _normalizeAddressNumber(String? value) {
+    final text = value?.trim();
+    if (text == null || text.isEmpty) return null;
+
+    final match = RegExp(
+      r'^\s*(?:n[ºo.]?\s*)?(\d{1,5}[a-zA-Z]?(?:[-/]\d{1,5})?)\s*$',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (match == null) return null;
+
+    final number = match.group(1);
+    if (number == null || RegExp(r'^\d{5}-?\d{3}$').hasMatch(number)) {
+      return null;
+    }
+    return number;
   }
 
   String? _firstAddressValue(Map<String, dynamic> address, List<String> keys) {

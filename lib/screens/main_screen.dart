@@ -255,7 +255,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 child: Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(26),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.25),
@@ -278,67 +278,111 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                     ],
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: SizedBox(
-                      height: 66,
-                      child: BottomNavigationBar(
-                        currentIndex: _currentIndex < 0
-                            ? 0
-                            : _currentIndex, // Garante índice válido
-                        onTap: _onTabTapped,
-                        type: BottomNavigationBarType.fixed,
-                        backgroundColor: Colors.white,
-                        selectedItemColor: _currentIndex < 0
-                            ? Colors.grey[600]
-                            : Colors.black,
-                        unselectedItemColor: Colors.grey[600],
-                        selectedFontSize: _currentIndex < 0 ? 10 : 11,
-                        unselectedFontSize: 10,
-                        iconSize: 24,
-                        selectedLabelStyle: TextStyle(
-                          fontWeight: _currentIndex < 0
-                              ? FontWeight.w400
-                              : FontWeight.w600,
-                          height: 1.2,
-                        ),
-                        unselectedLabelStyle: const TextStyle(
-                          fontWeight: FontWeight.w400,
-                          height: 1.2,
-                        ),
-                        elevation: 0,
-                        items: [
-                          const BottomNavigationBarItem(
-                            icon: Icon(Icons.home_outlined),
-                            activeIcon: Icon(Icons.home),
-                            label: 'Início',
-                          ),
-                          const BottomNavigationBarItem(
-                            icon: Icon(Icons.local_offer_outlined),
-                            activeIcon: Icon(Icons.local_offer),
-                            label: 'Descontos',
-                          ),
-                          BottomNavigationBarItem(
-                            icon: NotificationBellNavbar(key: _notificationKey),
-                            label: 'Notificações',
-                          ),
-                          const BottomNavigationBarItem(
-                            icon: Icon(Icons.shopping_bag_outlined),
-                            activeIcon: Icon(Icons.shopping_bag),
-                            label: 'Pedidos',
-                          ),
-                          const BottomNavigationBarItem(
-                            icon: Icon(Icons.person_outline),
-                            activeIcon: Icon(Icons.person),
-                            label: 'Perfil',
-                          ),
-                        ],
-                      ),
-                    ),
+                    borderRadius: BorderRadius.circular(26),
+                    child: _buildCustomNavbar(),
                   ),
                 ),
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCustomNavbar() {
+    return SizedBox(
+      height: 60,
+      child: Row(
+        children: [
+          _buildNavbarItem(
+            index: 0,
+            label: 'Início',
+            icon: Icons.home_outlined,
+            activeIcon: Icons.home,
+          ),
+          _buildNavbarItem(
+            index: 1,
+            label: 'Descontos',
+            icon: Icons.local_offer_outlined,
+            activeIcon: Icons.local_offer,
+          ),
+          _buildNavbarItem(
+            index: 2,
+            label: 'Notificações',
+            customIcon: NotificationBellNavbar(key: _notificationKey),
+          ),
+          _buildNavbarItem(
+            index: 3,
+            label: 'Pedidos',
+            icon: Icons.shopping_bag_outlined,
+            activeIcon: Icons.shopping_bag,
+          ),
+          _buildNavbarItem(
+            index: 4,
+            label: 'Perfil',
+            icon: Icons.person_outline,
+            activeIcon: Icons.person,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavbarItem({
+    required int index,
+    required String label,
+    IconData? icon,
+    IconData? activeIcon,
+    Widget? customIcon,
+  }) {
+    final selected = _currentIndex == index;
+    final color = selected ? Colors.black : Colors.grey[600]!;
+
+    final IconData? resolvedIcon;
+    if (selected) {
+      resolvedIcon = activeIcon ?? icon;
+    } else {
+      resolvedIcon = icon;
+    }
+    final iconWidget = customIcon ?? Icon(resolvedIcon, size: 25);
+
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _onTabTapped(index),
+          child: IconTheme(
+            data: IconThemeData(color: color, size: 25),
+            child: SizedBox(
+              width: double.infinity,
+              height: 60,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(height: 25, child: Center(child: iconWidget)),
+                    const SizedBox(height: 3),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: selected ? 11 : 10,
+                        height: 1,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

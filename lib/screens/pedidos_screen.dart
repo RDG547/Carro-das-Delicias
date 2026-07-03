@@ -238,6 +238,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
           'cliente_nome': pedidoAtualizado['cliente_nome'],
           'cliente_telefone': pedidoAtualizado['cliente_telefone'],
           'endereco_completo': pedidoAtualizado['endereco_completo'],
+          'numero': pedidoAtualizado['numero'],
+          'complemento': pedidoAtualizado['complemento'],
           'bairro': pedidoAtualizado['bairro'],
           'cidade': pedidoAtualizado['cidade'],
           'cep': pedidoAtualizado['cep'],
@@ -363,6 +365,8 @@ class _PedidosScreenState extends State<PedidosScreen> {
             'cliente_nome': pedido['cliente_nome'],
             'cliente_telefone': pedido['cliente_telefone'],
             'endereco_completo': pedido['endereco_completo'],
+            'numero': pedido['numero'],
+            'complemento': pedido['complemento'],
             'bairro': pedido['bairro'],
             'cidade': pedido['cidade'],
             'cep': pedido['cep'],
@@ -1176,6 +1180,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
     final isGuestMode = user == null;
     final adminProvider = AdminStatusProvider.of(context);
     final isAdmin = adminProvider?.isAdmin ?? false;
+    final bottomListPadding = 86.0 + MediaQuery.viewPaddingOf(context).bottom;
 
     return BaseScreen(
       title: 'Meus Pedidos',
@@ -1216,7 +1221,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
               onRefresh: _loadPedidos,
               child: ListView.builder(
                 addRepaintBoundaries: true,
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                padding: EdgeInsets.fromLTRB(16, 16, 16, bottomListPadding),
                 itemCount: _pedidos.length,
                 itemBuilder: (context, index) {
                   final pedido = _pedidos[index];
@@ -2032,6 +2037,45 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     );
   }
 
+  String _streetWithNumber() {
+    final street = widget.pedido['endereco_completo']?.toString().trim() ?? '';
+    final number = widget.pedido['numero']?.toString().trim() ?? '';
+    if (street.isEmpty) return 'Não informado';
+    if (number.isEmpty) return street;
+
+    final escapedNumber = RegExp.escape(number);
+    final alreadyHasNumber = RegExp(
+      '(?:,\\s*|\\s+)$escapedNumber\$',
+      caseSensitive: false,
+    ).hasMatch(street);
+
+    return alreadyHasNumber ? street : '$street, $number';
+  }
+
+  String _deliveryAddressDetails() {
+    final lines = <String>[_streetWithNumber()];
+
+    final complemento = widget.pedido['complemento']?.toString().trim();
+    if (complemento != null && complemento.isNotEmpty) {
+      lines.add('Complemento: $complemento');
+    }
+
+    final bairro = widget.pedido['bairro']?.toString().trim();
+    if (bairro != null && bairro.isNotEmpty) {
+      lines.add('Bairro: $bairro');
+    }
+
+    final cidade = widget.pedido['cidade']?.toString().trim();
+    final cep = widget.pedido['cep']?.toString().trim();
+    if (cidade != null && cidade.isNotEmpty) {
+      lines.add(cep == null || cep.isEmpty ? cidade : '$cidade - CEP: $cep');
+    } else if (cep != null && cep.isNotEmpty) {
+      lines.add('CEP: $cep');
+    }
+
+    return lines.join('\n');
+  }
+
   @override
   Widget build(BuildContext context) {
     final displayStatus = _resolveStatusKey(_pedidoAtual);
@@ -2108,7 +2152,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
               _buildDetailRow(
                 Icons.location_on,
                 'Endereço',
-                '${widget.pedido['endereco_completo'] ?? 'Não informado'}${widget.pedido['bairro'] != null ? '\nBairro: ${widget.pedido['bairro']}' : ''}${widget.pedido['cidade'] != null ? '\n${widget.pedido['cidade']}' : ''}${widget.pedido['cep'] != null ? ' - CEP: ${widget.pedido['cep']}' : ''}',
+                _deliveryAddressDetails(),
                 Colors.orange,
               ),
               const SizedBox(height: 12),
@@ -2139,35 +2183,55 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
               ],
 
               const SizedBox(height: 12),
-              TextField(
-                controller: _observacaoController,
-                minLines: 2,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  labelText: 'Observação do pedido',
-                  hintText: 'Ex: Corrigir complemento, referência, contato...',
-                  prefixIcon: const Icon(Icons.edit_note),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _observacaoController,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: 'Observação do pedido',
+                        hintText: 'Ex: referência, contato...',
+                        prefixIcon: const Icon(Icons.edit_note),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: OutlinedButton.icon(
-                  onPressed: _isSavingObservacao
-                      ? null
-                      : _salvarObservacaoPedido,
-                  icon: _isSavingObservacao
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_outlined),
-                  label: Text(_isSavingObservacao ? 'Salvando...' : 'Salvar'),
-                ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 48,
+                    height: 56,
+                    child: IconButton.filled(
+                      onPressed: _isSavingObservacao
+                          ? null
+                          : _salvarObservacaoPedido,
+                      icon: _isSavingObservacao
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.send_outlined, size: 18),
+                      tooltip: 'Enviar',
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.blue[100],
+                        disabledForegroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
 
               const Divider(height: 24),

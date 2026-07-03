@@ -24,6 +24,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
+  final _addressNumberController = TextEditingController();
   final _complementController = TextEditingController();
   final _neighborhoodController = TextEditingController();
   final _cityController = TextEditingController();
@@ -148,6 +149,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     _nameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
+    _addressNumberController.dispose();
     _complementController.dispose();
     _neighborhoodController.dispose();
     _cityController.dispose();
@@ -191,6 +193,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               response['phone'] ?? '',
             );
             _addressController.text = response['address'] ?? '';
+            _addressNumberController.text = response['address_number'] ?? '';
             _complementController.text = response['complement'] ?? '';
             _neighborhoodController.text = response['neighborhood'] ?? '';
             _cityController.text = response['city'] ?? '';
@@ -289,6 +292,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           final profileDataWithAddress = {
             ...profileData,
             'address': _addressController.text.trim(),
+            'address_number': _addressNumberController.text.trim(),
             'complement': _complementController.text.trim(),
             'neighborhood': _neighborhoodController.text.trim(),
             'city': _cityController.text.trim(),
@@ -357,6 +361,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         _userProfile?['phone'] ?? '',
       );
       _addressController.text = _userProfile?['address'] ?? '';
+      _addressNumberController.text = _userProfile?['address_number'] ?? '';
       _complementController.text = _userProfile?['complement'] ?? '';
       _neighborhoodController.text = _userProfile?['neighborhood'] ?? '';
       _cityController.text = _userProfile?['city'] ?? '';
@@ -834,7 +839,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     final keyboardVisible = _keyboardVisible;
     final bottomPadding = keyboardVisible
         ? 140.0
-        : 132.0 + MediaQuery.viewPaddingOf(context).bottom;
+        : 82.0 + MediaQuery.viewPaddingOf(context).bottom;
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -890,7 +895,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     final keyboardVisible = _keyboardVisible;
     final bottomPadding = keyboardVisible
         ? 140.0
-        : 132.0 + MediaQuery.viewPaddingOf(context).bottom;
+        : 82.0 + MediaQuery.viewPaddingOf(context).bottom;
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -965,6 +970,17 @@ class _ProfileScreenState extends State<ProfileScreen>
                   controller: _addressController,
                   labelText: 'Endereço Completo',
                   prefixIcon: Icons.home,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              AbsorbPointer(
+                absorbing: !_isEditing,
+                child: AnimatedTextField(
+                  controller: _addressNumberController,
+                  labelText: 'Número',
+                  prefixIcon: Icons.door_front_door_outlined,
+                  keyboardType: TextInputType.streetAddress,
                 ),
               ),
               const SizedBox(height: 16),

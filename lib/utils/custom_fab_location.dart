@@ -10,8 +10,8 @@ class CustomFabLocation extends FloatingActionButtonLocation {
     // Calcula o padding inferior do dispositivo (notch, barra de navegação, etc)
     final bottomPadding = scaffoldGeometry.minInsets.bottom;
 
-    // Altura da navbar (80px) + margem maior (32px) + padding do dispositivo
-    final bottomOffset = 80.0 + 32.0 + bottomPadding;
+    // Altura da navbar compacta + margem visual acima dela + padding do dispositivo.
+    final bottomOffset = 60.0 + 50.0 + bottomPadding;
 
     // Posiciona no canto direito
     final double fabX =

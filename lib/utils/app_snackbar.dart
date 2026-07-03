@@ -44,7 +44,7 @@ class AppSnackBar {
     required String message,
     required VoidCallback onViewCart,
     bool avoidAdminFab = false,
-    double bottomSpacing = 110,
+    double bottomSpacing = 92,
     Duration duration = const Duration(seconds: 3),
   }) {
     final mediaQuery = MediaQuery.of(context);
@@ -118,7 +118,7 @@ class AppSnackBar {
     Color backgroundColor = Colors.black87,
     Duration duration = const Duration(seconds: 2),
     bool avoidAdminFab = false,
-    double bottomSpacing = 110,
+    double bottomSpacing = 92,
   }) {
     final mediaQuery = MediaQuery.of(context);
     final messenger = ScaffoldMessenger.of(context);

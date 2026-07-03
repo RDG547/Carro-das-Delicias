@@ -21,9 +21,7 @@ class NotificationService {
     // Solicitar permissões de notificação (obrigatório no Android 13+)
     await PermissionService.requestNotificationPermissions();
 
-    const androidSettings = AndroidInitializationSettings(
-      '@mipmap/ic_launcher',
-    );
+    const androidSettings = AndroidInitializationSettings('ic_stat_car');
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -221,7 +219,8 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       showWhen: true,
-      icon: '@mipmap/ic_launcher',
+      icon: 'ic_stat_car',
+      largeIcon: DrawableResourceAndroidBitmap('notification_app_icon'),
     );
 
     const iosDetails = DarwinNotificationDetails(

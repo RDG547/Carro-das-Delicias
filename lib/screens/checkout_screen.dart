@@ -68,6 +68,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   final _nomeController = TextEditingController();
   final _telefoneController = TextEditingController();
   final _enderecoController = TextEditingController();
+  final _numeroController = TextEditingController();
   final _complementoController = TextEditingController();
   final _bairroController = TextEditingController();
   final _cidadeController = TextEditingController();
@@ -207,6 +208,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     _nomeController.dispose();
     _telefoneController.dispose();
     _enderecoController.dispose();
+    _numeroController.dispose();
     _complementoController.dispose();
     _bairroController.dispose();
     _cidadeController.dispose();
@@ -247,6 +249,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
   void _addDeliveryAddressListeners() {
     _enderecoController.addListener(_scheduleDeliveryAreaValidation);
+    _numeroController.addListener(_scheduleDeliveryAreaValidation);
     _bairroController.addListener(_scheduleDeliveryAreaValidation);
     _cidadeController.addListener(_scheduleDeliveryAreaValidation);
     _cepController.addListener(_scheduleDeliveryAreaValidation);
@@ -254,6 +257,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
   void _removeDeliveryAddressListeners() {
     _enderecoController.removeListener(_scheduleDeliveryAreaValidation);
+    _numeroController.removeListener(_scheduleDeliveryAreaValidation);
     _bairroController.removeListener(_scheduleDeliveryAreaValidation);
     _cidadeController.removeListener(_scheduleDeliveryAreaValidation);
     _cepController.removeListener(_scheduleDeliveryAreaValidation);
@@ -262,6 +266,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   bool _hasEnoughAddressForDeliveryAreaValidation() {
     final cepDigits = _cepController.text.replaceAll(RegExp(r'[^0-9]'), '');
     return _enderecoController.text.trim().isNotEmpty &&
+        _numeroController.text.trim().isNotEmpty &&
         _bairroController.text.trim().isNotEmpty &&
         _cidadeController.text.trim().isNotEmpty &&
         cepDigits.length == 8;
@@ -270,11 +275,44 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   String _deliveryAreaAddressQuery() {
     final cepDigits = _cepController.text.replaceAll(RegExp(r'[^0-9]'), '');
     return [
-      _enderecoController.text.trim(),
+      _deliveryStreetWithNumber(),
       _bairroController.text.trim(),
       _cidadeController.text.trim(),
       cepDigits,
     ].where((part) => part.isNotEmpty).join(', ');
+  }
+
+  String _deliveryStreetWithNumber() {
+    final street = _enderecoController.text.trim();
+    final number = _numeroController.text.trim();
+    if (number.isEmpty) return street;
+
+    final escapedNumber = RegExp.escape(number);
+    final alreadyHasNumber = RegExp(
+      '(?:,\\s*|\\s+)$escapedNumber\$',
+      caseSensitive: false,
+    ).hasMatch(street);
+    if (alreadyHasNumber) return street;
+
+    return '$street, $number';
+  }
+
+  ({String street, String number}) _splitStreetAndNumber(String value) {
+    final trimmed = value.trim();
+    final commaParts = trimmed.split(',');
+    if (commaParts.length > 1) {
+      final possibleNumber = commaParts.last.trim();
+      final street = commaParts
+          .sublist(0, commaParts.length - 1)
+          .join(',')
+          .trim();
+      if (street.isNotEmpty &&
+          RegExp(r'^\d+[a-zA-Z0-9/-]*$').hasMatch(possibleNumber)) {
+        return (street: street, number: possibleNumber);
+      }
+    }
+
+    return (street: trimmed, number: '');
   }
 
   void _scheduleDeliveryAreaValidation() {
@@ -315,7 +353,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Preencha endereço, bairro, cidade e CEP para validar a área de entrega.',
+                    'Preencha endereço, número, bairro, cidade e CEP para validar a área de entrega.',
                   ),
                 ),
               ],
@@ -340,7 +378,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     }
 
     final rawValidation = await _geofenceService.validarEndereco(
-      endereco: _enderecoController.text,
+      endereco: _deliveryStreetWithNumber(),
       bairro: _bairroController.text,
       cidade: _cidadeController.text,
       cep: _cepController.text,
@@ -455,7 +493,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         latitude: latitude,
         longitude: longitude,
       );
-      if (reverseAddress?.hasAnyValue == true) {
+      if (reverseAddress?.hasStreetAddress == true) {
         _applyReverseAddress(reverseAddress!);
       }
 
@@ -564,18 +602,22 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   void _applyReverseAddress(DeliveryReverseAddress address) {
     _isApplyingLocationAddress = true;
     try {
-      if (address.endereco?.trim().isNotEmpty == true) {
-        _enderecoController.text = address.endereco!.trim();
-      }
-      if (address.bairro?.trim().isNotEmpty == true) {
-        _bairroController.text = address.bairro!.trim();
-      }
-      if (address.cidade?.trim().isNotEmpty == true) {
-        _cidadeController.text = address.cidade!.trim();
-      }
-      if (address.cep?.trim().isNotEmpty == true) {
-        _cepController.text = _formatCep(address.cep!.trim());
-      }
+      final rawStreet = address.endereco?.trim() ?? '';
+      final parsedAddress = rawStreet.isEmpty
+          ? (street: '', number: '')
+          : _splitStreetAndNumber(rawStreet);
+      final rawNumber = address.numero?.trim() ?? '';
+
+      _enderecoController.text = parsedAddress.street;
+      _numeroController.text = rawNumber.isNotEmpty
+          ? rawNumber
+          : parsedAddress.number;
+      _complementoController.text = address.complemento?.trim() ?? '';
+      _bairroController.text = address.bairro?.trim() ?? '';
+      _cidadeController.text = address.cidade?.trim() ?? '';
+      _cepController.text = address.cep?.trim().isNotEmpty == true
+          ? _formatCep(address.cep!.trim())
+          : '';
     } finally {
       _isApplyingLocationAddress = false;
       _deliveryAreaDebounce?.cancel();
@@ -625,14 +667,11 @@ class _CheckoutScreenState extends State<CheckoutScreen>
       color = Colors.grey;
       icon = Icons.info_outline;
       text =
-          'Digite endereço, bairro, cidade e CEP para confirmar se atendemos à região.';
+          'Digite endereço, número, bairro, cidade e CEP para confirmar se atendemos à região.';
     } else if (validation.atende) {
       color = Colors.green;
       icon = Icons.check_circle_outline;
-      final areaName = validation.areaName;
-      text = areaName == null || areaName.isEmpty
-          ? 'Endereço dentro da área de entrega.'
-          : 'Endereço dentro da área de entrega: $areaName.';
+      text = 'Endereço dentro da área de entrega.';
     } else {
       color = Colors.red;
       icon = Icons.location_off_outlined;
@@ -711,7 +750,13 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
           // Se existir endereço salvo, preencher também
           if (response['address'] != null) {
-            _enderecoController.text = response['address'] ?? '';
+            final rawAddress = response['address']?.toString() ?? '';
+            final rawNumber = response['address_number']?.toString() ?? '';
+            final parsedAddress = rawNumber.trim().isEmpty
+                ? _splitStreetAndNumber(rawAddress)
+                : (street: rawAddress.trim(), number: rawNumber.trim());
+            _enderecoController.text = parsedAddress.street;
+            _numeroController.text = parsedAddress.number;
           }
           if (response['complement'] != null) {
             _complementoController.text = response['complement'] ?? '';
@@ -798,71 +843,6 @@ class _CheckoutScreenState extends State<CheckoutScreen>
       _troco = 0.0;
       _trocoController.clear();
     }
-  }
-
-  Future<void> _saveUserAddress() async {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
-
-    final addressData = <String, dynamic>{
-      'address': _enderecoController.text.trim(),
-      'complement': _complementoController.text.trim(),
-      'neighborhood': _bairroController.text.trim(),
-      'city': _cidadeController.text.trim(),
-      'cep': _cepController.text.replaceAll(RegExp(r'[^0-9]'), ''),
-      'updated_at': DateTime.now().toIso8601String(),
-    };
-
-    final typedName = _nomeController.text.trim();
-    if (typedName.isNotEmpty) {
-      addressData['name'] = typedName;
-    }
-
-    final typedPhone = _telefoneController.text.trim();
-    if (typedPhone.isNotEmpty) {
-      addressData['phone'] = typedPhone;
-    }
-
-    final supabase = Supabase.instance.client;
-    final updated = await supabase
-        .from('profiles')
-        .update(addressData)
-        .eq('id', user.id)
-        .select('id')
-        .limit(1);
-
-    if (updated.isNotEmpty) return;
-
-    await supabase.from('profiles').insert({
-      ...addressData,
-      'id': user.id,
-      'name': _fallbackProfileName(user),
-      'email': _fallbackProfileEmail(user),
-    });
-  }
-
-  String _fallbackProfileName(User user) {
-    final typedName = _nomeController.text.trim();
-    if (typedName.isNotEmpty) return typedName;
-
-    final metadata = user.userMetadata ?? <String, dynamic>{};
-    final metadataName = (metadata['full_name'] ?? metadata['name'])
-        ?.toString()
-        .trim();
-    if (metadataName != null && metadataName.isNotEmpty) {
-      return metadataName;
-    }
-
-    final emailName = user.email?.split('@').first.trim();
-    if (emailName != null && emailName.isNotEmpty) return emailName;
-
-    return 'Usuário';
-  }
-
-  String _fallbackProfileEmail(User user) {
-    final email = user.email?.trim().toLowerCase();
-    if (email != null && email.isNotEmpty) return email;
-    return 'sem-email-${user.id}@local.app';
   }
 
   @override
@@ -1475,14 +1455,34 @@ class _CheckoutScreenState extends State<CheckoutScreen>
             TextFormField(
               controller: _enderecoController,
               decoration: const InputDecoration(
-                labelText: 'Endereço completo *',
+                labelText: 'Endereço *',
                 prefixIcon: Icon(Icons.home),
                 border: OutlineInputBorder(),
-                hintText: 'Rua e número',
+                hintText: 'Rua, avenida...',
               ),
+              textInputAction: TextInputAction.next,
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
                   return 'Endereço é obrigatório';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+
+            TextFormField(
+              controller: _numeroController,
+              decoration: const InputDecoration(
+                labelText: 'Número *',
+                prefixIcon: Icon(Icons.door_front_door_outlined),
+                border: OutlineInputBorder(),
+                hintText: 'Número do endereço',
+              ),
+              keyboardType: TextInputType.streetAddress,
+              textInputAction: TextInputAction.next,
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Número é obrigatório';
                 }
                 return null;
               },
@@ -1572,7 +1572,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                 Expanded(
                   child: SizedBox(
                     height: 48,
-                    child: OutlinedButton.icon(
+                    child: ElevatedButton.icon(
                       onPressed: _isUsingCurrentLocation
                           ? null
                           : _validateCurrentDeviceLocation,
@@ -1580,7 +1580,10 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : const Icon(Icons.my_location, size: 20),
                       label: FittedBox(
@@ -1591,9 +1594,12 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                               : 'Usar localização',
                         ),
                       ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.orange[700],
-                        side: BorderSide(color: Colors.orange[300]!),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[700],
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.blue[200],
+                        disabledForegroundColor: Colors.white70,
+                        elevation: 2,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -1606,7 +1612,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                 Expanded(
                   child: SizedBox(
                     height: 48,
-                    child: OutlinedButton.icon(
+                    child: ElevatedButton.icon(
                       onPressed:
                           _isSelectingLocationOnMap || _isCheckingDeliveryArea
                           ? null
@@ -1615,7 +1621,10 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : const Icon(
                               Icons.add_location_alt_outlined,
@@ -1629,9 +1638,12 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                               : 'Selecionar no mapa',
                         ),
                       ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.orange[700],
-                        side: BorderSide(color: Colors.orange[300]!),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange[700],
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.orange[200],
+                        disabledForegroundColor: Colors.white70,
+                        elevation: 2,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -2163,6 +2175,239 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     return date.weekday != DateTime.saturday && date.weekday != DateTime.sunday;
   }
 
+  Future<DateTime?> _showDeliveryDatePicker({
+    required DateTime initialDate,
+    required DateTime firstDate,
+    required DateTime lastDate,
+  }) {
+    DateTime visibleMonth = DateTime(initialDate.year, initialDate.month);
+    DateTime? selectedDate = _isDataEntregaValida(initialDate)
+        ? DateTime(initialDate.year, initialDate.month, initialDate.day)
+        : null;
+    String? warning;
+
+    bool sameMonth(DateTime a, DateTime b) =>
+        a.year == b.year && a.month == b.month;
+
+    return showDialog<DateTime>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final firstMonth = DateTime(firstDate.year, firstDate.month);
+            final lastMonth = DateTime(lastDate.year, lastDate.month);
+            final canGoPrevious = visibleMonth.isAfter(firstMonth);
+            final canGoNext = visibleMonth.isBefore(lastMonth);
+            final firstDayOfMonth = DateTime(
+              visibleMonth.year,
+              visibleMonth.month,
+            );
+            final daysInMonth = DateTime(
+              visibleMonth.year,
+              visibleMonth.month + 1,
+              0,
+            ).day;
+            final leadingBlanks = firstDayOfMonth.weekday % 7;
+            final cells = <Widget>[
+              for (var index = 0; index < leadingBlanks; index++)
+                const SizedBox.shrink(),
+              for (var day = 1; day <= daysInMonth; day++)
+                Builder(
+                  builder: (context) {
+                    final date = DateTime(
+                      visibleMonth.year,
+                      visibleMonth.month,
+                      day,
+                    );
+                    final outOfRange =
+                        date.isBefore(firstDate) || date.isAfter(lastDate);
+                    final weekend = !_isDataEntregaValida(date);
+                    final selected =
+                        selectedDate != null && sameMonth(selectedDate!, date)
+                        ? selectedDate!.day == date.day
+                        : false;
+                    final disabled = outOfRange || weekend;
+
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: outOfRange
+                          ? null
+                          : () {
+                              if (weekend) {
+                                setDialogState(() {
+                                  warning =
+                                      'Não realizamos entregas aos sábados e domingos, pois trabalhamos com produtos frescos.';
+                                });
+                                return;
+                              }
+                              setDialogState(() {
+                                warning = null;
+                                selectedDate = date;
+                              });
+                            },
+                      child: Center(
+                        child: Container(
+                          width: 34,
+                          height: 34,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? Colors.orange[700]
+                                : weekend
+                                ? Colors.grey[200]
+                                : Colors.transparent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            day.toString(),
+                            style: TextStyle(
+                              color: selected
+                                  ? Colors.white
+                                  : disabled
+                                  ? Colors.grey[400]
+                                  : Colors.black,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ];
+
+            return AlertDialog(
+              title: const Text('Escolha a data de entrega'),
+              content: SizedBox(
+                width: 340,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: canGoPrevious
+                              ? () => setDialogState(() {
+                                  visibleMonth = DateTime(
+                                    visibleMonth.year,
+                                    visibleMonth.month - 1,
+                                  );
+                                  warning = null;
+                                })
+                              : null,
+                          icon: const Icon(Icons.chevron_left),
+                        ),
+                        Expanded(
+                          child: Text(
+                            _formatMonthYear(visibleMonth),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: canGoNext
+                              ? () => setDialogState(() {
+                                  visibleMonth = DateTime(
+                                    visibleMonth.year,
+                                    visibleMonth.month + 1,
+                                  );
+                                  warning = null;
+                                })
+                              : null,
+                          icon: const Icon(Icons.chevron_right),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Row(
+                      children: [
+                        Expanded(child: Center(child: Text('D'))),
+                        Expanded(child: Center(child: Text('S'))),
+                        Expanded(child: Center(child: Text('T'))),
+                        Expanded(child: Center(child: Text('Q'))),
+                        Expanded(child: Center(child: Text('Q'))),
+                        Expanded(child: Center(child: Text('S'))),
+                        Expanded(child: Center(child: Text('S'))),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: 7,
+                      mainAxisSpacing: 4,
+                      crossAxisSpacing: 4,
+                      children: cells,
+                    ),
+                    if (warning != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange[200]!),
+                        ),
+                        child: Text(
+                          warning!,
+                          style: TextStyle(
+                            color: Colors.orange[900],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  onPressed: selectedDate == null
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(selectedDate),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange[700],
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Confirmar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _formatMonthYear(DateTime date) {
+    const months = [
+      '',
+      'Janeiro',
+      'Fevereiro',
+      'Março',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro',
+    ];
+    return '${months[date.month]} ${date.year}';
+  }
+
   String _formatDate(DateTime date) {
     const diasSemana = [
       '',
@@ -2263,28 +2508,10 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                       if (initialDate.isBefore(dataMinima)) {
                         initialDate = _proximaDataEntregaValida(dataMinima);
                       }
-                      final picked = await showDatePicker(
-                        context: context,
+                      final picked = await _showDeliveryDatePicker(
                         initialDate: initialDate,
                         firstDate: dataMinima,
                         lastDate: DateTime.now().add(const Duration(days: 60)),
-                        selectableDayPredicate: _isDataEntregaValida,
-                        helpText: 'Escolha a data de entrega',
-                        cancelText: 'Cancelar',
-                        confirmText: 'Confirmar',
-                        builder: (context, child) {
-                          return Theme(
-                            data: Theme.of(context).copyWith(
-                              colorScheme: ColorScheme.light(
-                                primary: Colors.orange[700]!,
-                                onPrimary: Colors.white,
-                                surface: Colors.white,
-                                onSurface: Colors.black,
-                              ),
-                            ),
-                            child: child!,
-                          );
-                        },
                       );
                       if (picked != null) {
                         setState(() => _dataEntrega = picked);
@@ -2534,6 +2761,23 @@ class _CheckoutScreenState extends State<CheckoutScreen>
       return;
     }
 
+    if (_numeroController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.error_outline, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(child: Text('Por favor, preencha o número do endereço')),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     if (_bairroController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2663,12 +2907,6 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         itens: _buildPedidoItensPayload(),
       );
 
-      try {
-        await _saveUserAddress();
-      } catch (e) {
-        debugPrint('Erro ao salvar endereço: $e');
-      }
-
       if (isOnlinePayment) {
         await _cartService.clearCart();
         if (!mounted) return;
@@ -2737,6 +2975,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
       'cliente_nome': _nomeController.text.trim(),
       'cliente_telefone': _telefoneController.text.trim(),
       'endereco_completo': _enderecoController.text.trim(),
+      'numero': _numeroController.text.trim(),
       'complemento': _complementoController.text.trim().isEmpty
           ? null
           : _complementoController.text.trim(),

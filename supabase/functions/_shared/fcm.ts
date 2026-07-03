@@ -99,6 +99,8 @@ export async function sendPushForNotification(
               priority: "HIGH",
               notification: {
                 channel_id: "carrodasdelicias_channel",
+                icon: "ic_stat_car",
+                color: "#000000",
                 sound: "default",
                 notification_priority: "PRIORITY_HIGH",
               },
