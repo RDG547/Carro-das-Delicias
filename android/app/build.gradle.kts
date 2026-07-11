@@ -92,7 +92,7 @@ flutter {
 
 dependencies {
     // Desugaring para suportar APIs Java 8+ em versões antigas do Android
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     // Edge-to-edge support for Android 15+
     implementation("androidx.activity:activity:1.12.4")
 }

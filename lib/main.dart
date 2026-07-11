@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
+import 'services/cart_service.dart';
 import 'services/notification_service.dart';
 import 'services/remote_push_service.dart';
 import 'auth_wrapper.dart';
@@ -14,7 +15,7 @@ Future<void> main() async {
   // Inicializa o Supabase com configuração segura
   await Supabase.initialize(
     url: SupabaseConfig.url,
-    anonKey: SupabaseConfig.anonKey,
+    publishableKey: SupabaseConfig.anonKey,
     authOptions: const FlutterAuthClientOptions(
       authFlowType: AuthFlowType.pkce,
       detectSessionInUri: true,
@@ -26,6 +27,9 @@ Future<void> main() async {
 
   // Inicializa o serviço de notificações
   await NotificationService.initialize();
+
+  // Restaura o carrinho salvo localmente antes de renderizar a interface.
+  await CartService().loadCart();
 
   runApp(const MyApp());
 }

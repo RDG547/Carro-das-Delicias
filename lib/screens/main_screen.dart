@@ -11,7 +11,7 @@ import 'profile_screen.dart';
 import 'kombi_tracking_screen.dart';
 import 'admin_screen.dart';
 import 'support_legal_screen.dart';
-import '../widgets/notification_bell_navbar.dart';
+import '../widgets/cart_navbar_menu.dart';
 
 class MainScreen extends StatefulWidget {
   final bool isGuestMode;
@@ -29,7 +29,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   bool _isLoadingAdminStatus = true;
   bool _showNavbar = true; // Controla se a navbar deve ser exibida
   bool _keyboardVisible = false;
-  final GlobalKey<NotificationBellNavbarState> _notificationKey = GlobalKey();
+  final GlobalKey<CartNavbarMenuState> _cartMenuKey = GlobalKey();
 
   @override
   void initState() {
@@ -120,15 +120,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void _onTabTapped(int index) {
-    // Abrir menu de notificações quando clicar (índice 2)
+    // Abrir menu do carrinho quando clicar (índice 2)
     if (index == 2) {
-      _notificationKey.currentState?.toggleMenuFromOutside();
+      _cartMenuKey.currentState?.toggleMenuFromOutside();
       return;
     }
 
     // Mapeamento dos índices da navbar para o PageView
-    // NavBar:   0=Início, 1=Descontos, 2=Notificações(menu), 3=Pedidos, 4=Perfil
-    // PageView: 0=Início, 1=Descontos,                       2=Pedidos, 3=Perfil
+    // NavBar:   0=Início, 1=Descontos, 2=Carrinho(menu), 3=Pedidos, 4=Perfil
+    // PageView: 0=Início, 1=Descontos,                    2=Pedidos, 3=Perfil
     int pageIndex;
     if (index < 2) {
       pageIndex = index; // 0->0, 1->1
@@ -151,7 +151,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _onPageChanged(int index) {
     // Ajustar índice ao mudar página
     // PageView: 0=Início, 1=Descontos, 2=Pedidos, 3=Perfil, 4=Carrinho, 5=Rastrear Kombi, 6=Admin, 7=Ajuda
-    // NavBar: 0=Início, 1=Descontos, 2=Notificações(menu), 3=Pedidos, 4=Perfil
+    // NavBar: 0=Início, 1=Descontos, 2=Carrinho(menu), 3=Pedidos, 4=Perfil
     setState(() {
       if (index == 6) {
         // Admin (6): oculta navbar e desativa seleção
@@ -202,13 +202,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               navigateToHome: navigateToHome,
               navigateToPage: (navBarIndex) {
                 // Converter índice da navbar para índice do PageView
-                // NavBar:   0=Início, 1=Descontos, 2=Notificações(menu), 3=Pedidos, 4=Perfil
-                // PageView: 0=Início, 1=Descontos, 2=Pedidos,            3=Perfil
+                // NavBar:   0=Início, 1=Descontos, 2=Carrinho(menu), 3=Pedidos, 4=Perfil
+                // PageView: 0=Início, 1=Descontos, 2=Pedidos,         3=Perfil
                 int pageIndex;
                 if (navBarIndex < 2) {
                   pageIndex = navBarIndex; // 0->0, 1->1
                 } else if (navBarIndex == 2) {
-                  return; // Notificações não tem página
+                  return; // Carrinho abre menu na navbar
                 } else if (navBarIndex == 3) {
                   pageIndex = 2; // Pedidos: NavBar 3 -> PageView 2
                 } else {
@@ -308,8 +308,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ),
           _buildNavbarItem(
             index: 2,
-            label: 'Notificações',
-            customIcon: NotificationBellNavbar(key: _notificationKey),
+            label: 'Carrinho',
+            customIcon: CartNavbarMenu(key: _cartMenuKey),
           ),
           _buildNavbarItem(
             index: 3,

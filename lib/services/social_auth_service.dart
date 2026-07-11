@@ -29,6 +29,8 @@ class SocialAuthService {
 
   static const String _googleScopes = 'openid email profile';
   static const String _oauthRedirectTo = 'carrodasdelicias://login-callback';
+  static Future<void>? _googleSignInInitialization;
+  static String? _initializedGoogleWebClientId;
 
   static Future<SocialAuthResult> signInWithGoogle() async {
     if (kIsWeb) {
@@ -45,6 +47,20 @@ class SocialAuthService {
     try {
       await _signInWithGoogleNative(webClientId);
       return const SocialAuthResult(SocialAuthLaunchMode.native);
+    } on GoogleSignInException catch (error) {
+      if (_shouldFallbackToOAuth(error)) {
+        debugPrint(
+          'Google Sign-In nativo falhou com erro de configuração. Tentando OAuth do Supabase: $error',
+        );
+        return _signInWithGoogleOAuth();
+      }
+
+      throw Exception(_friendlyGoogleSignInError(error));
+    } on UnsupportedError catch (error) {
+      debugPrint(
+        'Google Sign-In nativo não é suportado nesta plataforma. Tentando OAuth do Supabase: $error',
+      );
+      return _signInWithGoogleOAuth();
     } on PlatformException catch (error) {
       if (_shouldFallbackToOAuth(error)) {
         debugPrint(
@@ -58,17 +74,16 @@ class SocialAuthService {
   }
 
   static Future<void> _signInWithGoogleNative(String webClientId) async {
-    final googleSignIn = GoogleSignIn(serverClientId: webClientId);
+    final googleSignIn = await _initializedGoogleSignIn(webClientId);
     await _forgetPreviousGoogleAccount(googleSignIn);
 
-    final googleUser = await googleSignIn.signIn();
-    if (googleUser == null) {
-      throw Exception('Login com Google cancelado.');
+    if (!googleSignIn.supportsAuthenticate()) {
+      throw UnsupportedError('GoogleSignIn.authenticate não está disponível.');
     }
 
-    final googleAuth = await googleUser.authentication;
+    final googleUser = await googleSignIn.authenticate();
+    final googleAuth = googleUser.authentication;
     final idToken = googleAuth.idToken;
-    final accessToken = googleAuth.accessToken;
 
     if (idToken == null) {
       throw Exception(
@@ -79,8 +94,37 @@ class SocialAuthService {
     await Supabase.instance.client.auth.signInWithIdToken(
       provider: OAuthProvider.google,
       idToken: idToken,
-      accessToken: accessToken,
     );
+  }
+
+  static Future<GoogleSignIn> _initializedGoogleSignIn(
+    String webClientId,
+  ) async {
+    final existingInitialization = _googleSignInInitialization;
+    if (existingInitialization != null) {
+      if (_initializedGoogleWebClientId != webClientId) {
+        debugPrint(
+          'GoogleSignIn já foi inicializado com outro Web Client ID. Mantendo a configuração inicial.',
+        );
+      }
+      await existingInitialization;
+      return GoogleSignIn.instance;
+    }
+
+    final googleSignIn = GoogleSignIn.instance;
+    _initializedGoogleWebClientId = webClientId;
+    final initialization = googleSignIn.initialize(serverClientId: webClientId);
+    _googleSignInInitialization = initialization;
+
+    try {
+      await initialization;
+    } catch (_) {
+      _googleSignInInitialization = null;
+      _initializedGoogleWebClientId = null;
+      rethrow;
+    }
+
+    return googleSignIn;
   }
 
   static Future<SocialAuthResult> _signInWithGoogleOAuth() async {
@@ -140,26 +184,34 @@ class SocialAuthService {
         !clientId.startsWith('000000000000-');
   }
 
-  static bool _shouldFallbackToOAuth(PlatformException error) {
-    final details = [
-      error.code,
-      error.message,
-      error.details?.toString(),
-    ].whereType<String>().join(' ').toLowerCase();
+  static bool _shouldFallbackToOAuth(Object error) {
+    if (error is GoogleSignInException) {
+      return switch (error.code) {
+        GoogleSignInExceptionCode.clientConfigurationError ||
+        GoogleSignInExceptionCode.providerConfigurationError ||
+        GoogleSignInExceptionCode.uiUnavailable => true,
+        _ => false,
+      };
+    }
+
+    if (error is! PlatformException) return false;
+
+    final details = _errorDetails(error).toLowerCase();
 
     return error.code == 'sign_in_failed' &&
         (details.contains('10') || details.contains('developer_error'));
   }
 
-  static String _friendlyGoogleSignInError(PlatformException error) {
-    final details = [
-      error.code,
-      error.message,
-      error.details?.toString(),
-    ].whereType<String>().join(' ');
+  static String _friendlyGoogleSignInError(Object error) {
+    final details = _errorDetails(error);
 
     if (_shouldFallbackToOAuth(error)) {
       return 'Configuração do Google Sign-In incompleta. Confira o Web Client ID, o pacote Android e os SHA-1 no Google Cloud.';
+    }
+
+    if (error is GoogleSignInException &&
+        error.code == GoogleSignInExceptionCode.canceled) {
+      return 'Login com Google cancelado.';
     }
 
     if (details.toLowerCase().contains('network')) {
@@ -167,5 +219,25 @@ class SocialAuthService {
     }
 
     return 'Não foi possível iniciar o login com Google. Tente novamente.';
+  }
+
+  static String _errorDetails(Object error) {
+    if (error is GoogleSignInException) {
+      return [
+        error.code.name,
+        error.description,
+        error.details?.toString(),
+      ].whereType<String>().join(' ');
+    }
+
+    if (error is PlatformException) {
+      return [
+        error.code,
+        error.message,
+        error.details?.toString(),
+      ].whereType<String>().join(' ');
+    }
+
+    return error.toString();
   }
 }

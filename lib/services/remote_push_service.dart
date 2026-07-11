@@ -15,6 +15,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 class RemotePushService {
   static final SupabaseClient _supabase = Supabase.instance.client;
+  static const int _maxTokenAttempts = 3;
+  static const Duration _tokenRetryDelay = Duration(seconds: 4);
   static bool _firebaseReady = false;
   static bool _initialized = false;
   static StreamSubscription<String>? _tokenRefreshSubscription;
@@ -84,7 +86,7 @@ class RemotePushService {
       );
       debugPrint('🔔 Permissão FCM: ${settings.authorizationStatus}');
 
-      final token = await FirebaseMessaging.instance.getToken();
+      final token = await _getTokenWithRetry();
       if (token == null || token.isEmpty) {
         debugPrint('⚠️ FCM não retornou token para ${user.id}');
         return;
@@ -95,11 +97,71 @@ class RemotePushService {
 
       _tokenRefreshSubscription ??= FirebaseMessaging.instance.onTokenRefresh
           .listen((newToken) {
-            unawaited(_registerToken(newToken));
+            unawaited(
+              _registerToken(newToken).catchError((error) {
+                debugPrint('⚠️ Erro ao atualizar token FCM: $error');
+              }),
+            );
           });
     } catch (error) {
       debugPrint('❌ Erro ao registrar token FCM: $error');
     }
+  }
+
+  static Future<String?> _getTokenWithRetry() async {
+    Object? lastError;
+
+    for (var attempt = 1; attempt <= _maxTokenAttempts; attempt++) {
+      try {
+        return await FirebaseMessaging.instance.getToken();
+      } catch (error) {
+        lastError = error;
+        final shouldRetry =
+            attempt < _maxTokenAttempts && _isTransientTokenError(error);
+
+        if (shouldRetry) {
+          final nextDelay = _tokenRetryDelay * attempt;
+          debugPrint(
+            '⏳ FCM ainda não retornou token '
+            '(tentativa $attempt/$_maxTokenAttempts). '
+            'Nova tentativa em ${nextDelay.inSeconds}s: ${_describeTokenError(error)}',
+          );
+        } else {
+          debugPrint(
+            '❌ Falha definitiva ao obter token FCM '
+            '(tentativa $attempt/$_maxTokenAttempts): ${_describeTokenError(error)}',
+          );
+        }
+
+        if (!shouldRetry) break;
+        await Future<void>.delayed(_tokenRetryDelay * attempt);
+      }
+    }
+
+    if (lastError != null) {
+      throw Exception(_describeTokenError(lastError));
+    }
+    return null;
+  }
+
+  static bool _isTransientTokenError(Object error) {
+    final details = _describeTokenError(error).toLowerCase();
+    return details.contains('fcm registration failed') ||
+        details.contains('service_not_available') ||
+        details.contains('timeout') ||
+        details.contains('network') ||
+        details.contains('ioexception');
+  }
+
+  static String _describeTokenError(Object error) {
+    if (error is FirebaseException) {
+      return [
+        error.plugin,
+        error.code,
+        error.message,
+      ].whereType<String>().join(' ');
+    }
+    return error.toString();
   }
 
   static Future<void> unregisterCurrentDevice() async {

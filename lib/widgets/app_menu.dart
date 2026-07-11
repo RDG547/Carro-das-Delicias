@@ -6,11 +6,12 @@ import '../widgets/main_navigation_provider.dart';
 import '../screens/login_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/support_legal_screen.dart';
-import '../services/cart_service.dart';
 import '../services/location_tracking_service.dart';
+import '../services/notification_service.dart';
 import '../services/remote_push_service.dart';
 import '../services/user_presence_service.dart';
 import '../utils/realtime_auth_utils.dart';
+import 'notification_menu_entry.dart';
 
 // ValueNotifier global para o status da Kombi (compartilhado entre todas instâncias)
 final ValueNotifier<bool> kombiOnlineStatus = ValueNotifier<bool>(false);
@@ -43,6 +44,9 @@ class _AppMenuState extends State<AppMenu> {
   static List<Map<String, dynamic>> _lastKombiRows = const [];
   static bool _isRecoveringKombiAuth = false;
   static int _kombiListenerOwners = 0;
+  int _unreadNotificationCount = 0;
+  RealtimeChannel? _notificationBadgeChannel;
+  bool _isRecoveringNotificationBadgeAuth = false;
 
   @override
   void initState() {
@@ -52,6 +56,8 @@ class _AppMenuState extends State<AppMenu> {
     );
     if (!widget.isGuestMode) {
       _loadUserAvatar();
+      _loadUnreadNotificationCount();
+      _startNotificationBadgeUpdates();
     }
 
     // Inicia o stream apenas uma vez globalmente
@@ -79,6 +85,9 @@ class _AppMenuState extends State<AppMenu> {
       debugPrint('🛑 AppMenu - Subscription global cancelada');
     }
 
+    _notificationBadgeChannel?.unsubscribe();
+    _notificationBadgeChannel = null;
+
     super.dispose();
   }
 
@@ -93,10 +102,10 @@ class _AppMenuState extends State<AppMenu> {
       return;
     }
 
-    // Escuta mudanças na tabela kombi_location em tempo real via websocket.
-    _globalKombiSubscription = Supabase.instance.client
-        .from('kombi_location')
-        .stream(primaryKey: ['id'])
+    // Escuta mudanças na tabela kombi_location; cai para polling se Realtime
+    // não estiver habilitado para a tabela.
+    _globalKombiSubscription = LocationTrackingService()
+        .watchAllKombis()
         .listen(
           (data) {
             final rows = data
@@ -187,6 +196,70 @@ class _AppMenuState extends State<AppMenu> {
       }
     } finally {
       _isRecoveringKombiAuth = false;
+    }
+  }
+
+  Future<void> _loadUnreadNotificationCount() async {
+    if (widget.isGuestMode) return;
+
+    try {
+      final count = await NotificationService.getUnreadCount();
+      if (mounted) {
+        setState(() => _unreadNotificationCount = count);
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar contador de notificações: $e');
+    }
+  }
+
+  void _startNotificationBadgeUpdates() {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null || widget.isGuestMode) return;
+
+    _notificationBadgeChannel?.unsubscribe();
+    _notificationBadgeChannel = Supabase.instance.client
+        .channel('app_menu_notification_badge:${user.id}:$hashCode')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: user.id,
+          ),
+          callback: (_) {
+            if (mounted) {
+              unawaited(_loadUnreadNotificationCount());
+            }
+          },
+        )
+        .subscribe((status, error) {
+          if (status == RealtimeSubscribeStatus.channelError) {
+            debugPrint('❌ AppMenu - Erro no badge de notificações: $error');
+            unawaited(_handleNotificationBadgeError(error));
+          }
+        });
+  }
+
+  Future<void> _handleNotificationBadgeError(Object? error) async {
+    if (_isRecoveringNotificationBadgeAuth || widget.isGuestMode) {
+      return;
+    }
+
+    _isRecoveringNotificationBadgeAuth = true;
+    try {
+      await RealtimeAuthUtils.recoverFromAuthError(
+        error: error,
+        source: 'app_menu_notification_badge',
+        onRecovered: () async {
+          if (!mounted) return;
+          _startNotificationBadgeUpdates();
+          await _loadUnreadNotificationCount();
+        },
+      );
+    } finally {
+      _isRecoveringNotificationBadgeAuth = false;
     }
   }
 
@@ -377,20 +450,53 @@ class _AppMenuState extends State<AppMenu> {
     );
   }
 
+  Widget _buildNotificationBadge(int count) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white, width: 1.4),
+      ),
+      child: Text(
+        count > 99 ? '99+' : count.toString(),
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+          height: 1,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = Supabase.instance.client.auth.currentUser;
 
     return PopupMenuButton<String>(
-      icon: Container(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: widget.isGuestMode ? Colors.grey[400]! : Colors.black,
-            width: 2,
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: widget.isGuestMode ? Colors.grey[400]! : Colors.black,
+                width: 2,
+              ),
+            ),
+            child: _buildAvatar(),
           ),
-        ),
-        child: _buildAvatar(),
+          if (!widget.isGuestMode && _unreadNotificationCount > 0)
+            Positioned(
+              right: -4,
+              top: -4,
+              child: _buildNotificationBadge(_unreadNotificationCount),
+            ),
+        ],
       ),
       offset: const Offset(0, 50),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -398,6 +504,7 @@ class _AppMenuState extends State<AppMenu> {
       onOpened: () {
         if (!widget.isGuestMode) {
           unawaited(_loadUserAvatar());
+          unawaited(_loadUnreadNotificationCount());
         }
       },
       onSelected: (value) {
@@ -405,24 +512,6 @@ class _AppMenuState extends State<AppMenu> {
           _signOut(context);
         } else if (value == 'login' && widget.isGuestMode) {
           BaseScreen.pushReplacement(context, const LoginScreen());
-        } else if (value == 'cart') {
-          // Navega para o carrinho usando o PageView do MainScreen
-          final provider = MainNavigationProvider.of(context);
-          if (provider?.navigateToPageDirect != null) {
-            // Navega diretamente para índice 4 do PageView (Carrinho)
-            provider!.navigateToPageDirect!(4);
-          } else {
-            // Fallback: se não houver provider (ex: telas Admin/Tracking),
-            // volta para MainScreen e depois navega pro carrinho
-            Navigator.of(context).popUntil((route) => route.isFirst);
-            // Aguarda um frame para garantir que o MainScreen está montado
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              final newProvider = MainNavigationProvider.of(context);
-              if (newProvider?.navigateToPageDirect != null) {
-                newProvider!.navigateToPageDirect!(4);
-              }
-            });
-          }
         } else if (value == 'profile') {
           // Navega para o perfil usando o PageView do MainScreen
           final provider = MainNavigationProvider.of(context);
@@ -547,84 +636,6 @@ class _AppMenuState extends State<AppMenu> {
           ),
         ),
 
-        // Opção Carrinho
-        if (!widget.isGuestMode)
-          PopupMenuItem(
-            value: 'cart',
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  Stack(
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: Colors.orange[50],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          Icons.shopping_cart_outlined,
-                          color: Colors.orange[700],
-                        ),
-                      ),
-                      ListenableBuilder(
-                        listenable: CartService(),
-                        builder: (context, child) {
-                          final itemCount = CartService().totalItems;
-                          if (itemCount == 0) {
-                            return const SizedBox.shrink();
-                          }
-
-                          return Positioned(
-                            right: 0,
-                            top: 0,
-                            child: Container(
-                              padding: const EdgeInsets.all(2),
-                              decoration: BoxDecoration(
-                                color: Colors.red,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              constraints: const BoxConstraints(
-                                minWidth: 16,
-                                minHeight: 16,
-                              ),
-                              child: Text(
-                                '$itemCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 16),
-                  const Expanded(
-                    child: Text(
-                      'Carrinho',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  Icon(
-                    Icons.arrow_forward_ios,
-                    size: 16,
-                    color: Colors.grey[600],
-                  ),
-                ],
-              ),
-            ),
-          ),
-
         // Opção Perfil
         PopupMenuItem(
           value: 'profile',
@@ -665,6 +676,17 @@ class _AppMenuState extends State<AppMenu> {
             ),
           ),
         ),
+
+        // Opção Notificações
+        if (!widget.isGuestMode)
+          NotificationMenuEntry(
+            unreadCount: _unreadNotificationCount,
+            onUnreadCountChanged: (count) {
+              if (mounted && _unreadNotificationCount != count) {
+                setState(() => _unreadNotificationCount = count);
+              }
+            },
+          ),
 
         // Opção Admin (só para admins)
         if (!widget.isGuestMode && widget.isAdmin)

@@ -2189,7 +2189,9 @@ Entre em contato conosco para fazer seu pedido!
 
     try {
       // Compartilhar usando o sistema nativo (WhatsApp, Facebook, etc.)
-      await Share.share(texto, subject: 'Produto: $nome');
+      await SharePlus.instance.share(
+        ShareParams(text: texto, subject: 'Produto: $nome'),
+      );
     } catch (e) {
       // Em caso de erro, mostrar mensagem
       if (mounted) {

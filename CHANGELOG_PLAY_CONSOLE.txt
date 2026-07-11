@@ -1,0 +1,1 @@
+Carrinho na barra inferior com acesso rapido, contador e menu completo para revisar itens, ajustar quantidades e finalizar pedidos. Notificacoes movidas para o menu do perfil com contador de pendencias. Melhorias na persistencia do carrinho, confirmacao ao limpar itens, push FCM, login social e status da Kombi.

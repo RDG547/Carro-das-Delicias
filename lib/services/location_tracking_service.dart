@@ -10,6 +10,7 @@ class LocationTrackingService {
   LocationTrackingService._internal();
 
   static const Duration onlineFreshness = Duration(minutes: 2);
+  static const Duration kombiPollingInterval = Duration(seconds: 20);
 
   Timer? _locationTimer;
   StreamSubscription<Position>? _positionStreamSubscription;
@@ -243,19 +244,57 @@ class LocationTrackingService {
 
   /// Stream de atualizações de localização em tempo real
   Stream<Map<String, dynamic>?> watchKombiLocation() {
-    return _supabase
-        .from('kombi_location')
-        .stream(primaryKey: ['id'])
-        .eq('is_online', true)
-        .map((data) {
-          final online = data.where(isKombiRecentlyOnline).toList();
-          return online.isNotEmpty ? online.first : null;
-        });
+    return watchAllKombis().map((data) {
+      final online = data.where(isKombiRecentlyOnline).toList();
+      return online.isNotEmpty ? online.first : null;
+    });
   }
 
   /// Stream de todas as Kombis (online e offline)
-  Stream<List<Map<String, dynamic>>> watchAllKombis() {
-    return _supabase.from('kombi_location').stream(primaryKey: ['id']);
+  Stream<List<Map<String, dynamic>>> watchAllKombis() async* {
+    try {
+      final initialRows = await _fetchAllKombiRows();
+      yield initialRows;
+    } catch (error) {
+      debugPrint('Erro ao carregar localização inicial da Kombi: $error');
+    }
+
+    try {
+      await for (final data in _supabase
+          .from('kombi_location')
+          .stream(primaryKey: ['id'])) {
+        yield data.map((row) => Map<String, dynamic>.from(row)).toList();
+      }
+    } catch (error) {
+      debugPrint(
+        '⚠️ Realtime da kombi_location indisponível; usando polling. '
+        'Habilite public.kombi_location no Supabase Realtime para atualizações instantâneas. '
+        'Detalhe: $error',
+      );
+      yield* _watchAllKombisByPolling();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchAllKombiRows() async {
+    final response = await _supabase
+        .from('kombi_location')
+        .select()
+        .order('updated_at', ascending: false);
+
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  Stream<List<Map<String, dynamic>>> _watchAllKombisByPolling() async* {
+    while (true) {
+      try {
+        yield await _fetchAllKombiRows();
+      } catch (error) {
+        debugPrint('Erro no polling da localização da Kombi: $error');
+        yield const <Map<String, dynamic>>[];
+      }
+
+      await Future<void>.delayed(kombiPollingInterval);
+    }
   }
 
   /// Verifica se está rastreando
