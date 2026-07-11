@@ -25,6 +25,7 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
   bool _isMenuOpen = false;
   bool _isClosingOverlay = false;
   bool _isDisposed = false;
+  bool _showClearConfirmation = false;
 
   @override
   void initState() {
@@ -117,6 +118,7 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
 
     _overlayEntry?.remove();
     _overlayEntry = null;
+    _showClearConfirmation = false;
     _isClosingOverlay = false;
     if (mounted && !_isDisposed) {
       setState(() => _isMenuOpen = false);
@@ -187,6 +189,7 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
               ),
             ),
           ),
+          if (_showClearConfirmation) _buildClearCartConfirmation(),
         ],
       ),
     );
@@ -442,59 +445,83 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
   }
 
   Future<void> _confirmClearCart() async {
-    await _removeOverlay(immediate: true);
-    if (!mounted) return;
+    _setClearConfirmationVisible(true);
+  }
 
-    final shouldClear = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Limpar carrinho', textAlign: TextAlign.center),
-        content: const Text(
-          'Tem certeza que deseja remover todos os itens do carrinho?',
+  void _setClearConfirmationVisible(bool visible) {
+    if (_showClearConfirmation == visible) return;
+    _showClearConfirmation = visible;
+    if (mounted && !_isDisposed) {
+      setState(() {});
+    }
+    _overlayEntry?.markNeedsBuild();
+  }
+
+  Future<void> _clearCartAfterConfirmation() async {
+    _setClearConfirmationVisible(false);
+    await _cartService.clearCart();
+  }
+
+  Widget _buildClearCartConfirmation() {
+    return Positioned.fill(
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.45),
+        child: InkWell(
+          onTap: () => _setClearConfirmationVisible(false),
+          child: Center(
+            child: InkWell(
+              onTap: () {},
+              child: AlertDialog(
+                title: const Text(
+                  'Limpar carrinho',
+                  textAlign: TextAlign.center,
+                ),
+                content: const Text(
+                  'Tem certeza que deseja remover todos os itens do carrinho?',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => _setClearConfirmationVisible(false),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/icons/menu/cancel_button.png',
+                          width: 18,
+                          height: 18,
+                        ),
+                        const SizedBox(width: 4),
+                        const Text('Cancelar'),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: _clearCartAfterConfirmation,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/icons/menu/delete_button.png',
+                          width: 18,
+                          height: 18,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 4),
+                        const Text('Limpar'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset(
-                  'assets/icons/menu/cancel_button.png',
-                  width: 18,
-                  height: 18,
-                ),
-                const SizedBox(width: 4),
-                const Text('Cancelar'),
-              ],
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset(
-                  'assets/icons/menu/delete_button.png',
-                  width: 18,
-                  height: 18,
-                  color: Colors.white,
-                ),
-                const SizedBox(width: 4),
-                const Text('Limpar'),
-              ],
-            ),
-          ),
-        ],
       ),
     );
-
-    if (shouldClear == true && mounted) {
-      await _cartService.clearCart();
-    }
   }
 }
 
