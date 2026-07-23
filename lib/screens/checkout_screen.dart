@@ -58,6 +58,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   final _cartService = CartService();
   final _geofenceService = DeliveryGeofenceService.instance;
   final _scrollController = ScrollController();
+  final _orderSummaryScrollController = ScrollController();
   late AnimationController _scrollIndicatorController;
   bool _showScrollIndicator = true;
   bool _hasScrolledDown = false;
@@ -74,6 +75,8 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   final _cidadeController = TextEditingController();
   final _cepController = TextEditingController();
   final _observacoesController = TextEditingController();
+  final _numeroFocusNode = FocusNode();
+  final _numeroFieldKey = GlobalKey();
 
   String _metodoPagamento = 'pix'; // Padrão é PIX
   double _troco = 0.0;
@@ -204,6 +207,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     _removeDeliveryAddressListeners();
     _cartService.removeListener(_onCartChanged);
     _scrollController.dispose();
+    _orderSummaryScrollController.dispose();
     _scrollIndicatorController.dispose();
     _nomeController.dispose();
     _telefoneController.dispose();
@@ -215,6 +219,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     _cepController.dispose();
     _observacoesController.dispose();
     _trocoController.dispose();
+    _numeroFocusNode.dispose();
     super.dispose();
   }
 
@@ -516,6 +521,9 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
       if (!validation.atende) {
         await _showDeliveryAreaUnavailableDialog(validation);
+      } else if (reverseAddress?.hasStreetAddress == true &&
+          _numeroController.text.trim().isEmpty) {
+        _focusMissingAddressNumber();
       }
     } catch (error) {
       if (!mounted) return;
@@ -622,6 +630,46 @@ class _CheckoutScreenState extends State<CheckoutScreen>
       _isApplyingLocationAddress = false;
       _deliveryAreaDebounce?.cancel();
     }
+  }
+
+  void _focusMissingAddressNumber() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_scrollToAndFocusAddressNumber());
+    });
+  }
+
+  Future<void> _scrollToAndFocusAddressNumber() async {
+    if (!mounted || _numeroController.text.trim().isNotEmpty) return;
+
+    final fieldContext = _numeroFieldKey.currentContext;
+    if (fieldContext != null) {
+      await Scrollable.ensureVisible(
+        fieldContext,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+        alignment: 0.3,
+      );
+    }
+    if (!mounted || _numeroController.text.trim().isNotEmpty) return;
+
+    _numeroFocusNode.requestFocus();
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.white),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text('Falta somente o número e o complemento (opcional).'),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 4),
+      ),
+    );
   }
 
   Future<void> _showDeliveryAreaUnavailableDialog(
@@ -952,12 +1000,12 @@ class _CheckoutScreenState extends State<CheckoutScreen>
           RepaintBoundary(child: _buildDeliveryAddressSection()),
           const SizedBox(height: 24),
 
-          // Método de pagamento
-          RepaintBoundary(child: _buildPaymentMethodSection()),
-          const SizedBox(height: 24),
-
           // Agendamento de entrega
           RepaintBoundary(child: _buildScheduleSection()),
+          const SizedBox(height: 24),
+
+          // Método de pagamento
+          RepaintBoundary(child: _buildPaymentMethodSection()),
           const SizedBox(height: 24),
 
           // Observações
@@ -992,7 +1040,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
             ),
             const SizedBox(height: 16),
 
-            ..._cartService.items.map(_buildCheckoutSummaryItem),
+            _buildCheckoutSummaryItems(),
 
             const SizedBox(height: 4),
             SizedBox(
@@ -1283,12 +1331,36 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     );
   }
 
+  Widget _buildCheckoutSummaryItems() {
+    final items = _cartService.items;
+    if (items.length <= 3) {
+      return Column(children: items.map(_buildCheckoutSummaryItem).toList());
+    }
+
+    return SizedBox(
+      height: 372,
+      child: Scrollbar(
+        controller: _orderSummaryScrollController,
+        thumbVisibility: true,
+        child: ListView.builder(
+          controller: _orderSummaryScrollController,
+          primary: false,
+          itemExtent: 124,
+          padding: const EdgeInsets.only(right: 8),
+          itemCount: items.length,
+          itemBuilder: (context, index) =>
+              _buildCheckoutSummaryItem(items[index]),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCheckoutItemPlaceholder(CartItem item) {
     return Container(
       color: Colors.orange[50],
       child: Center(
         child: CategoryIconWidget(
-          icone: null,
+          icone: _resolveCheckoutCategoryIcon(item.categoriaNome, null),
           categoryName: item.categoriaNome,
           size: 24,
         ),
@@ -1470,58 +1542,34 @@ class _CheckoutScreenState extends State<CheckoutScreen>
             ),
             const SizedBox(height: 16),
 
-            TextFormField(
-              controller: _numeroController,
-              decoration: const InputDecoration(
-                labelText: 'Número *',
-                prefixIcon: Icon(Icons.door_front_door_outlined),
-                border: OutlineInputBorder(),
-                hintText: 'Número do endereço',
-              ),
-              keyboardType: TextInputType.streetAddress,
-              textInputAction: TextInputAction.next,
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Número é obrigatório';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-
-            TextFormField(
-              controller: _complementoController,
-              decoration: const InputDecoration(
-                labelText: 'Complemento',
-                prefixIcon: Icon(Icons.apartment),
-                border: OutlineInputBorder(),
-                hintText: 'Casa, bloco, apto, referência...',
-              ),
-            ),
-            const SizedBox(height: 16),
-
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  flex: 5,
+                  flex: 4,
                   child: TextFormField(
-                    controller: _bairroController,
+                    key: _numeroFieldKey,
+                    controller: _numeroController,
+                    focusNode: _numeroFocusNode,
                     decoration: const InputDecoration(
-                      labelText: 'Bairro *',
-                      prefixIcon: Icon(Icons.holiday_village),
+                      labelText: 'Número *',
+                      prefixIcon: Icon(Icons.door_front_door_outlined),
                       border: OutlineInputBorder(),
+                      hintText: 'Nº',
                     ),
+                    keyboardType: TextInputType.streetAddress,
+                    textInputAction: TextInputAction.next,
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Bairro é obrigatório';
+                        return 'Obrigatório';
                       }
                       return null;
                     },
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 Expanded(
-                  flex: 4,
+                  flex: 6,
                   child: TextFormField(
                     controller: _cepController,
                     decoration: const InputDecoration(
@@ -1549,6 +1597,33 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 16),
+
+            TextFormField(
+              controller: _complementoController,
+              decoration: const InputDecoration(
+                labelText: 'Complemento',
+                prefixIcon: Icon(Icons.apartment),
+                border: OutlineInputBorder(),
+                hintText: 'Casa, bloco, apto, referência...',
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            TextFormField(
+              controller: _bairroController,
+              decoration: const InputDecoration(
+                labelText: 'Bairro *',
+                prefixIcon: Icon(Icons.holiday_village),
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Bairro é obrigatório';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 16),
 
@@ -3023,7 +3098,6 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         'quantidade': item.quantidade,
         'preco_unitario': item.preco,
         'subtotal': item.subtotal,
-        'observacoes': item.observacoes,
         'tamanho_selecionado': item.tamanhoSelecionado,
         if (item.saborSelecionado != null)
           'sabor_selecionado': item.saborSelecionado,
@@ -3583,6 +3657,16 @@ class _CheckoutAddItemsSheetState extends State<_CheckoutAddItemsSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Text(
+                  'Quantidade',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 3),
                 _buildModalQuantityControls(productId, quantity),
                 const SizedBox(height: 7),
                 SizedBox(

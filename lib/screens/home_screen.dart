@@ -2263,6 +2263,9 @@ class _HomeScreenState extends State<HomeScreen>
                                       : Colors.pink,
                                   avoidAdminFab:
                                       !widget.isGuestMode && _isAdmin,
+                                  bottomSpacing: !widget.isGuestMode && _isAdmin
+                                      ? 70
+                                      : 92,
                                   content: Row(
                                     children: [
                                       Icon(

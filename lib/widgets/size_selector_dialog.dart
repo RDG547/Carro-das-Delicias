@@ -260,29 +260,69 @@ class _SizeSelectorDialogState extends State<SizeSelectorDialog> {
   }
 
   Widget _buildSizeDropdown() {
-    return DropdownButtonFormField<Map<String, dynamic>>(
-      initialValue: _selectedSize,
-      isExpanded: true,
-      decoration: const InputDecoration(
-        labelText: 'Tamanho',
-        prefixIcon: Icon(Icons.format_size),
-        border: OutlineInputBorder(),
-      ),
-      items: _sizes.map((size) {
-        final name = ProductVariantUtils.optionName(size) ?? 'Tamanho';
-        final price = ProductVariantUtils.toDouble(size['preco']);
-        final label = price == null
-            ? name
-            : '$name - ${CurrencyFormatter.format(price)}';
-        return DropdownMenuItem<Map<String, dynamic>>(
-          value: size,
-          child: Text(label, overflow: TextOverflow.ellipsis),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return AdaptiveDropdownMenu<Map<String, dynamic>>(
+          items: _sizes,
+          selectedItem: _selectedSize,
+          menuWidth: constraints.maxWidth,
+          itemHeight: 56,
+          maxVisibleItems: 5,
+          alwaysOpenBelow: true,
+          onSelected: (value) {
+            setState(() {
+              _selectedSize = value;
+            });
+          },
+          buttonBuilder: (context, isOpen) {
+            final name =
+                ProductVariantUtils.optionName(_selectedSize) ?? 'Tamanho';
+            final price = ProductVariantUtils.toDouble(_selectedSize?['preco']);
+            final label = price == null
+                ? name
+                : '$name - ${CurrencyFormatter.format(price)}';
+
+            return InputDecorator(
+              isFocused: isOpen,
+              decoration: InputDecoration(
+                labelText: 'Tamanho',
+                prefixIcon: const Icon(Icons.format_size),
+                suffixIcon: Icon(
+                  isOpen
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                ),
+                border: const OutlineInputBorder(),
+              ),
+              child: Text(label, overflow: TextOverflow.ellipsis),
+            );
+          },
+          itemBuilder: (context, size, isSelected) {
+            final name = ProductVariantUtils.optionName(size) ?? 'Tamanho';
+            final price = ProductVariantUtils.toDouble(size['preco']);
+            final label = price == null
+                ? name
+                : '$name - ${CurrencyFormatter.format(price)}';
+
+            return Container(
+              color: isSelected ? Colors.orange[50] : Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Row(
+                children: [
+                  const Icon(Icons.format_size, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
+                  if (isSelected)
+                    Icon(
+                      Icons.check_rounded,
+                      color: Colors.orange[700],
+                      size: 20,
+                    ),
+                ],
+              ),
+            );
+          },
         );
-      }).toList(),
-      onChanged: (value) {
-        setState(() {
-          _selectedSize = value;
-        });
       },
     );
   }

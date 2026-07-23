@@ -587,65 +587,111 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildUserProfile(User? user) {
+    final profileName = _userProfile?['name']?.toString().trim();
+    final metadataName = user?.userMetadata?['name']?.toString().trim();
+    final displayName = profileName != null && profileName.isNotEmpty
+        ? profileName
+        : metadataName != null && metadataName.isNotEmpty
+        ? metadataName
+        : 'Usuário';
+    final email = user?.email ?? '';
+    final initialSource = displayName != 'Usuário' ? displayName : email;
+    final initial = initialSource.isNotEmpty
+        ? initialSource.substring(0, 1).toUpperCase()
+        : 'U';
+    final hasUploadedImage =
+        _uploadedImageUrl != null && _uploadedImageUrl!.isNotEmpty;
+
     return Column(
       children: [
-        // Avatar e informações básicas
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Colors.black, Colors.grey],
+              colors: [Color(0xFF303030), Color(0xFF575757)],
             ),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
           ),
-          margin: const EdgeInsets.all(16),
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Avatar com upload de foto
-              Stack(
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   CircleAvatar(
-                    radius: 50,
+                    radius: 42,
                     backgroundColor: Colors.white,
                     backgroundImage: _selectedImage != null
                         ? FileImage(_selectedImage!)
-                        : _uploadedImageUrl != null
+                        : hasUploadedImage
                         ? NetworkImage(_uploadedImageUrl!)
                         : null,
-                    child: _selectedImage == null && _uploadedImageUrl == null
+                    child: _selectedImage == null && !hasUploadedImage
                         ? Text(
-                            (_userProfile?['name']?.substring(0, 1) ??
-                                    user?.userMetadata?['name']?.substring(
-                                      0,
-                                      1,
-                                    ) ??
-                                    user?.email?.substring(0, 1) ??
-                                    'U')
-                                .toUpperCase(),
+                            initial,
                             style: const TextStyle(
-                              fontSize: 36,
+                              fontSize: 32,
                               fontWeight: FontWeight.bold,
                               color: Colors.black,
                             ),
                           )
                         : null,
                   ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.blue,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                      child: IconButton(
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.email_outlined,
+                              size: 15,
+                              color: Colors.white70,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                email,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (_selectedImage != null)
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
                         onPressed: _isUploadingImage
                             ? null
-                            : _selectProfileImage,
+                            : _uploadProfileImage,
                         icon: _isUploadingImage
                             ? const SizedBox(
                                 width: 16,
@@ -655,109 +701,82 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   color: Colors.white,
                                 ),
                               )
-                            : const Icon(
-                                Icons.camera_alt,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
+                            : const Icon(Icons.check_circle_outline, size: 18),
+                        label: Text(
+                          _isUploadingImage ? 'Enviando...' : 'Confirmar',
                         ),
-                        padding: EdgeInsets.zero,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              // Botões de ação para upload de foto
-              if (_selectedImage != null) ...[
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: _isUploadingImage ? null : _uploadProfileImage,
-                      icon: _isUploadingImage
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.check, size: 18),
-                      label: Text(
-                        _isUploadingImage ? 'Enviando...' : 'Confirmar',
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green[700],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    ElevatedButton.icon(
-                      onPressed: _isUploadingImage
-                          ? null
-                          : _discardSelectedProfileImage,
-                      icon: const Icon(Icons.close, size: 18),
-                      label: const Text('Cancelar'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isUploadingImage
+                            ? null
+                            : _discardSelectedProfileImage,
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        label: const Text('Cancelar'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red[700],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                         ),
                       ),
                     ),
                   ],
-                ),
-              ] else if (_uploadedImageUrl != null &&
-                  _uploadedImageUrl!.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                TextButton.icon(
-                  onPressed: _isUploadingImage ? null : _removeProfileImage,
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  label: const Text('Remover foto'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: Colors.black.withValues(alpha: 0.25),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      side: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.45),
+                )
+              else if (hasUploadedImage)
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isUploadingImage
+                            ? null
+                            : _selectProfileImage,
+                        icon: const Icon(Icons.cameraswitch_outlined, size: 18),
+                        label: const Text('Trocar foto'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue[700],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
                       ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isUploadingImage
+                            ? null
+                            : _removeProfileImage,
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        label: const Text('Remover foto'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red[700],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                ElevatedButton.icon(
+                  onPressed: _isUploadingImage ? null : _selectProfileImage,
+                  icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+                  label: const Text('Adicionar foto'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[700],
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                 ),
-              ],
-
-              const SizedBox(height: 16),
-              Text(
-                _userProfile?['name'] ??
-                    user?.userMetadata?['name'] ??
-                    'Usuário',
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              Text(
-                user?.email ?? '',
-                style: const TextStyle(fontSize: 16, color: Colors.white70),
-              ),
             ],
           ),
         ),
@@ -789,7 +808,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.account_circle_outlined, size: 18),
+                          Icon(Icons.info_outline, size: 18),
                           SizedBox(width: 6),
                           Text(
                             'Informações\nPessoais',
@@ -947,6 +966,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   controller: _nameController,
                   labelText: 'Nome Completo',
                   prefixIcon: Icons.person,
+                  textCapitalization: TextCapitalization.words,
                 ),
               ),
               const SizedBox(height: 16),
@@ -970,6 +990,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   controller: _addressController,
                   labelText: 'Endereço Completo',
                   prefixIcon: Icons.home,
+                  textCapitalization: TextCapitalization.words,
                 ),
               ),
               const SizedBox(height: 16),
@@ -981,6 +1002,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   labelText: 'Número',
                   prefixIcon: Icons.door_front_door_outlined,
                   keyboardType: TextInputType.streetAddress,
+                  textCapitalization: TextCapitalization.words,
                 ),
               ),
               const SizedBox(height: 16),
@@ -991,6 +1013,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   controller: _complementController,
                   labelText: 'Complemento',
                   prefixIcon: Icons.apartment,
+                  textCapitalization: TextCapitalization.words,
                 ),
               ),
               const SizedBox(height: 16),
@@ -1001,6 +1024,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   controller: _neighborhoodController,
                   labelText: 'Bairro',
                   prefixIcon: Icons.holiday_village,
+                  textCapitalization: TextCapitalization.words,
                 ),
               ),
               const SizedBox(height: 16),
@@ -1011,6 +1035,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   controller: _cityController,
                   labelText: 'Cidade',
                   prefixIcon: Icons.location_city,
+                  textCapitalization: TextCapitalization.words,
                 ),
               ),
               const SizedBox(height: 16),

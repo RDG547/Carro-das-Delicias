@@ -12,7 +12,6 @@ class CartItem {
   final String? categoriaId;
   final String? categoriaNome;
   int quantidade;
-  String? observacoes;
   final bool isBuyNow; // Identifica se foi adicionado via "Comprar"
   final String? tamanhoSelecionado; // Tamanho selecionado (ex: "P", "M", "G")
   final String? saborSelecionado; // Sabor selecionado (ex: "Chocolate")
@@ -25,7 +24,6 @@ class CartItem {
     this.categoriaId,
     this.categoriaNome,
     this.quantidade = 1,
-    this.observacoes,
     this.isBuyNow = false,
     this.tamanhoSelecionado,
     this.saborSelecionado,
@@ -63,7 +61,6 @@ class CartItem {
       'categoriaId': categoriaId,
       'categoriaNome': categoriaNome,
       'quantidade': quantidade,
-      'observacoes': observacoes,
       'isBuyNow': isBuyNow,
       'tamanhoSelecionado': tamanhoSelecionado,
       'saborSelecionado': saborSelecionado,
@@ -79,7 +76,6 @@ class CartItem {
       categoriaId: json['categoriaId'],
       categoriaNome: json['categoriaNome'],
       quantidade: json['quantidade'] ?? 1,
-      observacoes: json['observacoes'],
       isBuyNow: json['isBuyNow'] ?? false,
       tamanhoSelecionado: json['tamanhoSelecionado'],
       saborSelecionado: json['saborSelecionado'],
@@ -142,7 +138,6 @@ class CartService extends ChangeNotifier {
   Future<void> addItem(
     Map<String, dynamic> produto, {
     int quantidade = 1,
-    String? observacoes,
     bool isBuyNow = false,
   }) async {
     final productId = produto['id'].toString();
@@ -183,10 +178,6 @@ class CartService extends ChangeNotifier {
     if (existingIndex >= 0 && !isBuyNow) {
       // Se existe e não é buyNow, aumentar a quantidade
       _items[existingIndex].quantidade += quantidade;
-      // Atualizar observações se fornecidas
-      if (observacoes != null && observacoes.isNotEmpty) {
-        _items[existingIndex].observacoes = observacoes;
-      }
     } else {
       // Se não existe ou é buyNow, adicionar nova entrada
       final cartItem = CartItem(
@@ -202,7 +193,6 @@ class CartService extends ChangeNotifier {
         categoriaId: produto['categoria_id']?.toString(),
         categoriaNome: produto['categoria_nome'],
         quantidade: quantidade,
-        observacoes: observacoes,
         isBuyNow: isBuyNow,
         tamanhoSelecionado: tamanhoSelecionadoString,
         saborSelecionado: saborSelecionadoString,
@@ -231,16 +221,6 @@ class CartService extends ChangeNotifier {
     final index = _items.indexWhere((item) => item.cartKey == itemKey);
     if (index >= 0) {
       _items[index].quantidade = newQuantity;
-      await _saveCart();
-      notifyListeners();
-    }
-  }
-
-  // Atualizar observações de um item
-  Future<void> updateObservations(String itemKey, String? observacoes) async {
-    final index = _items.indexWhere((item) => item.cartKey == itemKey);
-    if (index >= 0) {
-      _items[index].observacoes = observacoes;
       await _saveCart();
       notifyListeners();
     }

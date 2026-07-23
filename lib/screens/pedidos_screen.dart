@@ -217,7 +217,6 @@ class _PedidosScreenState extends State<PedidosScreen> {
             'quantidade': item['quantidade'],
             'preco': item['preco_unitario'],
             'subtotal': item['subtotal'],
-            'observacoes': item['observacoes'],
             'tamanho': tamanhoFormatado,
             'sabor': saborFormatado,
             'imagem_url': item['imagem_url'] ?? produto?['imagem_url'],
@@ -343,7 +342,6 @@ class _PedidosScreenState extends State<PedidosScreen> {
                   'quantidade': item['quantidade'],
                   'preco': item['preco_unitario'],
                   'subtotal': item['subtotal'],
-                  'observacoes': item['observacoes'],
                   'tamanho': tamanhoFormatado,
                   'sabor': saborFormatado,
                   'imagem_url': item['imagem_url'] ?? produto?['imagem_url'],
@@ -1070,7 +1068,6 @@ class _PedidosScreenState extends State<PedidosScreen> {
           await cartService.addItem(
             produtoSelecionado,
             quantidade: item['quantidade'] ?? 1,
-            observacoes: item['observacoes'],
           );
 
           itensAdicionados++;
@@ -1627,6 +1624,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
   bool _isLoadingHistorico = true;
   bool _isSavingObservacao = false;
   StreamSubscription<List<Map<String, dynamic>>>? _historicoSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _pedidoSubscription;
   late Map<String, dynamic> _pedidoAtual;
   late final TextEditingController _observacaoController;
 
@@ -1645,6 +1643,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
   @override
   void dispose() {
     _historicoSubscription?.cancel();
+    _pedidoSubscription?.cancel();
     _observacaoController.dispose();
     super.dispose();
   }
@@ -1676,7 +1675,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
   void _setupPedidoRealtimeSubscription() {
     // Escutar mudanças no pedido atual
-    Supabase.instance.client
+    _pedidoSubscription = Supabase.instance.client
         .from('pedidos')
         .stream(primaryKey: ['id'])
         .eq('id', widget.pedido['id'])
@@ -2076,6 +2075,15 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
     return lines.join('\n');
   }
 
+  bool _shouldShowHistoryObservation(dynamic rawObservation) {
+    final observation = rawObservation?.toString().trim() ?? '';
+    if (observation.isEmpty) return false;
+
+    return !observation.toLowerCase().startsWith(
+      'status alterado automaticamente',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final displayStatus = _resolveStatusKey(_pedidoAtual);
@@ -2184,19 +2192,31 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
 
               const SizedBox(height: 12),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _observacaoController,
-                      minLines: 1,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        labelText: 'Observação do pedido',
-                        hintText: 'Ex: referência, contato...',
-                        prefixIcon: const Icon(Icons.edit_note),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      height: 56,
+                      child: TextField(
+                        controller: _observacaoController,
+                        maxLines: 1,
+                        textInputAction: TextInputAction.done,
+                        decoration: InputDecoration(
+                          label: const Text(
+                            'Observação do pedido',
+                            maxLines: 2,
+                            softWrap: true,
+                            overflow: TextOverflow.visible,
+                          ),
+                          labelStyle: const TextStyle(height: 1),
+                          hintText: 'Ex: referência, contato...',
+                          prefixIcon: const Icon(Icons.edit_note),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 8,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
                       ),
                     ),
@@ -2357,18 +2377,6 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                                 color: Colors.grey[600],
                               ),
                             ),
-                            if (item['observacoes'] != null &&
-                                item['observacoes'].toString().isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                'Obs: ${item['observacoes']}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontStyle: FontStyle.italic,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ),
@@ -2476,8 +2484,9 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                                           ),
                                         ),
                                       ),
-                                    if (observacao != null &&
-                                        observacao.toString().isNotEmpty)
+                                    if (_shouldShowHistoryObservation(
+                                      observacao,
+                                    ))
                                       Padding(
                                         padding: const EdgeInsets.only(top: 4),
                                         child: Text(

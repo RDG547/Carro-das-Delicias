@@ -44,7 +44,9 @@ class _AdminScreenState extends State<AdminScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _pedidosSubscription;
   RealtimeChannel? _catalogChannel;
   RealtimeChannel? _profilesChannel;
+  RealtimeChannel? _orderDependenciesChannel;
   Timer? _catalogRefreshDebounce;
+  Timer? _ordersRefreshDebounce;
   Timer? _usersRefreshDebounce;
   Timer? _presenceRefreshTimer;
   late final VoidCallback _catalogSyncListener;
@@ -147,6 +149,7 @@ class _AdminScreenState extends State<AdminScreen>
     _searchUserController.dispose();
     _pedidosSubscription?.cancel();
     _catalogRefreshDebounce?.cancel();
+    _ordersRefreshDebounce?.cancel();
     _usersRefreshDebounce?.cancel();
     _presenceRefreshTimer?.cancel();
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
@@ -155,6 +158,9 @@ class _AdminScreenState extends State<AdminScreen>
     }
     if (_profilesChannel != null) {
       Supabase.instance.client.removeChannel(_profilesChannel!);
+    }
+    if (_orderDependenciesChannel != null) {
+      Supabase.instance.client.removeChannel(_orderDependenciesChannel!);
     }
     _isTrackingLocationNotifier.dispose();
     _userFilterNotifier.dispose();
@@ -206,8 +212,10 @@ class _AdminScreenState extends State<AdminScreen>
     }
   }
 
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadData({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() => _isLoading = true);
+    }
 
     try {
       final produtosResponse = await Supabase.instance.client
@@ -293,10 +301,103 @@ class _AdminScreenState extends State<AdminScreen>
         ).showSnackBar(SnackBar(content: Text('Erro ao carregar dados: $e')));
       }
     } finally {
-      if (mounted) {
+      if (mounted && showLoading) {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchPedidosWithProfiles() async {
+    final pedidosResponse = await Supabase.instance.client
+        .from('pedidos')
+        .select('''
+          *,
+          pedido_itens(
+            *,
+            produtos(
+              id,
+              nome,
+              preco,
+              imagem_url,
+              imagens
+            )
+          )
+        ''')
+        .order('created_at', ascending: false);
+
+    final userIds = pedidosResponse
+        .map((pedido) => pedido['user_id'])
+        .whereType<String>()
+        .toSet();
+    final profilesResponse = userIds.isNotEmpty
+        ? await Supabase.instance.client
+              .from('profiles')
+              .select()
+              .inFilter('id', userIds.toList())
+        : <Map<String, dynamic>>[];
+    final profilesMap = Map.fromEntries(
+      profilesResponse.map((profile) => MapEntry(profile['id'], profile)),
+    );
+
+    return pedidosResponse.map<Map<String, dynamic>>((pedido) {
+      return {...pedido, 'profiles': profilesMap[pedido['user_id']]};
+    }).toList();
+  }
+
+  Future<void> _loadPedidosOnly() async {
+    try {
+      final pedidos = await _fetchPedidosWithProfiles();
+      if (!mounted) return;
+      setState(() {
+        _pedidos = pedidos;
+      });
+    } catch (error) {
+      debugPrint('Erro ao atualizar pedidos: $error');
+    }
+  }
+
+  Future<void> _loadCatalogOnly() async {
+    try {
+      final produtosResponse = await Supabase.instance.client
+          .from('produtos')
+          .select('*, categorias!categoria_id(nome, icone)')
+          .order('created_at', ascending: false);
+      final categoriasResponse = await Supabase.instance.client
+          .from('categorias')
+          .select()
+          .order('ordem', ascending: true);
+      if (!mounted) return;
+
+      final categorias = List<Map<String, dynamic>>.from(categoriasResponse);
+      final categoryQuery = _searchCategoryController.text.trim().toLowerCase();
+      setState(() {
+        _produtos = produtosResponse.map<Map<String, dynamic>>((produto) {
+          final categoria = produto['categorias'] as Map<String, dynamic>?;
+          return {
+            ...produto,
+            'categoria_nome': categoria?['nome'] ?? 'Sem categoria',
+            'categoria_icone': categoria?['icone'],
+          };
+        }).toList();
+        _categorias = categorias;
+        _filteredCategorias = categoryQuery.isEmpty
+            ? List.from(categorias)
+            : categorias
+                  .where(
+                    (categoria) => (categoria['nome'] ?? '')
+                        .toString()
+                        .toLowerCase()
+                        .contains(categoryQuery),
+                  )
+                  .toList();
+      });
+    } catch (error) {
+      debugPrint('Erro ao atualizar catálogo: $error');
+    }
+  }
+
+  Future<void> _refreshAdminData() {
+    return _loadData(showLoading: false);
   }
 
   Future<List<Map<String, dynamic>>> _fetchUsuarios() async {
@@ -423,6 +524,15 @@ class _AdminScreenState extends State<AdminScreen>
   /// Configurar listener em tempo real para pedidos
   void _setupRealtimeSubscription() {
     _pedidosSubscription?.cancel();
+    if (_catalogChannel != null) {
+      Supabase.instance.client.removeChannel(_catalogChannel!);
+    }
+    if (_profilesChannel != null) {
+      Supabase.instance.client.removeChannel(_profilesChannel!);
+    }
+    if (_orderDependenciesChannel != null) {
+      Supabase.instance.client.removeChannel(_orderDependenciesChannel!);
+    }
 
     // Escutar mudanças em tempo real na tabela de pedidos
     _pedidosSubscription = Supabase.instance.client
@@ -467,6 +577,16 @@ class _AdminScreenState extends State<AdminScreen>
           callback: (_) => _scheduleUsersRefresh(),
         )
         .subscribe();
+
+    _orderDependenciesChannel = Supabase.instance.client
+        .channel('admin-order-dependency-changes')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'pedido_itens',
+          callback: (_) => _scheduleOrdersRefresh(),
+        )
+        .subscribe();
   }
 
   Future<void> _handleAdminPedidosRealtimeError(Object? error) async {
@@ -500,7 +620,16 @@ class _AdminScreenState extends State<AdminScreen>
     _catalogRefreshDebounce?.cancel();
     _catalogRefreshDebounce = Timer(const Duration(milliseconds: 500), () {
       if (mounted) {
-        _loadData();
+        unawaited(_loadCatalogOnly());
+      }
+    });
+  }
+
+  void _scheduleOrdersRefresh() {
+    _ordersRefreshDebounce?.cancel();
+    _ordersRefreshDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        unawaited(_loadPedidosOnly());
       }
     });
   }
@@ -1066,266 +1195,270 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   Widget _buildDashboardTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.dashboard_customize,
-                color: Colors.blue[700],
-                size: 28,
-              ),
-              const SizedBox(width: 10),
-              const Flexible(
-                child: Text(
-                  'Resumo do Sistema',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          // Cards de métricas
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
-              final aspectRatio = constraints.maxWidth > 600 ? 1.2 : 1.3;
-
-              return GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: crossAxisCount,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: aspectRatio,
-                children: [
-                  _buildMetricCard(
-                    'Pedidos Hoje',
-                    '${_getPedidosHoje()}',
-                    Icons.today,
-                    Colors.blue,
-                  ),
-                  _buildMetricCard(
-                    'Pedidos Pendentes',
-                    '${_pedidos.where((p) => p['status'] == 'pendente').length}',
-                    Icons.pending_actions,
-                    Colors.orange,
-                  ),
-                  _buildMetricCard(
-                    'Pedidos Entregues',
-                    '${_pedidos.where((p) => p['status'] == 'entregue').length}',
-                    Icons.check_circle,
-                    Colors.green,
-                  ),
-                  _buildMetricCard(
-                    'Faturamento Total',
-                    'R\$ ${_getFaturamentoTotal()}',
-                    Icons.attach_money,
-                    Colors.green[700]!,
-                  ),
-                ],
-              );
-            },
-          ),
-
-          const SizedBox(height: 24),
-
-          // Relatórios Detalhados
-          const Center(
-            child: Text(
-              'Relatórios Detalhados',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: Column(
+    return RefreshIndicator(
+      onRefresh: _refreshAdminData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Faturamento
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildReportCard(
-                        'Faturamento Hoje',
-                        'R\$ ${_getFaturamentoHoje()}',
-                        Icons.today,
-                        Colors.blue,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildReportCard(
-                        'Faturamento Total',
-                        'R\$ ${_getFaturamentoTotal()}',
-                        Icons.attach_money,
-                        Colors.green,
-                      ),
-                    ),
-                  ],
+                Icon(
+                  Icons.dashboard_customize,
+                  color: Colors.blue[700],
+                  size: 28,
                 ),
-                const SizedBox(height: 16),
-
-                // Estatísticas de Pedidos
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildReportCard(
-                        'Ticket Médio',
-                        'R\$ ${_getTicketMedio()}',
-                        Icons.receipt,
-                        Colors.orange,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildReportCard(
-                        'Taxa de Entrega',
-                        '${_getTaxaEntrega()}%',
-                        Icons.local_shipping,
-                        Colors.purple,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Resumo por Status
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[200]!),
+                const SizedBox(width: 10),
+                const Flexible(
+                  child: Text(
+                    'Resumo do Sistema',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Cards de métricas
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
+                final aspectRatio = constraints.maxWidth > 600 ? 1.2 : 1.3;
+
+                return GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: aspectRatio,
+                  children: [
+                    _buildMetricCard(
+                      'Pedidos Hoje',
+                      '${_getPedidosHoje()}',
+                      Icons.today,
+                      Colors.blue,
+                    ),
+                    _buildMetricCard(
+                      'Pedidos Pendentes',
+                      '${_pedidos.where((p) => p['status'] == 'pendente').length}',
+                      Icons.pending_actions,
+                      Colors.orange,
+                    ),
+                    _buildMetricCard(
+                      'Pedidos Entregues',
+                      '${_pedidos.where((p) => p['status'] == 'entregue').length}',
+                      Icons.check_circle,
+                      Colors.green,
+                    ),
+                    _buildMetricCard(
+                      'Faturamento Total',
+                      'R\$ ${_getFaturamentoTotal()}',
+                      Icons.attach_money,
+                      Colors.green[700]!,
+                    ),
+                  ],
+                );
+              },
+            ),
+
+            const SizedBox(height: 24),
+
+            // Relatórios Detalhados
+            const Center(
+              child: Text(
+                'Relatórios Detalhados',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Column(
+                children: [
+                  // Faturamento
+                  Row(
                     children: [
-                      const Text(
-                        'Resumo por Status:',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                      Expanded(
+                        child: _buildReportCard(
+                          'Faturamento Hoje',
+                          'R\$ ${_getFaturamentoHoje()}',
+                          Icons.today,
+                          Colors.blue,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildStatusSummary(
-                              'Pendentes',
-                              _pedidosReais
-                                  .where((p) => p['status'] == 'pendente')
-                                  .length,
-                              Colors.orange,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _buildStatusSummary(
-                              'Confirmados',
-                              _pedidosReais
-                                  .where((p) => p['status'] == 'confirmado')
-                                  .length,
-                              Colors.blue,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _buildStatusSummary(
-                              'Entregues',
-                              _pedidosReais
-                                  .where((p) => p['status'] == 'entregue')
-                                  .length,
-                              Colors.green,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _buildStatusSummary(
-                              'Cancelados',
-                              _pedidosReais
-                                  .where((p) => p['status'] == 'cancelado')
-                                  .length,
-                              Colors.red,
-                            ),
-                          ),
-                        ],
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildReportCard(
+                          'Faturamento Total',
+                          'R\$ ${_getFaturamentoTotal()}',
+                          Icons.attach_money,
+                          Colors.green,
+                        ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-          ),
+                  const SizedBox(height: 16),
 
-          const SizedBox(height: 24),
+                  // Estatísticas de Pedidos
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildReportCard(
+                          'Ticket Médio',
+                          'R\$ ${_getTicketMedio()}',
+                          Icons.receipt,
+                          Colors.orange,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildReportCard(
+                          'Taxa de Entrega',
+                          '${_getTaxaEntrega()}%',
+                          Icons.local_shipping,
+                          Colors.purple,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
 
-          // Ações rápidas centralizadas
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey[300]!),
+                  // Resumo por Status
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Resumo por Status:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildStatusSummary(
+                                'Pendentes',
+                                _pedidosReais
+                                    .where((p) => p['status'] == 'pendente')
+                                    .length,
+                                Colors.orange,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _buildStatusSummary(
+                                'Confirmados',
+                                _pedidosReais
+                                    .where((p) => p['status'] == 'confirmado')
+                                    .length,
+                                Colors.blue,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _buildStatusSummary(
+                                'Entregues',
+                                _pedidosReais
+                                    .where((p) => p['status'] == 'entregue')
+                                    .length,
+                                Colors.green,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _buildStatusSummary(
+                                'Cancelados',
+                                _pedidosReais
+                                    .where((p) => p['status'] == 'cancelado')
+                                    .length,
+                                Colors.red,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            child: Column(
-              children: [
-                const Text(
-                  'Ações Rápidas',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2, // 2 colunas para melhor centralização
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.2,
-                  children: [
-                    _buildActionButton(
-                      'Novo\nProduto',
-                      Icons.add_box,
-                      Colors.green,
-                      () => _showAddProductDialog(),
-                    ),
-                    _buildActionButton(
-                      'Nova\nCategoria',
-                      Icons.add_circle,
-                      Colors.blue,
-                      () => _showAddCategoryDialog(),
-                    ),
-                    _buildActionButton(
-                      'Relatórios',
-                      Icons.assessment,
-                      Colors.purple,
-                      () => _showReportsDialog(),
-                    ),
-                    _buildActionButton(
-                      'Configurações',
-                      Icons.settings,
-                      Colors.grey,
-                      () => _showSettingsDialog(),
-                    ),
-                  ],
-                ),
-              ],
+
+            const SizedBox(height: 24),
+
+            // Ações rápidas centralizadas
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'Ações Rápidas',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: 2, // 2 colunas para melhor centralização
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.2,
+                    children: [
+                      _buildActionButton(
+                        'Novo\nProduto',
+                        Icons.add_box,
+                        Colors.green,
+                        () => _showAddProductDialog(),
+                      ),
+                      _buildActionButton(
+                        'Nova\nCategoria',
+                        Icons.add_circle,
+                        Colors.blue,
+                        () => _showAddCategoryDialog(),
+                      ),
+                      _buildActionButton(
+                        'Relatórios',
+                        Icons.assessment,
+                        Colors.purple,
+                        () => _showReportsDialog(),
+                      ),
+                      _buildActionButton(
+                        'Configurações',
+                        Icons.settings,
+                        Colors.grey,
+                        () => _showSettingsDialog(),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1367,172 +1500,191 @@ class _AdminScreenState extends State<AdminScreen>
 
         // Lista de produtos
         Expanded(
-          child: _produtos.isEmpty
-              ? const Center(
-                  child: Text(
-                    'Nenhum produto encontrado',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _produtos.length,
-                  itemBuilder: (context, index) {
-                    final produto = _produtos[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: Tooltip(
-                          message: 'Toque para alterar a foto do produto',
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: () => _changeProductImage(produto),
-                              customBorder: const CircleBorder(),
-                              child: SizedBox(
-                                width: 56,
-                                height: 56,
-                                child: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    Positioned.fill(
-                                      child:
-                                          produto['imagem_url'] != null &&
-                                              produto['imagem_url']
-                                                  .toString()
-                                                  .isNotEmpty
-                                          ? ClipOval(
-                                              child: Image.network(
-                                                produto['imagem_url'],
-                                                fit: BoxFit.cover,
-                                                cacheWidth: 112,
-                                                cacheHeight: 112,
-                                                filterQuality:
-                                                    FilterQuality.medium,
-                                                errorBuilder:
-                                                    (
-                                                      context,
-                                                      error,
-                                                      stackTrace,
-                                                    ) => CircleAvatar(
-                                                      backgroundColor:
-                                                          Colors.grey[200],
-                                                      child: Text(
-                                                        produto['nome']
-                                                                ?.substring(
-                                                                  0,
-                                                                  1,
-                                                                )
-                                                                .toUpperCase() ??
-                                                            'P',
-                                                        style: const TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.bold,
+          child: RefreshIndicator(
+            onRefresh: _refreshAdminData,
+            child: _produtos.isEmpty
+                ? const CustomScrollView(
+                    physics: AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
+                          child: Text(
+                            'Nenhum produto encontrado',
+                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _produtos.length,
+                    itemBuilder: (context, index) {
+                      final produto = _produtos[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: ListTile(
+                          leading: Tooltip(
+                            message: 'Toque para alterar a foto do produto',
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () => _changeProductImage(produto),
+                                customBorder: const CircleBorder(),
+                                child: SizedBox(
+                                  width: 56,
+                                  height: 56,
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Positioned.fill(
+                                        child:
+                                            produto['imagem_url'] != null &&
+                                                produto['imagem_url']
+                                                    .toString()
+                                                    .isNotEmpty
+                                            ? ClipOval(
+                                                child: Image.network(
+                                                  produto['imagem_url'],
+                                                  fit: BoxFit.cover,
+                                                  cacheWidth: 112,
+                                                  cacheHeight: 112,
+                                                  filterQuality:
+                                                      FilterQuality.medium,
+                                                  errorBuilder:
+                                                      (
+                                                        context,
+                                                        error,
+                                                        stackTrace,
+                                                      ) => CircleAvatar(
+                                                        backgroundColor:
+                                                            Colors.grey[200],
+                                                        child: Text(
+                                                          produto['nome']
+                                                                  ?.substring(
+                                                                    0,
+                                                                    1,
+                                                                  )
+                                                                  .toUpperCase() ??
+                                                              'P',
+                                                          style:
+                                                              const TextStyle(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                              ),
                                                         ),
                                                       ),
-                                                    ),
-                                              ),
-                                            )
-                                          : CircleAvatar(
-                                              backgroundColor: Colors.grey[200],
-                                              child: Text(
-                                                produto['nome']
-                                                        ?.substring(0, 1)
-                                                        .toUpperCase() ??
-                                                    'P',
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              )
+                                            : CircleAvatar(
+                                                backgroundColor:
+                                                    Colors.grey[200],
+                                                child: Text(
+                                                  produto['nome']
+                                                          ?.substring(0, 1)
+                                                          .toUpperCase() ??
+                                                      'P',
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
                                                 ),
                                               ),
+                                      ),
+                                      Positioned(
+                                        right: -2,
+                                        bottom: -2,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(5),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: Colors.white,
+                                              width: 2,
                                             ),
-                                    ),
-                                    Positioned(
-                                      right: -2,
-                                      bottom: -2,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(5),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black,
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
+                                          ),
+                                          child: const Icon(
+                                            Icons.camera_alt,
+                                            size: 12,
                                             color: Colors.white,
-                                            width: 2,
                                           ),
                                         ),
-                                        child: const Icon(
-                                          Icons.camera_alt,
-                                          size: 12,
-                                          color: Colors.white,
-                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
                           ),
+                          title: Text(produto['nome'] ?? 'Produto'),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                CurrencyFormatter.format(
+                                  produto['preco']?.toDouble(),
+                                ),
+                              ),
+                              Text(
+                                produto['categorias']?['nome'] ??
+                                    'Sem categoria',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                          trailing: PopupMenuButton(
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit, size: 20),
+                                    SizedBox(width: 8),
+                                    Text('Editar'),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Image.asset(
+                                      'assets/icons/menu/delete_button.png',
+                                      width: 20,
+                                      height: 20,
+                                      color: Colors.red,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Excluir',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _showEditProductDialog(produto);
+                              } else if (value == 'delete') {
+                                _showDeleteConfirmation(
+                                  'produto',
+                                  produto['id'],
+                                );
+                              }
+                            },
+                          ),
                         ),
-                        title: Text(produto['nome'] ?? 'Produto'),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              CurrencyFormatter.format(
-                                produto['preco']?.toDouble(),
-                              ),
-                            ),
-                            Text(
-                              produto['categorias']?['nome'] ?? 'Sem categoria',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                        trailing: PopupMenuButton(
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(
-                              value: 'edit',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.edit, size: 20),
-                                  SizedBox(width: 8),
-                                  Text('Editar'),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Row(
-                                children: [
-                                  Image.asset(
-                                    'assets/icons/menu/delete_button.png',
-                                    width: 20,
-                                    height: 20,
-                                    color: Colors.red,
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Excluir',
-                                    style: TextStyle(color: Colors.red),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                          onSelected: (value) {
-                            if (value == 'edit') {
-                              _showEditProductDialog(produto);
-                            } else if (value == 'delete') {
-                              _showDeleteConfirmation('produto', produto['id']);
-                            }
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                      );
+                    },
+                  ),
+          ),
         ),
       ],
     );
@@ -1586,145 +1738,157 @@ class _AdminScreenState extends State<AdminScreen>
 
         // Lista de categorias
         Expanded(
-          child: _filteredCategorias.isEmpty
-              ? const Center(
-                  child: Text(
-                    'Nenhuma categoria encontrada',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
-                  ),
-                )
-              : ReorderableListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _filteredCategorias.length,
-                  proxyDecorator: (child, index, animation) {
-                    return Material(
-                      elevation: 4,
-                      borderRadius: BorderRadius.circular(12),
-                      clipBehavior: Clip.antiAlias,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width - 32,
+          child: RefreshIndicator(
+            onRefresh: _refreshAdminData,
+            child: _filteredCategorias.isEmpty
+                ? const CustomScrollView(
+                    physics: AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
+                          child: Text(
+                            'Nenhuma categoria encontrada',
+                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                          ),
                         ),
-                        child: child,
                       ),
-                    );
-                  },
-                  onReorderItem: (oldIndex, newIndex) async {
-                    setState(() {
-                      final item = _filteredCategorias.removeAt(oldIndex);
-                      _filteredCategorias.insert(newIndex, item);
-
-                      // Atualizar a lista principal também se não há filtro ativo
-                      if (_searchCategoryController.text.isEmpty) {
-                        _categorias.clear();
-                        _categorias.addAll(_filteredCategorias);
-                      }
-                    });
-
-                    // Salvar a ordem no banco de dados
-                    try {
-                      for (int i = 0; i < _filteredCategorias.length; i++) {
-                        final categoria = _filteredCategorias[i];
-                        await Supabase.instance.client
-                            .from('categorias')
-                            .update({'ordem': i})
-                            .eq('id', categoria['id']);
-                      }
-
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Ordem salva com sucesso!'),
-                            backgroundColor: Colors.green,
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Erro ao salvar ordem: $e'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        // Recarregar dados em caso de erro
-                        _loadData();
-                      }
-                    }
-                  },
-                  itemBuilder: (context, index) {
-                    final categoria = _filteredCategorias[index];
-                    return Card(
-                      key: ValueKey(categoria['id']),
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(
+                    ],
+                  )
+                : ReorderableListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _filteredCategorias.length,
+                    proxyDecorator: (child, index, animation) {
+                      return Material(
+                        elevation: 4,
                         borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ListTile(
+                        clipBehavior: Clip.antiAlias,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: MediaQuery.of(context).size.width - 32,
+                          ),
+                          child: child,
+                        ),
+                      );
+                    },
+                    onReorderItem: (oldIndex, newIndex) async {
+                      setState(() {
+                        final item = _filteredCategorias.removeAt(oldIndex);
+                        _filteredCategorias.insert(newIndex, item);
+
+                        // Atualizar a lista principal também se não há filtro ativo
+                        if (_searchCategoryController.text.isEmpty) {
+                          _categorias.clear();
+                          _categorias.addAll(_filteredCategorias);
+                        }
+                      });
+
+                      // Salvar a ordem no banco de dados
+                      try {
+                        for (int i = 0; i < _filteredCategorias.length; i++) {
+                          final categoria = _filteredCategorias[i];
+                          await Supabase.instance.client
+                              .from('categorias')
+                              .update({'ordem': i})
+                              .eq('id', categoria['id']);
+                        }
+
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Ordem salva com sucesso!'),
+                              backgroundColor: Colors.green,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Erro ao salvar ordem: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                          // Recarregar dados em caso de erro
+                          _loadData();
+                        }
+                      }
+                    },
+                    itemBuilder: (context, index) {
+                      final categoria = _filteredCategorias[index];
+                      return Card(
+                        key: ValueKey(categoria['id']),
+                        margin: const EdgeInsets.only(bottom: 12),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        leading: SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: Center(
-                            child: CategoryIconWidget(
-                              icone: categoria['icone'] ?? '📦',
-                              categoryName: categoria['nome'],
-                              size: 28,
+                        child: ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          leading: SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: Center(
+                              child: CategoryIconWidget(
+                                icone: categoria['icone'] ?? '📦',
+                                categoryName: categoria['nome'],
+                                size: 28,
+                              ),
                             ),
                           ),
-                        ),
-                        title: Text(categoria['nome'] ?? 'Categoria'),
-                        trailing: PopupMenuButton(
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(
-                              value: 'edit',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.edit, size: 20),
-                                  SizedBox(width: 8),
-                                  Text('Editar'),
-                                ],
+                          title: Text(categoria['nome'] ?? 'Categoria'),
+                          trailing: PopupMenuButton(
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit, size: 20),
+                                    SizedBox(width: 8),
+                                    Text('Editar'),
+                                  ],
+                                ),
                               ),
-                            ),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Row(
-                                children: [
-                                  Image.asset(
-                                    'assets/icons/menu/delete_button.png',
-                                    width: 20,
-                                    height: 20,
-                                    color: Colors.red,
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Excluir',
-                                    style: TextStyle(color: Colors.red),
-                                  ),
-                                ],
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Image.asset(
+                                      'assets/icons/menu/delete_button.png',
+                                      width: 20,
+                                      height: 20,
+                                      color: Colors.red,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Excluir',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
-                          onSelected: (value) {
-                            if (value == 'edit') {
-                              _showEditCategoryDialog(categoria);
-                            } else if (value == 'delete') {
-                              // Garantir que o ID seja passado como int para evitar conflito de tipos no RPC
-                              final catId = categoria['id'];
-                              final catIdInt = catId is int
-                                  ? catId
-                                  : int.parse(catId.toString());
-                              _showDeleteConfirmation('categoria', catIdInt);
-                            }
-                          },
+                            ],
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _showEditCategoryDialog(categoria);
+                              } else if (value == 'delete') {
+                                // Garantir que o ID seja passado como int para evitar conflito de tipos no RPC
+                                final catId = categoria['id'];
+                                final catIdInt = catId is int
+                                    ? catId
+                                    : int.parse(catId.toString());
+                                _showDeleteConfirmation('categoria', catIdInt);
+                              }
+                            },
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
+                      );
+                    },
+                  ),
+          ),
         ),
       ],
     );
@@ -2039,6 +2203,30 @@ class _AdminScreenState extends State<AdminScreen>
     }
   }
 
+  Future<void> _showUserUsageDetails(Map<String, dynamic> usuario) {
+    final userId = usuario['id']?.toString();
+    final initialOrders = userId == null
+        ? <Map<String, dynamic>>[]
+        : _pedidos
+              .where((pedido) => pedido['user_id']?.toString() == userId)
+              .map(Map<String, dynamic>.from)
+              .toList();
+
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => FractionallySizedBox(
+        heightFactor: 0.9,
+        child: _UserUsageDetailsSheet(
+          usuario: usuario,
+          initialOrders: initialOrders,
+        ),
+      ),
+    );
+  }
+
   Widget _buildUsuariosTab() {
     return ValueListenableBuilder<String>(
       valueListenable: _userFilterNotifier,
@@ -2117,221 +2305,249 @@ class _AdminScreenState extends State<AdminScreen>
                 ),
                 const SizedBox(height: 8),
                 Expanded(
-                  child: filteredUsuarios.isEmpty
-                      ? const Center(
-                          key: ValueKey('empty-users'),
-                          child: Text(
-                            'Nenhum usuário encontrado',
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
-                          ),
-                        )
-                      : ListView.builder(
-                          key: ValueKey('users-$selectedFilter-$searchQuery'),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: filteredUsuarios.length,
-                          itemBuilder: (context, index) {
-                            final usuario = filteredUsuarios[index];
-                            final isAdmin = usuario['role'] == 'admin';
-                            final isBanned = usuario['is_banned'] == true;
-                            final isOnline = _isUserOnline(usuario);
-                            final lastAccess = _formatLastAccess(
-                              _lastAccessValue(usuario),
-                            );
+                  child: RefreshIndicator(
+                    onRefresh: _refreshAdminData,
+                    child: filteredUsuarios.isEmpty
+                        ? const CustomScrollView(
+                            key: ValueKey('empty-users'),
+                            physics: AlwaysScrollableScrollPhysics(),
+                            slivers: [
+                              SliverFillRemaining(
+                                hasScrollBody: false,
+                                child: Center(
+                                  child: Text(
+                                    'Nenhum usuário encontrado',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : ListView.builder(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            key: ValueKey('users-$selectedFilter-$searchQuery'),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: filteredUsuarios.length,
+                            itemBuilder: (context, index) {
+                              final usuario = filteredUsuarios[index];
+                              final isAdmin = usuario['role'] == 'admin';
+                              final isBanned = usuario['is_banned'] == true;
+                              final isOnline = _isUserOnline(usuario);
+                              final lastAccess = _formatLastAccess(
+                                _lastAccessValue(usuario),
+                              );
 
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              child: ListTile(
-                                leading: _buildUserAvatar(usuario, isAdmin),
-                                title: Text(usuario['full_name'] ?? 'Usuário'),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if ((usuario['email'] ?? '')
-                                        .toString()
-                                        .isNotEmpty)
-                                      InkWell(
-                                        onTap: () => _showEmailActions(
-                                          usuario['email'].toString(),
-                                        ),
-                                        borderRadius: BorderRadius.circular(6),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 2,
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                child: ListTile(
+                                  onTap: () => _showUserUsageDetails(usuario),
+                                  leading: _buildUserAvatar(usuario, isAdmin),
+                                  title: Text(
+                                    usuario['full_name'] ?? 'Usuário',
+                                  ),
+                                  subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if ((usuario['email'] ?? '')
+                                          .toString()
+                                          .isNotEmpty)
+                                        InkWell(
+                                          onTap: () => _showEmailActions(
+                                            usuario['email'].toString(),
                                           ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.max,
-                                            children: [
-                                              Icon(
-                                                Icons.email_outlined,
-                                                size: 13,
-                                                color: Colors.blue[700],
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Flexible(
-                                                child: Text(
-                                                  usuario['email'].toString(),
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 2,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.max,
+                                              children: [
+                                                Icon(
+                                                  Icons.email_outlined,
+                                                  size: 13,
+                                                  color: Colors.blue[700],
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Flexible(
+                                                  child: Text(
+                                                    usuario['email'].toString(),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      color: Colors.blue[700],
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      Text(
+                                        isAdmin ? 'Administrador' : 'Cliente',
+                                        style: TextStyle(
+                                          color: isAdmin
+                                              ? Colors.red
+                                              : Colors.blue,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      if ((usuario['phone'] ?? '')
+                                          .toString()
+                                          .isNotEmpty)
+                                        InkWell(
+                                          onTap: () => _showPhoneActions(
+                                            usuario['phone'].toString(),
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 2,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons.phone,
+                                                  size: 13,
+                                                  color: Colors.green[700],
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  _formatPhoneBr(
+                                                    usuario['phone'].toString(),
+                                                  ),
                                                   style: TextStyle(
-                                                    color: Colors.blue[700],
+                                                    color: Colors.green[700],
                                                     fontSize: 12,
                                                     fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    Text(
-                                      isAdmin ? 'Administrador' : 'Cliente',
-                                      style: TextStyle(
-                                        color: isAdmin
-                                            ? Colors.red
-                                            : Colors.blue,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    if ((usuario['phone'] ?? '')
-                                        .toString()
-                                        .isNotEmpty)
-                                      InkWell(
-                                        onTap: () => _showPhoneActions(
-                                          usuario['phone'].toString(),
-                                        ),
-                                        borderRadius: BorderRadius.circular(6),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 2,
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                Icons.phone,
-                                                size: 13,
-                                                color: Colors.green[700],
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                _formatPhoneBr(
-                                                  usuario['phone'].toString(),
-                                                ),
-                                                style: TextStyle(
-                                                  color: Colors.green[700],
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                      Text(
+                                        isBanned ? 'Banido' : 'Ativo',
+                                        style: TextStyle(
+                                          color: isBanned
+                                              ? Colors.red
+                                              : Colors.green,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 12,
                                         ),
                                       ),
-                                    Text(
-                                      isBanned ? 'Banido' : 'Ativo',
-                                      style: TextStyle(
-                                        color: isBanned
-                                            ? Colors.red
-                                            : Colors.green,
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.circle,
-                                          size: 9,
-                                          color: isOnline
-                                              ? Colors.green
-                                              : Colors.grey,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          isOnline ? 'Online' : 'Offline',
-                                          style: TextStyle(
-                                            color: isOnline
-                                                ? Colors.green[700]
-                                                : Colors.grey[700],
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Text(
-                                      'Último acesso: $lastAccess',
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                trailing: PopupMenuButton(
-                                  itemBuilder: (context) => [
-                                    const PopupMenuItem(
-                                      value: 'edit_profile',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.edit, size: 20),
-                                          SizedBox(width: 8),
-                                          Text('Editar dados'),
-                                        ],
-                                      ),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'toggle_ban',
-                                      child: Row(
+                                      const SizedBox(height: 4),
+                                      Row(
                                         children: [
                                           Icon(
-                                            isBanned
-                                                ? Icons.verified_user
-                                                : Icons.block,
-                                            size: 20,
-                                            color: isBanned
+                                            Icons.circle,
+                                            size: 9,
+                                            color: isOnline
                                                 ? Colors.green
-                                                : Colors.orange,
+                                                : Colors.grey,
                                           ),
-                                          const SizedBox(width: 8),
-                                          Text(isBanned ? 'Desbanir' : 'Banir'),
-                                        ],
-                                      ),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'delete_user',
-                                      child: Row(
-                                        children: [
-                                          Image.asset(
-                                            'assets/icons/menu/delete_button.png',
-                                            width: 20,
-                                            height: 20,
-                                            color: Colors.red,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          const Text(
-                                            'Excluir',
-                                            style: TextStyle(color: Colors.red),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            isOnline ? 'Online' : 'Offline',
+                                            style: TextStyle(
+                                              color: isOnline
+                                                  ? Colors.green[700]
+                                                  : Colors.grey[700],
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 12,
+                                            ),
                                           ),
                                         ],
                                       ),
-                                    ),
-                                  ],
-                                  onSelected: (value) {
-                                    if (value == 'edit_profile') {
-                                      _showEditUserDialog(usuario);
-                                    } else if (value == 'toggle_ban') {
-                                      _toggleUserBan(usuario);
-                                    } else if (value == 'delete_user') {
-                                      _deleteUser(usuario);
-                                    }
-                                  },
+                                      Text(
+                                        'Último acesso: $lastAccess',
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  trailing: PopupMenuButton(
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
+                                        value: 'edit_profile',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.edit, size: 20),
+                                            SizedBox(width: 8),
+                                            Text('Editar dados'),
+                                          ],
+                                        ),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'toggle_ban',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              isBanned
+                                                  ? Icons.verified_user
+                                                  : Icons.block,
+                                              size: 20,
+                                              color: isBanned
+                                                  ? Colors.green
+                                                  : Colors.orange,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              isBanned ? 'Desbanir' : 'Banir',
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete_user',
+                                        child: Row(
+                                          children: [
+                                            Image.asset(
+                                              'assets/icons/menu/delete_button.png',
+                                              width: 20,
+                                              height: 20,
+                                              color: Colors.red,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            const Text(
+                                              'Excluir',
+                                              style: TextStyle(
+                                                color: Colors.red,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                    onSelected: (value) {
+                                      if (value == 'edit_profile') {
+                                        _showEditUserDialog(usuario);
+                                      } else if (value == 'toggle_ban') {
+                                        _toggleUserBan(usuario);
+                                      } else if (value == 'delete_user') {
+                                        _deleteUser(usuario);
+                                      }
+                                    },
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
+                              );
+                            },
+                          ),
+                  ),
                 ),
               ],
             );
@@ -4314,132 +4530,146 @@ class _AdminScreenState extends State<AdminScreen>
         ? _pedidos
         : _pedidos.where((p) => p['status'] == _selectedStatusFilter).toList();
 
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.receipt_long, color: Colors.blue[700], size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Gerenciar Pedidos',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue[700],
+    return RefreshIndicator(
+      onRefresh: _refreshAdminData,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.receipt_long,
+                        color: Colors.blue[700],
+                        size: 28,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Gerenciar Pedidos',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: _showPedidosFilterDialog,
-                        child: InputDecorator(
-                          decoration: InputDecoration(
-                            labelText: 'Filtrar pedidos',
-                            prefixIcon: const Icon(Icons.filter_list),
-                            suffixIcon: const Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                            ),
-                            filled: true,
-                            fillColor: Colors.white,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: BorderSide(color: Colors.grey[300]!),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 12,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                selectedOption['icon'] as IconData,
-                                size: 18,
-                                color: selectedOption['color'] as Color,
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: _showPedidosFilterDialog,
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              labelText: 'Filtrar pedidos',
+                              prefixIcon: const Icon(Icons.filter_list),
+                              suffixIcon: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
                               ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  selectedOption['label'] as String,
-                                  overflow: TextOverflow.ellipsis,
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide(
+                                  color: Colors.grey[300]!,
                                 ),
                               ),
-                            ],
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  selectedOption['icon'] as IconData,
+                                  size: 18,
+                                  color: selectedOption['color'] as Color,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    selectedOption['label'] as String,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (pedidosFiltrados.isEmpty)
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.receipt_long, size: 80, color: Colors.grey[400]),
-                    const SizedBox(height: 24),
-                    Text(
-                      _selectedStatusFilter == null
-                          ? 'Nenhum pedido encontrado'
-                          : 'Nenhum pedido com status "${_getStatusLabel(_selectedStatusFilter!)}" encontrado',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 18,
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _selectedStatusFilter == null
-                          ? 'Os pedidos aparecerão aqui quando forem criados'
-                          : 'Tente selecionar outro filtro ou aguarde novos pedidos',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-                    ),
-                  ],
-                ),
+                ],
               ),
             ),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                final pedido = pedidosFiltrados[index];
-                return _buildPedidoCard(pedido);
-              }, childCount: pedidosFiltrados.length),
-            ),
           ),
-      ],
+          if (pedidosFiltrados.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.receipt_long,
+                        size: 80,
+                        color: Colors.grey[400],
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        _selectedStatusFilter == null
+                            ? 'Nenhum pedido encontrado'
+                            : 'Nenhum pedido com status "${_getStatusLabel(_selectedStatusFilter!)}" encontrado',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _selectedStatusFilter == null
+                            ? 'Os pedidos aparecerão aqui quando forem criados'
+                            : 'Tente selecionar outro filtro ou aguarde novos pedidos',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final pedido = pedidosFiltrados[index];
+                  return _buildPedidoCard(pedido);
+                }, childCount: pedidosFiltrados.length),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -5379,17 +5609,6 @@ class _AdminScreenState extends State<AdminScreen>
                           ),
                         ],
                       ),
-                      if (item['observacoes'] != null &&
-                          item['observacoes'].isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'Obs: ${item['observacoes']}',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 );
@@ -6503,4 +6722,537 @@ class _AdminQuickStat {
     required this.icon,
     required this.tabIndex,
   });
+}
+
+class _UserUsageDetailsSheet extends StatefulWidget {
+  final Map<String, dynamic> usuario;
+  final List<Map<String, dynamic>> initialOrders;
+
+  const _UserUsageDetailsSheet({
+    required this.usuario,
+    required this.initialOrders,
+  });
+
+  @override
+  State<_UserUsageDetailsSheet> createState() => _UserUsageDetailsSheetState();
+}
+
+class _UserUsageDetailsSheetState extends State<_UserUsageDetailsSheet> {
+  late Map<String, dynamic> _profile;
+  late List<Map<String, dynamic>> _orders;
+  int? _favoritesCount;
+  bool _isLoading = true;
+  String? _ordersError;
+  RealtimeChannel? _usageChannel;
+  Timer? _reloadDebounce;
+
+  String get _userId => widget.usuario['id']?.toString() ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    _profile = Map<String, dynamic>.from(widget.usuario);
+    _orders = widget.initialOrders.map(Map<String, dynamic>.from).toList();
+    unawaited(_loadUsage());
+    _setupRealtime();
+  }
+
+  @override
+  void dispose() {
+    _reloadDebounce?.cancel();
+    if (_usageChannel != null) {
+      Supabase.instance.client.removeChannel(_usageChannel!);
+    }
+    super.dispose();
+  }
+
+  void _setupRealtime() {
+    if (_userId.isEmpty) return;
+
+    _usageChannel = Supabase.instance.client
+        .channel('admin-user-usage-$_userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'pedidos',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: _userId,
+          ),
+          callback: (_) => _scheduleReload(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'favoritos',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: _userId,
+          ),
+          callback: (_) => _scheduleReload(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'profiles',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: _userId,
+          ),
+          callback: (_) => _scheduleReload(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'pedido_itens',
+          callback: (_) => _scheduleReload(),
+        )
+        .subscribe();
+  }
+
+  void _scheduleReload() {
+    _reloadDebounce?.cancel();
+    _reloadDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) {
+        unawaited(_loadUsage(showLoading: false));
+      }
+    });
+  }
+
+  Future<void> _loadUsage({bool showLoading = true}) async {
+    if (_userId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _ordersError = 'Usuário sem identificador válido.';
+        });
+      }
+      return;
+    }
+
+    if (showLoading && mounted) {
+      setState(() => _isLoading = true);
+    }
+
+    var nextProfile = Map<String, dynamic>.from(_profile);
+    var nextOrders = _orders.map(Map<String, dynamic>.from).toList();
+    int? nextFavoritesCount = _favoritesCount;
+    String? nextOrdersError;
+
+    try {
+      final profileResponse = await Supabase.instance.client
+          .from('profiles')
+          .select(
+            'id, name, email, phone, role, avatar_url, is_online, '
+            'last_access_at, created_at, updated_at',
+          )
+          .eq('id', _userId)
+          .maybeSingle();
+      if (profileResponse != null) {
+        nextProfile = {...nextProfile, ...profileResponse};
+      }
+    } catch (error) {
+      debugPrint('Erro ao atualizar perfil no resumo de uso: $error');
+    }
+
+    try {
+      final ordersResponse = await Supabase.instance.client
+          .from('pedidos')
+          .select(
+            'id, user_id, status, total, metodo_pagamento, created_at, '
+            'is_teste, pedido_itens(quantidade)',
+          )
+          .eq('user_id', _userId)
+          .order('created_at', ascending: false);
+      nextOrders = List<Map<String, dynamic>>.from(ordersResponse);
+    } catch (error) {
+      debugPrint('Erro ao carregar consumo do usuário: $error');
+      nextOrdersError =
+          'Não foi possível atualizar os pedidos agora. Exibindo os últimos dados disponíveis.';
+    }
+
+    try {
+      final favoritesResponse = await Supabase.instance.client
+          .from('favoritos')
+          .select('produto_id')
+          .eq('user_id', _userId);
+      nextFavoritesCount = favoritesResponse.length;
+    } catch (error) {
+      debugPrint('Erro ao carregar favoritos do usuário: $error');
+      nextFavoritesCount = null;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _profile = nextProfile;
+      _orders = nextOrders;
+      _favoritesCount = nextFavoritesCount;
+      _ordersError = nextOrdersError;
+      _isLoading = false;
+    });
+  }
+
+  bool _isTestOrder(Map<String, dynamic> order) {
+    return order['is_teste'] == true ||
+        order['status']?.toString().toLowerCase() == 'teste';
+  }
+
+  List<Map<String, dynamic>> get _realOrders {
+    return _orders.where((order) => !_isTestOrder(order)).toList();
+  }
+
+  List<Map<String, dynamic>> get _deliveredOrders {
+    return _realOrders
+        .where(
+          (order) => order['status']?.toString().toLowerCase() == 'entregue',
+        )
+        .toList();
+  }
+
+  int get _cancelledOrders {
+    return _realOrders.where((order) {
+      final status = order['status']?.toString().toLowerCase() ?? '';
+      return status == 'cancelado' ||
+          status == 'pagamento_expirado' ||
+          status == 'expirado';
+    }).length;
+  }
+
+  double _asDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  double get _deliveredTotal {
+    return _deliveredOrders.fold<double>(
+      0,
+      (sum, order) => sum + _asDouble(order['total']),
+    );
+  }
+
+  double get _averageTicket {
+    if (_deliveredOrders.isEmpty) return 0;
+    return _deliveredTotal / _deliveredOrders.length;
+  }
+
+  int get _deliveredItems {
+    var total = 0;
+    for (final order in _deliveredOrders) {
+      final items = order['pedido_itens'] as List? ?? const [];
+      for (final rawItem in items) {
+        if (rawItem is Map) {
+          final quantity = rawItem['quantidade'];
+          total += quantity is num
+              ? quantity.toInt()
+              : int.tryParse(quantity?.toString() ?? '') ?? 0;
+        }
+      }
+    }
+    return total;
+  }
+
+  DateTime? _parseDate(dynamic value) {
+    if (value == null) return null;
+    return DateTime.tryParse(value.toString())?.toLocal();
+  }
+
+  String _formatDate(dynamic value) {
+    final date = _parseDate(value);
+    if (date == null) return 'Sem registro';
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/${date.year} '
+        '${date.hour.toString().padLeft(2, '0')}:'
+        '${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  bool get _isOnline {
+    if (_profile['is_online'] != true) return false;
+    final lastAccess = _parseDate(
+      _profile['last_access_at'] ??
+          _profile['updated_at'] ??
+          _profile['last_sign_in_at'],
+    );
+    return lastAccess == null ||
+        DateTime.now().difference(lastAccess) < const Duration(seconds: 75);
+  }
+
+  String get _preferredPaymentMethod {
+    final counts = <String, int>{};
+    for (final order in _realOrders) {
+      final method = order['metodo_pagamento']?.toString().toLowerCase();
+      if (method == null || method.isEmpty) continue;
+      counts[method] = (counts[method] ?? 0) + 1;
+    }
+    if (counts.isEmpty) return 'Sem registro';
+
+    final method = counts.entries
+        .reduce((a, b) => a.value >= b.value ? a : b)
+        .key;
+    switch (method) {
+      case 'pix':
+        return 'PIX';
+      case 'credito':
+      case 'cartao_credito':
+        return 'Cartão de crédito';
+      case 'cartao_debito':
+        return 'Cartão de débito';
+      case 'dinheiro':
+        return 'Dinheiro';
+      default:
+        return method;
+    }
+  }
+
+  String get _displayName {
+    final name =
+        _profile['name'] ??
+        _profile['full_name'] ??
+        widget.usuario['full_name'];
+    final value = name?.toString().trim() ?? '';
+    return value.isEmpty ? 'Usuário' : value;
+  }
+
+  Widget _buildMetric(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: TextStyle(
+                color: color,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey[700], fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String value) {
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, size: 21, color: Colors.blueGrey[700]),
+      title: Text(label, style: const TextStyle(fontSize: 12)),
+      subtitle: Text(
+        value,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final email = (_profile['email'] ?? widget.usuario['email'])
+        ?.toString()
+        .trim();
+    final lastOrder = _realOrders.isEmpty ? null : _realOrders.first;
+    final lastAccess =
+        _profile['last_access_at'] ??
+        _profile['last_sign_in_at'] ??
+        _profile['updated_at'];
+    final createdAt = _profile['created_at'] ?? widget.usuario['created_at'];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: Colors.blueGrey[50],
+                child: const Icon(Icons.person_search, color: Colors.blueGrey),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _displayName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (email != null && email.isNotEmpty)
+                      Text(
+                        email,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Atualizar',
+                onPressed: _isLoading ? null : () => unawaited(_loadUsage()),
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          const Divider(height: 22),
+          if (_isLoading) const LinearProgressIndicator(minHeight: 2),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _loadUsage,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: 12),
+                children: [
+                  if (_ordersError != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.orange[200]!),
+                      ),
+                      child: Text(
+                        _ordersError!,
+                        style: TextStyle(
+                          color: Colors.orange[900],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      const gap = 10.0;
+                      final width = (constraints.maxWidth - gap) / 2;
+                      final metrics = [
+                        _buildMetric(
+                          'Pedidos',
+                          '${_realOrders.length}',
+                          Icons.receipt_long,
+                          Colors.blue,
+                        ),
+                        _buildMetric(
+                          'Entregues',
+                          '${_deliveredOrders.length}',
+                          Icons.check_circle,
+                          Colors.green,
+                        ),
+                        _buildMetric(
+                          'Total consumido',
+                          CurrencyFormatter.format(_deliveredTotal),
+                          Icons.payments,
+                          Colors.teal,
+                        ),
+                        _buildMetric(
+                          'Ticket médio',
+                          CurrencyFormatter.format(_averageTicket),
+                          Icons.analytics,
+                          Colors.purple,
+                        ),
+                        _buildMetric(
+                          'Itens entregues',
+                          '$_deliveredItems',
+                          Icons.shopping_bag,
+                          Colors.orange,
+                        ),
+                        _buildMetric(
+                          'Favoritos',
+                          _favoritesCount?.toString() ?? '—',
+                          Icons.favorite,
+                          Colors.red,
+                        ),
+                      ];
+
+                      return Wrap(
+                        spacing: gap,
+                        runSpacing: gap,
+                        children: metrics
+                            .map(
+                              (metric) => SizedBox(
+                                width: width,
+                                height: 112,
+                                child: metric,
+                              ),
+                            )
+                            .toList(),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Uso do app',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  _buildInfoRow(
+                    _isOnline ? Icons.circle : Icons.circle_outlined,
+                    'Presença',
+                    _isOnline ? 'Online agora' : 'Offline',
+                  ),
+                  _buildInfoRow(
+                    Icons.login,
+                    'Último acesso',
+                    _formatDate(lastAccess),
+                  ),
+                  _buildInfoRow(
+                    Icons.person_add_alt,
+                    'Conta criada em',
+                    _formatDate(createdAt),
+                  ),
+                  _buildInfoRow(
+                    Icons.history,
+                    'Último pedido',
+                    lastOrder == null
+                        ? 'Nenhum pedido'
+                        : '#${lastOrder['id']} em ${_formatDate(lastOrder['created_at'])}',
+                  ),
+                  _buildInfoRow(
+                    Icons.account_balance_wallet_outlined,
+                    'Pagamento mais usado',
+                    _preferredPaymentMethod,
+                  ),
+                  _buildInfoRow(
+                    Icons.cancel_outlined,
+                    'Pedidos cancelados/expirados',
+                    '$_cancelledOrders',
+                  ),
+                  if (_favoritesCount == null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'A contagem de favoritos não está disponível para este acesso administrativo.',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

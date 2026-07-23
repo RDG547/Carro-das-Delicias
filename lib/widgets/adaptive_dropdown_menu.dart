@@ -13,6 +13,7 @@ class AdaptiveDropdownMenu<T> extends StatefulWidget {
   final int maxVisibleItems;
   final double menuWidth;
   final BorderRadius borderRadius;
+  final bool alwaysOpenBelow;
 
   const AdaptiveDropdownMenu({
     super.key,
@@ -25,6 +26,7 @@ class AdaptiveDropdownMenu<T> extends StatefulWidget {
     this.maxVisibleItems = 5,
     this.menuWidth = 0,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
+    this.alwaysOpenBelow = false,
   });
 
   @override
@@ -108,7 +110,10 @@ class _AdaptiveDropdownMenuState<T> extends State<AdaptiveDropdownMenu<T>> {
     final spaceBelow =
         visibleBottom - buttonOffset.dy - buttonSize.height - gap;
     final spaceAbove = buttonOffset.dy - visibleTop - gap;
-    final openDown = spaceBelow >= desiredHeight || spaceBelow >= spaceAbove;
+    final openDown =
+        widget.alwaysOpenBelow ||
+        spaceBelow >= desiredHeight ||
+        spaceBelow >= spaceAbove;
     final availableHeight = math.max(
       widget.itemHeight,
       openDown ? spaceBelow : spaceAbove,
@@ -136,7 +141,9 @@ class _AdaptiveDropdownMenuState<T> extends State<AdaptiveDropdownMenu<T>> {
             ),
             Positioned(
               left: left,
-              top: top.clamp(visibleTop, visibleBottom - menuHeight),
+              top: widget.alwaysOpenBelow
+                  ? top
+                  : top.clamp(visibleTop, visibleBottom - menuHeight),
               width: menuWidth,
               height: menuHeight,
               child: Material(

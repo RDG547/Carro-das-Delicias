@@ -19,6 +19,8 @@ class CategoryIconWidget extends StatelessWidget {
     'Bolos': 'asset:assets/icons/bolo_category.png',
     'Doces': 'asset:assets/icons/doce_category.png',
     'Salgados': 'asset:assets/icons/salgado_category.png',
+    'Salgado': 'asset:assets/icons/salgado_category.png',
+    'Padaria': '🥖',
     'Bebidas': 'asset:assets/icons/bebida_category.png',
     'Sobremesas': 'asset:assets/icons/sobremesa_category.png',
   };

@@ -23,7 +23,7 @@ void main() {
           'categoriaId': 'doces',
           'categoriaNome': 'Doces',
           'quantidade': 2,
-          'observacoes': 'Sem granulado',
+          'observacoes': 'Campo legado ignorado',
           'isBuyNow': false,
           'tamanhoSelecionado': null,
           'saborSelecionado': null,
@@ -35,6 +35,5 @@ void main() {
 
     expect(CartService().totalItems, 2);
     expect(CartService().items.single.nome, 'Brigadeiro');
-    expect(CartService().items.single.observacoes, 'Sem granulado');
   });
 }
