@@ -31,6 +31,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   int _quantidade = 1;
   final _cartService = CartService();
   final _favoritesService = FavoritesService();
+  final _observacoesController = TextEditingController();
   static const int _imageCarouselInitialPage = 10000;
   late final PageController _pageController;
   final ScrollController _scrollController = ScrollController();
@@ -132,6 +133,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     if (_productsChannel != null) {
       Supabase.instance.client.removeChannel(_productsChannel!);
     }
+    _observacoesController.dispose();
     _pageController.dispose();
     _scrollController.dispose();
     _scrollIndicatorController.dispose();
@@ -444,6 +446,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
                         // Contador de quantidade
                         _buildQuantitySelector(),
+                        const SizedBox(height: 24),
+
+                        // Observação específica deste item
+                        _buildItemObservationsField(),
                         const SizedBox(height: 24),
 
                         // Produtos semelhantes
@@ -1314,6 +1320,40 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     );
   }
 
+  Widget _buildItemObservationsField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Observações',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey[300]!),
+          ),
+          child: TextField(
+            controller: _observacoesController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              hintText: 'Escreva uma observação... (opcional)',
+              hintStyle: TextStyle(color: Colors.grey),
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.all(16),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSimilarProducts() {
     final categoriaId = widget.produto['categoria_id'];
     final produtoAtualId = widget.produto['id'];
@@ -2025,7 +2065,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         return;
       }
 
-      await _cartService.addItem(produtoParaCarrinho, quantidade: _quantidade);
+      await _cartService.addItem(
+        produtoParaCarrinho,
+        quantidade: _quantidade,
+        observacoes: _observacoesController.text,
+      );
 
       if (mounted) {
         final suffix = ProductVariantUtils.selectionSuffix(
@@ -2079,6 +2123,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       await _cartService.addItem(
         produtoParaCarrinho,
         quantidade: _quantidade,
+        observacoes: _observacoesController.text,
         isBuyNow: true,
       );
 

@@ -29,14 +29,16 @@ class DescontosScreen extends StatefulWidget {
 }
 
 class _DescontosScreenState extends State<DescontosScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   List<Map<String, dynamic>> _produtosComDesconto = [];
   bool _isLoading = true;
   final CartService _cartService = CartService();
   final ScrollController _scrollController = ScrollController();
   late final AnimationController _scrollIndicatorController;
   RealtimeChannel? _productsChannel;
+  RealtimeChannel? _categoriesChannel;
   Timer? _realtimeDebounceTimer;
+  Timer? _realtimeReconnectTimer;
   bool _showScrollIndicator = true;
   bool _hasScrolledDown = false;
   bool _isScrollIndicatorAnimating = false;
@@ -68,6 +70,7 @@ class _DescontosScreenState extends State<DescontosScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scrollIndicatorController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -93,10 +96,15 @@ class _DescontosScreenState extends State<DescontosScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _realtimeDebounceTimer?.cancel();
+    _realtimeReconnectTimer?.cancel();
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
     if (_productsChannel != null) {
       Supabase.instance.client.removeChannel(_productsChannel!);
+    }
+    if (_categoriesChannel != null) {
+      Supabase.instance.client.removeChannel(_categoriesChannel!);
     }
     _scrollController.dispose();
     _scrollIndicatorController.dispose();
@@ -105,15 +113,51 @@ class _DescontosScreenState extends State<DescontosScreen>
 
   void _setupRealtimeSubscription() {
     try {
-      _productsChannel = Supabase.instance.client
-          .channel('descontos-produtos-changes')
+      final supabase = Supabase.instance.client;
+      final previousChannel = _productsChannel;
+      if (previousChannel != null) {
+        unawaited(supabase.removeChannel(previousChannel));
+      }
+      final previousCategoriesChannel = _categoriesChannel;
+      if (previousCategoriesChannel != null) {
+        unawaited(supabase.removeChannel(previousCategoriesChannel));
+      }
+      _realtimeReconnectTimer?.cancel();
+
+      _productsChannel = supabase
+          .channel('discounts-catalog-changes:$hashCode')
           .onPostgresChanges(
             event: PostgresChangeEvent.all,
             schema: 'public',
             table: 'produtos',
             callback: (_) => _scheduleProductsRefresh(),
           )
-          .subscribe();
+          .subscribe((status, error) {
+            if (!mounted) return;
+            if (status == RealtimeSubscribeStatus.channelError ||
+                status == RealtimeSubscribeStatus.timedOut) {
+              debugPrint('Erro no realtime da tela de descontos: $error');
+              _realtimeReconnectTimer?.cancel();
+              _realtimeReconnectTimer = Timer(
+                const Duration(seconds: 3),
+                _setupRealtimeSubscription,
+              );
+            }
+          });
+      _categoriesChannel = supabase
+          .channel('discounts-category-changes:$hashCode')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'categorias',
+            callback: (_) => _scheduleProductsRefresh(),
+          )
+          .subscribe((status, error) {
+            if (status == RealtimeSubscribeStatus.channelError ||
+                status == RealtimeSubscribeStatus.timedOut) {
+              debugPrint('Realtime de categorias indisponível: $error');
+            }
+          });
     } catch (e) {
       debugPrint('Erro ao configurar realtime de descontos: $e');
     }
@@ -123,9 +167,16 @@ class _DescontosScreenState extends State<DescontosScreen>
     _realtimeDebounceTimer?.cancel();
     _realtimeDebounceTimer = Timer(const Duration(milliseconds: 250), () {
       if (mounted) {
-        _loadProdutosComDesconto();
+        _loadProdutosComDesconto(showLoadingIndicator: false);
       }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    _setupRealtimeSubscription();
+    unawaited(_loadProdutosComDesconto(showLoadingIndicator: false));
   }
 
   void _scheduleScrollIndicatorAvailabilityChecks() {
@@ -143,8 +194,12 @@ class _DescontosScreenState extends State<DescontosScreen>
     return scrollIndicatorBottomOffset(context);
   }
 
-  Future<void> _loadProdutosComDesconto() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadProdutosComDesconto({
+    bool showLoadingIndicator = true,
+  }) async {
+    if (showLoadingIndicator) {
+      setState(() => _isLoading = true);
+    }
 
     try {
       final response = await Supabase.instance.client

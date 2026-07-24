@@ -19,6 +19,7 @@ class CartNavbarMenu extends StatefulWidget {
 class CartNavbarMenuState extends State<CartNavbarMenu>
     with SingleTickerProviderStateMixin {
   final _cartService = CartService();
+  final Map<String, TextEditingController> _observationControllers = {};
   late final AnimationController _menuAnimationController;
   OverlayEntry? _overlayEntry;
   bool _isMenuOpen = false;
@@ -34,6 +35,7 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
       duration: const Duration(milliseconds: 220),
       reverseDuration: const Duration(milliseconds: 180),
     );
+    _syncObservationControllers();
     _cartService.addListener(_onCartChanged);
   }
 
@@ -41,6 +43,10 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
   void dispose() {
     _isDisposed = true;
     _cartService.removeListener(_onCartChanged);
+    for (final controller in _observationControllers.values) {
+      controller.dispose();
+    }
+    _observationControllers.clear();
     _overlayEntry?.remove();
     _overlayEntry = null;
     _menuAnimationController.dispose();
@@ -49,8 +55,25 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
 
   void _onCartChanged() {
     if (mounted && !_isDisposed) {
+      _syncObservationControllers();
       setState(() {});
       _overlayEntry?.markNeedsBuild();
+    }
+  }
+
+  void _syncObservationControllers() {
+    final currentKeys = _cartService.items.map((item) => item.cartKey).toSet();
+    _observationControllers.removeWhere((key, controller) {
+      if (currentKeys.contains(key)) return false;
+      controller.dispose();
+      return true;
+    });
+
+    for (final item in _cartService.items) {
+      _observationControllers.putIfAbsent(
+        item.cartKey,
+        () => TextEditingController(text: item.observacoes ?? ''),
+      );
     }
   }
 
@@ -119,7 +142,7 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
     final maxHeight = screenSize.height * 0.72;
     final estimatedHeight = _cartService.isEmpty
         ? 250.0
-        : 190.0 + (_cartService.items.length * 155.0);
+        : 190.0 + (_cartService.items.length * 230.0);
     final menuHeight = estimatedHeight.clamp(250.0, maxHeight);
 
     _overlayEntry = OverlayEntry(
@@ -261,6 +284,8 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
                       return CartItemCard(
                         item: item,
                         cartService: _cartService,
+                        observationController:
+                            _observationControllers[item.cartKey]!,
                       );
                     },
                   ),

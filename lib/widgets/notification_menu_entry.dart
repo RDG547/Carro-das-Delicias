@@ -141,7 +141,6 @@ class _NotificationMenuEntryState extends State<NotificationMenuEntry> {
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                 ),
               ),
-              if (_unreadCount > 0) _Badge(count: _unreadCount),
             ],
           ),
           children: [

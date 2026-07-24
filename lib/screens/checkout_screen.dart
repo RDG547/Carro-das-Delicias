@@ -77,6 +77,9 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   final _observacoesController = TextEditingController();
   final _numeroFocusNode = FocusNode();
   final _numeroFieldKey = GlobalKey();
+  final Map<String, Map<String, String?>> _cartProductMetadata = {};
+  final Set<String> _requestedCartProductMetadataIds = {};
+  bool _isLoadingCartProductMetadata = false;
 
   String _metodoPagamento = 'pix'; // Padrão é PIX
   double _troco = 0.0;
@@ -170,7 +173,9 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _keyboardVisible = _isKeyboardVisibleFromWindow();
+    _observacoesController.text = _cartService.orderObservation ?? '';
     _cartService.addListener(_onCartChanged);
+    unawaited(_loadMissingCartProductMetadata());
     _addDeliveryAddressListeners();
     unawaited(_geofenceService.inicializarAreas());
     _loadUserData();
@@ -241,6 +246,9 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   void _onCartChanged() {
     if (!mounted) return;
 
+    _syncOrderObservationController();
+    unawaited(_loadMissingCartProductMetadata());
+
     if (_cartService.isEmpty && !_isLoading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_cartService.isEmpty || _isLoading) return;
@@ -250,6 +258,94 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     }
 
     setState(() {});
+  }
+
+  void _syncOrderObservationController() {
+    final nextValue = _cartService.orderObservation ?? '';
+    if (_observacoesController.text == nextValue) return;
+
+    _observacoesController.value = TextEditingValue(
+      text: nextValue,
+      selection: TextSelection.collapsed(offset: nextValue.length),
+    );
+  }
+
+  Future<void> _loadMissingCartProductMetadata() async {
+    if (_isLoadingCartProductMetadata) return;
+
+    final missingIds = _cartService.items
+        .map((item) => item.id)
+        .where(
+          (id) =>
+              !_cartProductMetadata.containsKey(id) &&
+              !_requestedCartProductMetadataIds.contains(id),
+        )
+        .toSet();
+    if (missingIds.isEmpty) return;
+
+    _isLoadingCartProductMetadata = true;
+    _requestedCartProductMetadataIds.addAll(missingIds);
+    try {
+      final queryIds = missingIds
+          .map<Object>((id) => int.tryParse(id) ?? id)
+          .toList();
+      final response = await Supabase.instance.client
+          .from('produtos')
+          .select('''
+            id,
+            imagem_url,
+            imagens,
+            categorias:categoria_id (
+              nome,
+              icone
+            )
+          ''')
+          .inFilter('id', queryIds);
+
+      final updates = <String, Map<String, String?>>{};
+      for (final rawProduct in response) {
+        final product = Map<String, dynamic>.from(rawProduct);
+        final rawCategory = product['categorias'];
+        Map<String, dynamic>? category;
+        if (rawCategory is Map) {
+          category = Map<String, dynamic>.from(rawCategory);
+        } else if (rawCategory is List &&
+            rawCategory.isNotEmpty &&
+            rawCategory.first is Map) {
+          category = Map<String, dynamic>.from(rawCategory.first as Map);
+        }
+
+        final images = product['imagens'];
+        final directImage = product['imagem_url']?.toString().trim();
+        final firstImage = images is List && images.isNotEmpty
+            ? images.first?.toString().trim()
+            : null;
+        updates[product['id'].toString()] = {
+          'categoryName': category?['nome']?.toString(),
+          'categoryIcon': category?['icone']?.toString(),
+          'imageUrl': directImage?.isNotEmpty == true
+              ? directImage
+              : firstImage?.isNotEmpty == true
+              ? firstImage
+              : null,
+        };
+      }
+
+      for (final missingId in missingIds) {
+        updates.putIfAbsent(missingId, () => const {});
+      }
+
+      if (mounted) {
+        setState(() => _cartProductMetadata.addAll(updates));
+      }
+    } catch (error) {
+      debugPrint('Erro ao atualizar dados dos itens do carrinho: $error');
+    } finally {
+      _isLoadingCartProductMetadata = false;
+      if (mounted) {
+        unawaited(_loadMissingCartProductMetadata());
+      }
+    }
   }
 
   void _addDeliveryAddressListeners() {
@@ -610,16 +706,20 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   void _applyReverseAddress(DeliveryReverseAddress address) {
     _isApplyingLocationAddress = true;
     try {
+      final existingNumber = _numeroController.text.trim();
       final rawStreet = address.endereco?.trim() ?? '';
       final parsedAddress = rawStreet.isEmpty
           ? (street: '', number: '')
           : _splitStreetAndNumber(rawStreet);
       final rawNumber = address.numero?.trim() ?? '';
-
-      _enderecoController.text = parsedAddress.street;
-      _numeroController.text = rawNumber.isNotEmpty
+      final resolvedNumber = rawNumber.isNotEmpty
           ? rawNumber
           : parsedAddress.number;
+
+      _enderecoController.text = parsedAddress.street;
+      if (existingNumber.isEmpty) {
+        _numeroController.text = resolvedNumber;
+      }
       _complementoController.text = address.complemento?.trim() ?? '';
       _bairroController.text = address.bairro?.trim() ?? '';
       _cidadeController.text = address.cidade?.trim() ?? '';
@@ -662,7 +762,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
             Icon(Icons.info_outline, color: Colors.white),
             SizedBox(width: 8),
             Expanded(
-              child: Text('Falta somente o número e o complemento (opcional).'),
+              child: Text('Falta somente o número. O complemento é opcional.'),
             ),
           ],
         ),
@@ -1224,6 +1324,19 @@ class _CheckoutScreenState extends State<CheckoutScreen>
 
   Widget _buildCheckoutSummaryItem(CartItem item) {
     const actionWidth = 96.0;
+    final metadata = _cartProductMetadata[item.id];
+    final metadataImageUrl = metadata?['imageUrl']?.trim();
+    final imageUrl = item.imagemUrl?.trim().isNotEmpty == true
+        ? item.imagemUrl!.trim()
+        : metadataImageUrl?.isNotEmpty == true
+        ? metadataImageUrl
+        : null;
+    final categoryName = metadata?['categoryName']?.trim().isNotEmpty == true
+        ? metadata!['categoryName']!.trim()
+        : item.categoriaNome;
+    final categoryIcon = metadata?['categoryIcon']?.trim().isNotEmpty == true
+        ? metadata!['categoryIcon']
+        : item.categoriaIcone;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -1241,15 +1354,21 @@ class _CheckoutScreenState extends State<CheckoutScreen>
             child: SizedBox(
               width: 44,
               height: 44,
-              child: item.imagemUrl != null && item.imagemUrl!.isNotEmpty
+              child: imageUrl != null
                   ? Image.network(
-                      item.imagemUrl!,
+                      imageUrl,
                       fit: BoxFit.cover,
                       errorBuilder: (context, error, stackTrace) {
-                        return _buildCheckoutItemPlaceholder(item);
+                        return _buildCheckoutItemPlaceholder(
+                          categoryName: categoryName,
+                          categoryIcon: categoryIcon,
+                        );
                       },
                     )
-                  : _buildCheckoutItemPlaceholder(item),
+                  : _buildCheckoutItemPlaceholder(
+                      categoryName: categoryName,
+                      categoryIcon: categoryIcon,
+                    ),
             ),
           ),
           const SizedBox(width: 10),
@@ -1355,13 +1474,16 @@ class _CheckoutScreenState extends State<CheckoutScreen>
     );
   }
 
-  Widget _buildCheckoutItemPlaceholder(CartItem item) {
+  Widget _buildCheckoutItemPlaceholder({
+    required String? categoryName,
+    required String? categoryIcon,
+  }) {
     return Container(
       color: Colors.orange[50],
       child: Center(
         child: CategoryIconWidget(
-          icone: _resolveCheckoutCategoryIcon(item.categoriaNome, null),
-          categoryName: item.categoriaNome,
+          icone: _resolveCheckoutCategoryIcon(categoryName, categoryIcon),
+          categoryName: categoryName,
           size: 24,
         ),
       ),
@@ -2687,11 +2809,13 @@ class _CheckoutScreenState extends State<CheckoutScreen>
             TextFormField(
               controller: _observacoesController,
               decoration: const InputDecoration(
-                labelText: 'Observações gerais do pedido',
+                labelText: 'Observação do pedido (opcional)',
                 border: OutlineInputBorder(),
                 hintText: 'Ex: Entregar no portão, campainha não funciona...',
               ),
               maxLines: 3,
+              onChanged: (value) =>
+                  unawaited(_cartService.updateOrderObservation(value)),
             ),
           ],
         ),
@@ -3098,6 +3222,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
         'quantidade': item.quantidade,
         'preco_unitario': item.preco,
         'subtotal': item.subtotal,
+        'observacoes': item.observacoes,
         'tamanho_selecionado': item.tamanhoSelecionado,
         if (item.saborSelecionado != null)
           'sabor_selecionado': item.saborSelecionado,

@@ -16,7 +16,8 @@ class KombiTrackingScreen extends StatefulWidget {
   State<KombiTrackingScreen> createState() => _KombiTrackingScreenState();
 }
 
-class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
+class _KombiTrackingScreenState extends State<KombiTrackingScreen>
+    with WidgetsBindingObserver {
   static const double _bottomNavbarHeight = 88.0;
   static const double _bottomNavbarGap = 20.0;
   static const double _myLocationZoomCenterOffset = 26.0;
@@ -25,6 +26,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
   PointAnnotationManager? _pointAnnotationManager;
   final LocationTrackingService _trackingService = LocationTrackingService();
   StreamSubscription? _locationSubscription;
+  Timer? _locationReconnectTimer;
 
   Point? _kombiLocation;
   bool _isOnline = false;
@@ -54,6 +56,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     kombiOnlineStatus.addListener(_onKombiStatusChanged);
 
@@ -137,12 +140,23 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     kombiOnlineStatus.removeListener(_onKombiStatusChanged);
     _locationSubscription?.cancel();
+    _locationReconnectTimer?.cancel();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    unawaited(_loadInitialLocation());
+    _subscribeToLocationUpdates();
+  }
+
   void _subscribeToLocationUpdates() {
+    unawaited(_locationSubscription?.cancel());
+    _locationReconnectTimer?.cancel();
     _locationSubscription = _trackingService.watchAllKombis().listen(
       (allData) {
         if (!mounted) return;
@@ -200,9 +214,21 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen> {
       onError: (error) {
         if (mounted) {
           debugPrint('Erro ao receber localização: $error');
+          _scheduleLocationReconnect();
         }
       },
+      onDone: _scheduleLocationReconnect,
     );
+  }
+
+  void _scheduleLocationReconnect() {
+    if (!mounted) return;
+    _locationReconnectTimer?.cancel();
+    _locationReconnectTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      unawaited(_loadInitialLocation());
+      _subscribeToLocationUpdates();
+    });
   }
 
   Future<void> _loadVendorNames(List<Map<String, dynamic>> kombis) async {

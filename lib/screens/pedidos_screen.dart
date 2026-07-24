@@ -21,13 +21,17 @@ class PedidosScreen extends StatefulWidget {
   State<PedidosScreen> createState() => _PedidosScreenState();
 }
 
-class _PedidosScreenState extends State<PedidosScreen> {
+class _PedidosScreenState extends State<PedidosScreen>
+    with WidgetsBindingObserver {
   List<Map<String, dynamic>> _pedidos = [];
   bool _isLoading = true;
   StreamSubscription<List<Map<String, dynamic>>>? _pedidosSubscription;
+  RealtimeChannel? _orderDependenciesChannel;
   int _realtimeRetryCount = 0;
   static const int _maxRealtimeRetries = 5;
   Timer? _retryTimer;
+  Timer? _dependencyRefreshTimer;
+  Timer? _dependencyReconnectTimer;
   bool _isRecoveringRealtimeAuth = false;
 
   // Conjuntos para controle otimista de cancelamento/exclusão
@@ -37,15 +41,78 @@ class _PedidosScreenState extends State<PedidosScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadPedidos();
     _setupRealtimeSubscription();
+    _setupOrderDependenciesRealtime();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pedidosSubscription?.cancel();
     _retryTimer?.cancel();
+    _dependencyRefreshTimer?.cancel();
+    _dependencyReconnectTimer?.cancel();
+    final dependenciesChannel = _orderDependenciesChannel;
+    if (dependenciesChannel != null) {
+      unawaited(Supabase.instance.client.removeChannel(dependenciesChannel));
+    }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    _realtimeRetryCount = 0;
+    _setupRealtimeSubscription();
+    _setupOrderDependenciesRealtime();
+    unawaited(_loadPedidos(showLoadingIndicator: false));
+  }
+
+  void _setupOrderDependenciesRealtime() {
+    final supabase = Supabase.instance.client;
+    final previousChannel = _orderDependenciesChannel;
+    if (previousChannel != null) {
+      unawaited(supabase.removeChannel(previousChannel));
+    }
+    _dependencyReconnectTimer?.cancel();
+
+    _orderDependenciesChannel = supabase
+        .channel('customer-order-dependencies:$hashCode')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'pedido_itens',
+          callback: (_) => _scheduleOrderDependenciesRefresh(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'produtos',
+          callback: (_) => _scheduleOrderDependenciesRefresh(),
+        )
+        .subscribe((status, error) {
+          if (!mounted) return;
+          if (status == RealtimeSubscribeStatus.channelError ||
+              status == RealtimeSubscribeStatus.timedOut) {
+            debugPrint('Erro no realtime dos itens dos pedidos: $error');
+            _dependencyReconnectTimer?.cancel();
+            _dependencyReconnectTimer = Timer(
+              const Duration(seconds: 3),
+              _setupOrderDependenciesRealtime,
+            );
+          }
+        });
+  }
+
+  void _scheduleOrderDependenciesRefresh() {
+    _dependencyRefreshTimer?.cancel();
+    _dependencyRefreshTimer = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) {
+        unawaited(_loadPedidos(showLoadingIndicator: false));
+      }
+    });
   }
 
   void _setupRealtimeSubscription() {
@@ -217,6 +284,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
             'quantidade': item['quantidade'],
             'preco': item['preco_unitario'],
             'subtotal': item['subtotal'],
+            'observacoes': item['observacoes'],
             'tamanho': tamanhoFormatado,
             'sabor': saborFormatado,
             'imagem_url': item['imagem_url'] ?? produto?['imagem_url'],
@@ -260,8 +328,10 @@ class _PedidosScreenState extends State<PedidosScreen> {
     }
   }
 
-  Future<void> _loadPedidos() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadPedidos({bool showLoadingIndicator = true}) async {
+    if (showLoadingIndicator) {
+      setState(() => _isLoading = true);
+    }
 
     try {
       final user = Supabase.instance.client.auth.currentUser;
@@ -342,6 +412,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
                   'quantidade': item['quantidade'],
                   'preco': item['preco_unitario'],
                   'subtotal': item['subtotal'],
+                  'observacoes': item['observacoes'],
                   'tamanho': tamanhoFormatado,
                   'sabor': saborFormatado,
                   'imagem_url': item['imagem_url'] ?? produto?['imagem_url'],
@@ -1068,6 +1139,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
           await cartService.addItem(
             produtoSelecionado,
             quantidade: item['quantidade'] ?? 1,
+            observacoes: item['observacoes']?.toString(),
           );
 
           itensAdicionados++;
@@ -2203,7 +2275,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                         textInputAction: TextInputAction.done,
                         decoration: InputDecoration(
                           label: const Text(
-                            'Observação do pedido',
+                            'Observação do pedido (opcional)',
                             maxLines: 2,
                             softWrap: true,
                             overflow: TextOverflow.visible,
@@ -2211,6 +2283,7 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                           labelStyle: const TextStyle(height: 1),
                           hintText: 'Ex: referência, contato...',
                           prefixIcon: const Icon(Icons.edit_note),
+                          isDense: true,
                           contentPadding: const EdgeInsets.symmetric(
                             vertical: 8,
                           ),
@@ -2223,9 +2296,9 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
-                    width: 48,
+                    width: 104,
                     height: 56,
-                    child: IconButton.filled(
+                    child: ElevatedButton.icon(
                       onPressed: _isSavingObservacao
                           ? null
                           : _salvarObservacaoPedido,
@@ -2239,12 +2312,16 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                               ),
                             )
                           : const Icon(Icons.send_outlined, size: 18),
-                      tooltip: 'Enviar',
-                      style: IconButton.styleFrom(
+                      label: const Text('Enviar'),
+                      style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue,
                         foregroundColor: Colors.white,
                         disabledBackgroundColor: Colors.blue[100],
                         disabledForegroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        minimumSize: const Size(104, 56),
+                        maximumSize: const Size(104, 56),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -2377,6 +2454,21 @@ class _DetalhesDialogState extends State<_DetalhesDialog> {
                                 color: Colors.grey[600],
                               ),
                             ),
+                            if (item['observacoes'] != null &&
+                                item['observacoes']
+                                    .toString()
+                                    .trim()
+                                    .isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Obs: ${item['observacoes']}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontStyle: FontStyle.italic,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),

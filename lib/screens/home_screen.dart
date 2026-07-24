@@ -68,7 +68,7 @@ class HomeScreen extends StatefulWidget {
 enum ProductSortOption { latest, alphabetical }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _searchController = TextEditingController();
   final _scrollController = ScrollController();
   final _searchFocusNode = FocusNode();
@@ -79,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen>
   );
   Timer? _searchDebounce;
   Timer? _catalogRefreshDebounce;
+  Timer? _realtimeReconnectTimer;
   late final VoidCallback _catalogSyncListener;
 
   // Getters para compatibilidade
@@ -104,6 +105,7 @@ class _HomeScreenState extends State<HomeScreen>
   final _favoritesService = FavoritesService();
   final _cartService = CartService();
   RealtimeChannel? _productsChannel;
+  RealtimeChannel? _categoriesChannel;
   late final AudioPlayer _audioPlayer;
   late final AnimationController _scrollIndicatorController;
 
@@ -345,6 +347,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _audioPlayer = AudioPlayer();
     _scrollIndicatorController = AnimationController(
       vsync: this,
@@ -382,23 +385,54 @@ class _HomeScreenState extends State<HomeScreen>
   void _setupRealtimeSubscription() {
     try {
       final supabase = Supabase.instance.client;
+      final previousChannel = _productsChannel;
+      if (previousChannel != null) {
+        unawaited(supabase.removeChannel(previousChannel));
+      }
+      final previousCategoriesChannel = _categoriesChannel;
+      if (previousCategoriesChannel != null) {
+        unawaited(supabase.removeChannel(previousCategoriesChannel));
+      }
+      _realtimeReconnectTimer?.cancel();
 
-      // Criar canal de subscription para produtos
       _productsChannel = supabase
-          .channel('produtos-changes')
+          .channel('home-catalog-changes:$hashCode')
           .onPostgresChanges(
             event: PostgresChangeEvent.all,
             schema: 'public',
             table: 'produtos',
-            callback: (payload) {
-              debugPrint(
-                '🔄 Atualização em tempo real detectada: ${payload.eventType}',
-              );
-              debugPrint('📥 Agendando recarga após atualização em tempo real');
+            callback: (_) {
               _scheduleCatalogReload(preserveScrollPosition: true);
             },
           )
-          .subscribe();
+          .subscribe((status, error) {
+            if (!mounted) return;
+            if (status == RealtimeSubscribeStatus.channelError ||
+                status == RealtimeSubscribeStatus.timedOut) {
+              debugPrint('Erro no realtime da tela inicial: $error');
+              _realtimeReconnectTimer?.cancel();
+              _realtimeReconnectTimer = Timer(
+                const Duration(seconds: 3),
+                _setupRealtimeSubscription,
+              );
+            }
+          });
+      _categoriesChannel = supabase
+          .channel('home-category-changes:$hashCode')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'categorias',
+            callback: (_) {
+              _scheduleCatalogReload(preserveScrollPosition: true);
+            },
+          )
+          .subscribe((status, error) {
+            if (status == RealtimeSubscribeStatus.channelError ||
+                status == RealtimeSubscribeStatus.timedOut) {
+              debugPrint('Realtime de categorias indisponível: $error');
+            }
+          });
 
       debugPrint('✅ Subscription de tempo real configurada');
     } catch (e) {
@@ -467,9 +501,11 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _audioPlayer.dispose();
     _searchDebounce?.cancel();
     _catalogRefreshDebounce?.cancel();
+    _realtimeReconnectTimer?.cancel();
     _scrollIndicatorController.dispose();
     _searchController.dispose();
     _scrollController.dispose();
@@ -480,14 +516,27 @@ class _HomeScreenState extends State<HomeScreen>
     _favoritesService.removeListener(_onFavoritesChanged);
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
     _productsChannel?.unsubscribe();
+    _categoriesChannel?.unsubscribe();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    _setupRealtimeSubscription();
+    unawaited(
+      _loadData(preserveScrollPosition: true, showLoadingIndicator: false),
+    );
   }
 
   void _scheduleCatalogReload({bool preserveScrollPosition = true}) {
     _catalogRefreshDebounce?.cancel();
     _catalogRefreshDebounce = Timer(const Duration(milliseconds: 250), () {
       if (!mounted) return;
-      _loadData(preserveScrollPosition: preserveScrollPosition);
+      _loadData(
+        preserveScrollPosition: preserveScrollPosition,
+        showLoadingIndicator: false,
+      );
     });
   }
 
@@ -520,7 +569,10 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
-  Future<void> _loadData({bool preserveScrollPosition = false}) async {
+  Future<void> _loadData({
+    bool preserveScrollPosition = false,
+    bool showLoadingIndicator = true,
+  }) async {
     // Salvar posição atual do scroll apenas se solicitado
     double? currentScrollPosition;
     if (preserveScrollPosition && _scrollController.hasClients) {
@@ -531,8 +583,10 @@ class _HomeScreenState extends State<HomeScreen>
         (!_scrollController.hasClients || _scrollController.offset <= 0);
 
     setState(() {
-      _isLoading = true;
-      _produtos.clear(); // Limpar produtos existentes
+      if (showLoadingIndicator) {
+        _isLoading = true;
+        _produtos.clear();
+      }
       _cachedFilteredProducts = null; // Invalidar cache
     });
 
@@ -2263,9 +2317,6 @@ class _HomeScreenState extends State<HomeScreen>
                                       : Colors.pink,
                                   avoidAdminFab:
                                       !widget.isGuestMode && _isAdmin,
-                                  bottomSpacing: !widget.isGuestMode && _isAdmin
-                                      ? 70
-                                      : 92,
                                   content: Row(
                                     children: [
                                       Icon(

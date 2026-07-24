@@ -11,7 +11,9 @@ class CartItem {
   final String? imagemUrl;
   final String? categoriaId;
   final String? categoriaNome;
+  final String? categoriaIcone;
   int quantidade;
+  String? observacoes;
   final bool isBuyNow; // Identifica se foi adicionado via "Comprar"
   final String? tamanhoSelecionado; // Tamanho selecionado (ex: "P", "M", "G")
   final String? saborSelecionado; // Sabor selecionado (ex: "Chocolate")
@@ -23,7 +25,9 @@ class CartItem {
     this.imagemUrl,
     this.categoriaId,
     this.categoriaNome,
+    this.categoriaIcone,
     this.quantidade = 1,
+    this.observacoes,
     this.isBuyNow = false,
     this.tamanhoSelecionado,
     this.saborSelecionado,
@@ -60,7 +64,9 @@ class CartItem {
       'imagemUrl': imagemUrl,
       'categoriaId': categoriaId,
       'categoriaNome': categoriaNome,
+      'categoriaIcone': categoriaIcone,
       'quantidade': quantidade,
+      'observacoes': observacoes,
       'isBuyNow': isBuyNow,
       'tamanhoSelecionado': tamanhoSelecionado,
       'saborSelecionado': saborSelecionado,
@@ -75,7 +81,9 @@ class CartItem {
       imagemUrl: json['imagemUrl'],
       categoriaId: json['categoriaId'],
       categoriaNome: json['categoriaNome'],
+      categoriaIcone: json['categoriaIcone'],
       quantidade: json['quantidade'] ?? 1,
+      observacoes: json['observacoes'],
       isBuyNow: json['isBuyNow'] ?? false,
       tamanhoSelecionado: json['tamanhoSelecionado'],
       saborSelecionado: json['saborSelecionado'],
@@ -89,12 +97,14 @@ class CartService extends ChangeNotifier {
   CartService._internal();
 
   List<CartItem> _items = [];
+  String? _orderObservation;
   bool _isLoading = false;
 
   List<CartItem> get items => List.unmodifiable(_items);
   bool get isLoading => _isLoading;
   bool get isEmpty => _items.isEmpty;
   int get itemCount => _items.length;
+  String? get orderObservation => _orderObservation;
 
   // Total de itens no carrinho (considerando quantidade de cada item)
   int get totalItems => _items.fold(0, (sum, item) => sum + item.quantidade);
@@ -110,6 +120,7 @@ class CartService extends ChangeNotifier {
 
       final prefs = await SharedPreferences.getInstance();
       final cartData = prefs.getString('cart_items');
+      _orderObservation = prefs.getString('cart_order_observation');
 
       if (cartData != null) {
         final List<dynamic> cartJson = json.decode(cartData);
@@ -129,6 +140,12 @@ class CartService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final cartJson = _items.map((item) => item.toJson()).toList();
       await prefs.setString('cart_items', json.encode(cartJson));
+      final observation = _orderObservation?.trim();
+      if (observation == null || observation.isEmpty || _items.isEmpty) {
+        await prefs.remove('cart_order_observation');
+      } else {
+        await prefs.setString('cart_order_observation', observation);
+      }
     } catch (e) {
       debugPrint('Erro ao salvar carrinho: $e');
     }
@@ -138,6 +155,7 @@ class CartService extends ChangeNotifier {
   Future<void> addItem(
     Map<String, dynamic> produto, {
     int quantidade = 1,
+    String? observacoes,
     bool isBuyNow = false,
   }) async {
     final productId = produto['id'].toString();
@@ -178,7 +196,20 @@ class CartService extends ChangeNotifier {
     if (existingIndex >= 0 && !isBuyNow) {
       // Se existe e não é buyNow, aumentar a quantidade
       _items[existingIndex].quantidade += quantidade;
+      if (observacoes != null && observacoes.trim().isNotEmpty) {
+        _items[existingIndex].observacoes = observacoes.trim();
+      }
     } else {
+      final rawCategory = produto['categorias'];
+      Map<dynamic, dynamic>? relatedCategory;
+      if (rawCategory is Map) {
+        relatedCategory = rawCategory;
+      } else if (rawCategory is List &&
+          rawCategory.isNotEmpty &&
+          rawCategory.first is Map) {
+        relatedCategory = rawCategory.first as Map;
+      }
+
       // Se não existe ou é buyNow, adicionar nova entrada
       final cartItem = CartItem(
         id: productId,
@@ -191,8 +222,14 @@ class CartService extends ChangeNotifier {
                 ? (produto['imagens'] as List)[0]
                 : null),
         categoriaId: produto['categoria_id']?.toString(),
-        categoriaNome: produto['categoria_nome'],
+        categoriaNome:
+            produto['categoria_nome'] ?? relatedCategory?['nome']?.toString(),
+        categoriaIcone:
+            produto['categoria_icone'] ?? relatedCategory?['icone']?.toString(),
         quantidade: quantidade,
+        observacoes: observacoes?.trim().isEmpty == true
+            ? null
+            : observacoes?.trim(),
         isBuyNow: isBuyNow,
         tamanhoSelecionado: tamanhoSelecionadoString,
         saborSelecionado: saborSelecionadoString,
@@ -207,6 +244,9 @@ class CartService extends ChangeNotifier {
   // Remover item do carrinho
   Future<void> removeItem(String itemKey) async {
     _items.removeWhere((item) => item.cartKey == itemKey);
+    if (_items.isEmpty) {
+      _orderObservation = null;
+    }
     await _saveCart();
     notifyListeners();
   }
@@ -226,11 +266,36 @@ class CartService extends ChangeNotifier {
     }
   }
 
+  Future<void> updateOrderObservation(String? observation) async {
+    final normalized = observation?.trim();
+    _orderObservation = normalized == null || normalized.isEmpty
+        ? null
+        : observation;
+    await _saveCart();
+    notifyListeners();
+  }
+
+  Future<void> updateObservations(String itemKey, String? observations) async {
+    final index = _items.indexWhere((item) => item.cartKey == itemKey);
+    if (index < 0) return;
+
+    final normalized = observations?.trim();
+    _items[index].observacoes = normalized == null || normalized.isEmpty
+        ? null
+        : observations;
+    await _saveCart();
+    notifyListeners();
+  }
+
   // Limpar carrinho
   Future<void> clearCart() async {
     _items.clear();
+    _orderObservation = null;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('cart_items');
+    await Future.wait([
+      prefs.remove('cart_items'),
+      prefs.remove('cart_order_observation'),
+    ]);
     notifyListeners();
   }
 
@@ -240,6 +305,9 @@ class CartService extends ChangeNotifier {
     _items.removeWhere((item) => item.isBuyNow);
 
     if (hadBuyNowItems) {
+      if (_items.isEmpty) {
+        _orderObservation = null;
+      }
       await _saveCart();
       notifyListeners();
     }

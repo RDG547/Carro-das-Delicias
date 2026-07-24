@@ -1271,6 +1271,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                       backgroundColor: wasFavorite
                                           ? Colors.grey.shade700
                                           : Colors.red,
+                                      avoidAdminFab: widget.isAdmin == true,
                                       content: Row(
                                         children: [
                                           Icon(

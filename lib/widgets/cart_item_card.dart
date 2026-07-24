@@ -8,12 +8,14 @@ import '../utils/constants.dart';
 class CartItemCard extends StatelessWidget {
   final CartItem item;
   final CartService cartService;
+  final TextEditingController observationController;
   final EdgeInsetsGeometry margin;
 
   const CartItemCard({
     super.key,
     required this.item,
     required this.cartService,
+    required this.observationController,
     this.margin = const EdgeInsets.only(bottom: 16),
   });
 
@@ -32,16 +34,21 @@ class CartItemCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            _buildProductImage(),
-            const SizedBox(width: 16),
-            Expanded(child: _buildProductInfo()),
-            _buildQuantitySummary(),
-          ],
-        ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                _buildProductImage(),
+                const SizedBox(width: 16),
+                Expanded(child: _buildProductInfo()),
+                _buildQuantitySummary(),
+              ],
+            ),
+          ),
+          _buildObservationsField(),
+        ],
       ),
     );
   }
@@ -210,6 +217,53 @@ class CartItemCard extends StatelessWidget {
           padding: const EdgeInsets.all(4),
           child: Icon(icon, size: 16, color: Colors.grey[700]),
         ),
+      ),
+    );
+  }
+
+  Widget _buildObservationsField() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(16),
+          bottomRight: Radius.circular(16),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.edit_note, size: 16, color: Colors.grey[600]),
+              const SizedBox(width: 8),
+              Text(
+                'Observações',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: observationController,
+            decoration: const InputDecoration(
+              hintText: 'Escreva uma observação... (opcional)',
+              hintStyle: TextStyle(fontSize: 12),
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.zero,
+            ),
+            style: const TextStyle(fontSize: 14),
+            maxLines: 2,
+            onChanged: (value) {
+              cartService.updateObservations(item.cartKey, value);
+            },
+          ),
+        ],
       ),
     );
   }

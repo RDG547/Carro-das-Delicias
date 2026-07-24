@@ -16,6 +16,7 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
   final _cartService = CartService();
+  final Map<String, TextEditingController> _observationControllers = {};
   bool _isAdmin = false;
   bool _keyboardVisible = false;
 
@@ -30,6 +31,7 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _keyboardVisible = _isKeyboardVisibleFromWindow();
     _cartService.addListener(_onCartChanged);
+    _initializeControllers();
     // Atrasa a verificação para depois do primeiro build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAdminStatus();
@@ -74,6 +76,7 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cartService.removeListener(_onCartChanged);
+    _disposeControllers();
     super.dispose();
   }
 
@@ -94,7 +97,38 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
 
   void _onCartChanged() {
     if (mounted) {
-      setState(() {});
+      setState(_syncObservationControllers);
+    }
+  }
+
+  void _initializeControllers() {
+    for (final item in _cartService.items) {
+      _observationControllers[item.cartKey] = TextEditingController(
+        text: item.observacoes ?? '',
+      );
+    }
+  }
+
+  void _disposeControllers() {
+    for (final controller in _observationControllers.values) {
+      controller.dispose();
+    }
+    _observationControllers.clear();
+  }
+
+  void _syncObservationControllers() {
+    final currentKeys = _cartService.items.map((item) => item.cartKey).toSet();
+    _observationControllers.removeWhere((key, controller) {
+      if (currentKeys.contains(key)) return false;
+      controller.dispose();
+      return true;
+    });
+
+    for (final item in _cartService.items) {
+      _observationControllers.putIfAbsent(
+        item.cartKey,
+        () => TextEditingController(text: item.observacoes ?? ''),
+      );
     }
   }
 
@@ -299,7 +333,11 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildCartItem(CartItem item, int index) {
-    return CartItemCard(item: item, cartService: _cartService);
+    return CartItemCard(
+      item: item,
+      cartService: _cartService,
+      observationController: _observationControllers[item.cartKey]!,
+    );
   }
 
   Widget _buildCheckoutButton() {

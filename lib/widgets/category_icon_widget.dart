@@ -20,7 +20,7 @@ class CategoryIconWidget extends StatelessWidget {
     'Doces': 'asset:assets/icons/doce_category.png',
     'Salgados': 'asset:assets/icons/salgado_category.png',
     'Salgado': 'asset:assets/icons/salgado_category.png',
-    'Padaria': '🥖',
+    'Padaria': '🍞',
     'Bebidas': 'asset:assets/icons/bebida_category.png',
     'Sobremesas': 'asset:assets/icons/sobremesa_category.png',
   };

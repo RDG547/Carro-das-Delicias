@@ -5609,6 +5609,17 @@ class _AdminScreenState extends State<AdminScreen>
                           ),
                         ],
                       ),
+                      if (item['observacoes'] != null &&
+                          item['observacoes'].toString().trim().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Obs: ${item['observacoes']}',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 );
