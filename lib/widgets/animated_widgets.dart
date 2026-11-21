@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../utils/constants.dart';
 import '../services/cart_service.dart';
+import '../services/catalog_sync_service.dart';
 import '../services/favorites_service.dart';
 import '../services/main_navigation_service.dart';
 import '../screens/cart_screen.dart';
@@ -308,6 +309,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
   late Animation<double> _scaleAnimation;
   final _cartService = CartService();
   final _favoritesService = FavoritesService();
+  bool _isOpeningProductEditor = false;
   static const List<double> _grayscaleMatrix = [
     0.2126,
     0.7152,
@@ -780,8 +782,9 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
     }
   }
 
-  void _showAdminOptions() {
-    showModalBottomSheet(
+  Future<void> _showAdminOptions() async {
+    final rootContext = Navigator.of(context, rootNavigator: true).context;
+    final action = await showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -814,8 +817,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                 leading: const Icon(Icons.edit, color: Colors.blue),
                 title: const Text('Editar Produto'),
                 onTap: () {
-                  Navigator.pop(context);
-                  _showEditProductDialog();
+                  Navigator.pop(context, 'edit');
                 },
               ),
               const Divider(),
@@ -828,8 +830,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                 ),
                 title: const Text('Excluir Produto'),
                 onTap: () {
-                  Navigator.pop(context);
-                  _showDeleteConfirmation();
+                  Navigator.pop(context, 'delete');
                 },
               ),
               const SizedBox(height: 10),
@@ -838,26 +839,37 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         );
       },
     );
+    if (action == 'edit' && rootContext.mounted) {
+      await _showEditProductDialog(rootContext);
+    } else if (action == 'delete' && mounted) {
+      await _showDeleteConfirmation();
+    }
   }
 
-  Future<void> _showEditProductDialog() async {
+  Future<void> _showEditProductDialog(BuildContext dialogContext) async {
+    if (_isOpeningProductEditor) return;
+    _isOpeningProductEditor = true;
+    final produto = Map<String, dynamic>.from(widget.produto);
     try {
-      // Buscar categorias do Supabase
+      // Use the root navigator so refreshing a filtered card cannot close it.
       final response = await Supabase.instance.client
           .from('categorias')
           .select()
-          .order('ordem', ascending: true);
+          .order('ordem', ascending: true)
+          .timeout(const Duration(seconds: 10));
 
       final categorias = List<Map<String, dynamic>>.from(response);
 
-      if (!mounted) return;
+      if (!dialogContext.mounted) return;
 
-      showDialog(
-        context: context,
+      await showDialog<void>(
+        context: dialogContext,
+        useRootNavigator: true,
         builder: (context) => EditProductDialog(
-          produto: widget.produto,
+          produto: produto,
           categorias: categorias,
           onProductUpdated: () {
+            CatalogSyncService.instance.notifyCatalogChanged();
             // Recarregar a página atual
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -871,14 +883,16 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
         ),
       );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao carregar categorias: $e'),
+      if (dialogContext.mounted) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível abrir o produto. Tente novamente.'),
             backgroundColor: Colors.red,
           ),
         );
       }
+    } finally {
+      _isOpeningProductEditor = false;
     }
   }
 
@@ -1250,19 +1264,19 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                                     final wasFavorite = _favoritesService
                                         .isFavorite(productId);
                                     final productName = widget.produto['nome'];
-                                    final overlay = Overlay.of(context);
-
-                                    await _favoritesService.toggleFavorite(
-                                      productId,
+                                    final overlay = Overlay.of(
+                                      context,
+                                      rootOverlay: true,
                                     );
-                                    if (!context.mounted) return;
-                                    setState(() {}); // Atualizar UI
-
-                                    // Mostrar animação de coração
                                     FavoriteHeartAnimation.showWithOverlay(
                                       overlay,
                                       isFavoriting: !wasFavorite,
                                     );
+                                    await _favoritesService.toggleFavorite(
+                                      productId,
+                                    );
+                                    if (!mounted) return;
+                                    setState(() {});
 
                                     // Mostrar feedback visual
                                     AppSnackBar.showBottom(

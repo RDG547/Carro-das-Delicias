@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import '../screens/product_detail_screen.dart';
+import '../utils/product_links.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DeepLinkService {
@@ -10,6 +12,9 @@ class DeepLinkService {
 
   late AppLinks _appLinks;
   BuildContext? _context;
+  StreamSubscription<Uri>? _subscription;
+  VoidCallback? onPasswordRecovery;
+  String? _lastAuthLink;
 
   void init(BuildContext context) {
     _context = context;
@@ -19,7 +24,8 @@ class DeepLinkService {
 
   void _listenForDeepLinks() {
     // Escutar deep links quando o app já está aberto
-    _appLinks.uriLinkStream.listen(
+    _subscription?.cancel();
+    _subscription = _appLinks.uriLinkStream.listen(
       (uri) {
         _handleDeepLink(uri);
       },
@@ -41,41 +47,57 @@ class DeepLinkService {
   }
 
   void _handleDeepLink(Uri uri) async {
-    debugPrint('Deep link recebido: $uri');
+    debugPrint('Link recebido: ${uri.host}${uri.path}');
 
     if (await _handleAuthCallback(uri)) {
       return;
     }
 
-    // Verificar se é um link de produto: https://carrodasdelicias.app/produto/[id]
-    if (uri.pathSegments.length >= 2 && uri.pathSegments[0] == 'produto') {
-      final produtoId = uri.pathSegments[1];
-      await _openProduct(produtoId);
-    }
+    final productId = ProductLinks.productIdFrom(uri);
+    if (productId != null) await _openProduct(productId);
   }
 
   Future<bool> _handleAuthCallback(Uri uri) async {
-    final isAppCallback =
+    final isAuth =
         uri.scheme == 'carrodasdelicias' &&
-        (uri.host == 'login-callback' ||
-            uri.queryParameters.containsKey('code') ||
-            uri.fragment.contains('access_token') ||
-            uri.fragment.contains('error_description'));
-
-    if (!isAppCallback) return false;
-
-    if (Supabase.instance.client.auth.currentSession != null) {
-      return true;
-    }
-
+        (uri.host == 'login-callback' || uri.host == 'auth-callback');
+    if (!isAuth) return false;
+    if (_lastAuthLink == uri.toString()) return true;
+    _lastAuthLink = uri.toString();
+    Map<String, String> fragment;
     try {
-      await Supabase.instance.client.auth.getSessionFromUrl(uri);
-    } on AuthException catch (error) {
-      debugPrint('Erro no retorno de login OAuth: ${error.message}');
-    } catch (error) {
-      debugPrint('Erro ao processar retorno de login OAuth: $error');
+      fragment = Uri.splitQueryString(uri.fragment);
+    } catch (_) {
+      fragment = {};
     }
-
+    final type = uri.queryParameters['type'] ?? fragment['type'];
+    final tokenHash = uri.queryParameters['token_hash'];
+    try {
+      if (tokenHash != null) {
+        await Supabase.instance.client.auth.verifyOTP(
+          tokenHash: tokenHash,
+          type: type == 'recovery' ? OtpType.recovery : OtpType.email,
+        );
+      } else {
+        await Supabase.instance.client.auth.getSessionFromUrl(uri);
+      }
+      if (type == 'recovery' &&
+          Supabase.instance.client.auth.currentSession != null) {
+        onPasswordRecovery?.call();
+      }
+    } catch (_) {
+      _lastAuthLink = null;
+      if (_context?.mounted == true) {
+        ScaffoldMessenger.of(_context!).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'O link expirou ou já foi utilizado. Solicite um novo email.',
+            ),
+          ),
+        );
+      }
+    }
+    // Este serviço é o único responsável por trocar os códigos de links de auth.
     return true;
   }
 

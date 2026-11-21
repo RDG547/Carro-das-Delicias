@@ -2,6 +2,105 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+class ProductFormDialogHeader extends StatelessWidget {
+  const ProductFormDialogHeader({
+    super.key,
+    required this.title,
+    required this.icon,
+  });
+  final String title;
+  final IconData icon;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(
+        colors: [Colors.teal, Color(0xFF00695C)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        Icon(icon, color: Colors.white, size: 28),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class ProductFormDialogActions extends StatelessWidget {
+  const ProductFormDialogActions({
+    super.key,
+    required this.onSubmit,
+    required this.submitLabel,
+    required this.submitIcon,
+  });
+  final VoidCallback onSubmit;
+  final String submitLabel;
+  final IconData submitIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    final cancel = TextButton.icon(
+      onPressed: () => Navigator.of(context).pop(),
+      icon: Image.asset(
+        'assets/icons/menu/cancel_button.png',
+        width: 18,
+        height: 18,
+      ),
+      label: const Text('Cancelar'),
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.grey,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+    final submit = ElevatedButton.icon(
+      onPressed: onSubmit,
+      icon: Icon(submitIcon, size: 18),
+      label: Text(
+        submitLabel,
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.teal,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth < 340
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [submit, const SizedBox(height: 8), cancel],
+            )
+          : Row(
+              children: [
+                Expanded(child: cancel),
+                const SizedBox(width: 12),
+                Expanded(child: submit),
+              ],
+            ),
+    );
+  }
+}
+
 class ProductFormDialogShell extends StatefulWidget {
   final double width;
   final Widget title;

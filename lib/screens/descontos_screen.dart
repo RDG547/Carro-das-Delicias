@@ -10,6 +10,7 @@ import '../widgets/flavor_count_badge.dart';
 import '../widgets/main_navigation_provider.dart';
 import '../services/cart_service.dart';
 import '../services/catalog_sync_service.dart';
+import '../services/app_settings_service.dart';
 import '../services/main_navigation_service.dart';
 import '../utils/product_action_helper.dart';
 import '../utils/product_variant_utils.dart';
@@ -87,6 +88,9 @@ class _DescontosScreenState extends State<DescontosScreen>
       _scheduleProductsRefresh();
     };
     CatalogSyncService.instance.addListener(_catalogSyncListener);
+    AppSettingsService.showProductsWithoutPhotos.addListener(
+      _catalogSyncListener,
+    );
     _loadProdutosComDesconto();
     _setupRealtimeSubscription();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -100,6 +104,9 @@ class _DescontosScreenState extends State<DescontosScreen>
     _realtimeDebounceTimer?.cancel();
     _realtimeReconnectTimer?.cancel();
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
+    AppSettingsService.showProductsWithoutPhotos.removeListener(
+      _catalogSyncListener,
+    );
     if (_productsChannel != null) {
       Supabase.instance.client.removeChannel(_productsChannel!);
     }
@@ -111,57 +118,7 @@ class _DescontosScreenState extends State<DescontosScreen>
     super.dispose();
   }
 
-  void _setupRealtimeSubscription() {
-    try {
-      final supabase = Supabase.instance.client;
-      final previousChannel = _productsChannel;
-      if (previousChannel != null) {
-        unawaited(supabase.removeChannel(previousChannel));
-      }
-      final previousCategoriesChannel = _categoriesChannel;
-      if (previousCategoriesChannel != null) {
-        unawaited(supabase.removeChannel(previousCategoriesChannel));
-      }
-      _realtimeReconnectTimer?.cancel();
-
-      _productsChannel = supabase
-          .channel('discounts-catalog-changes:$hashCode')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'produtos',
-            callback: (_) => _scheduleProductsRefresh(),
-          )
-          .subscribe((status, error) {
-            if (!mounted) return;
-            if (status == RealtimeSubscribeStatus.channelError ||
-                status == RealtimeSubscribeStatus.timedOut) {
-              debugPrint('Erro no realtime da tela de descontos: $error');
-              _realtimeReconnectTimer?.cancel();
-              _realtimeReconnectTimer = Timer(
-                const Duration(seconds: 3),
-                _setupRealtimeSubscription,
-              );
-            }
-          });
-      _categoriesChannel = supabase
-          .channel('discounts-category-changes:$hashCode')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'categorias',
-            callback: (_) => _scheduleProductsRefresh(),
-          )
-          .subscribe((status, error) {
-            if (status == RealtimeSubscribeStatus.channelError ||
-                status == RealtimeSubscribeStatus.timedOut) {
-              debugPrint('Realtime de categorias indisponível: $error');
-            }
-          });
-    } catch (e) {
-      debugPrint('Erro ao configurar realtime de descontos: $e');
-    }
-  }
+  void _setupRealtimeSubscription() => CatalogSyncService.instance.start();
 
   void _scheduleProductsRefresh() {
     _realtimeDebounceTimer?.cancel();
@@ -194,13 +151,19 @@ class _DescontosScreenState extends State<DescontosScreen>
     return scrollIndicatorBottomOffset(context);
   }
 
+  bool _loadingProducts = false;
+  bool _productsReloadQueued = false;
+
   Future<void> _loadProdutosComDesconto({
     bool showLoadingIndicator = true,
   }) async {
-    if (showLoadingIndicator) {
-      setState(() => _isLoading = true);
+    if (!mounted) return;
+    if (_loadingProducts) {
+      _productsReloadQueued = true;
+      return;
     }
-
+    _loadingProducts = true;
+    if (showLoadingIndicator) setState(() => _isLoading = true);
     try {
       final response = await Supabase.instance.client
           .from('produtos')
@@ -226,8 +189,14 @@ class _DescontosScreenState extends State<DescontosScreen>
             return aPriority.compareTo(bPriority);
           });
 
+      if (!mounted) return;
       setState(() {
-        _produtosComDesconto = produtos;
+        final isAdmin = AdminStatusProvider.of(context)?.isAdmin ?? false;
+        _produtosComDesconto = produtos
+            .where(
+              (p) => AppSettingsService.isProductVisible(p, isAdmin: isAdmin),
+            )
+            .toList();
       });
       _scheduleScrollIndicatorAvailabilityChecks();
     } catch (e) {
@@ -240,8 +209,13 @@ class _DescontosScreenState extends State<DescontosScreen>
         );
       }
     } finally {
+      _loadingProducts = false;
       if (mounted) {
         setState(() => _isLoading = false);
+        if (_productsReloadQueued) {
+          _productsReloadQueued = false;
+          _scheduleProductsRefresh();
+        }
       }
     }
   }

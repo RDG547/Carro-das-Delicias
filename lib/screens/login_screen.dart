@@ -1,3 +1,4 @@
+import 'password_recovery_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/social_auth_service.dart';
@@ -384,6 +385,18 @@ class _LoginScreenState extends State<LoginScreen> with WidgetsBindingObserver {
                                 },
                               ),
 
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const PasswordRecoveryScreen(),
+                                    ),
+                                  ),
+                                  child: const Text('Esqueci minha senha'),
+                                ),
+                              ),
                               SizedBox(height: beforeButtonsGap),
 
                               // Botão Entrar

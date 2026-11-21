@@ -129,7 +129,11 @@ class AbacatePayService {
         }
       }
 
-      return _post('/checkouts/create', body, operation: 'Criar checkout');
+      return await _post(
+        '/checkouts/create',
+        body,
+        operation: 'Criar checkout',
+      );
     } catch (e) {
       debugPrint('Erro ao criar checkout AbacatePay: $e');
       return null;

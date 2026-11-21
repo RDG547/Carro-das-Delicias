@@ -23,8 +23,16 @@ class SupabaseConfig {
   // 1. Acesse: https://account.mapbox.com/access-tokens/
   // 2. Crie um novo token com os escopos: styles:read, fonts:read, geocoding
   // 3. Substitua o valor abaixo
-  static const String mapboxAccessToken = String.fromEnvironment(
+  static const String _mapboxTokenFromEnvironment = String.fromEnvironment(
     'MAPBOX_ACCESS_TOKEN',
     defaultValue: '',
   );
+  static String _nativeMapboxToken = '';
+  static String get mapboxAccessToken =>
+      _mapboxTokenFromEnvironment.trim().isNotEmpty
+      ? _mapboxTokenFromEnvironment.trim()
+      : _nativeMapboxToken;
+  static void configureNativeMapboxToken(String token) {
+    _nativeMapboxToken = token.trim();
+  }
 }

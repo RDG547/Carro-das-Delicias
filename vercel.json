@@ -1,27 +1,103 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/website/index.html" },
-    { "source": "/style.css", "destination": "/website/style.css" },
-    { "source": "/google5259c5a0740ac005.html", "destination": "/website/google5259c5a0740ac005.html" },
-    { "source": "/politica-de-privacidade.html", "destination": "/website/politica-de-privacidade.html" },
-    { "source": "/termos-de-servico.html", "destination": "/website/termos-de-servico.html" },
-    { "source": "/excluir-conta.html", "destination": "/website/excluir-conta.html" },
-    { "source": "/privacy", "destination": "/website/politica-de-privacidade.html" },
-    { "source": "/privacidade", "destination": "/website/politica-de-privacidade.html" },
-    { "source": "/terms", "destination": "/website/termos-de-servico.html" },
-    { "source": "/termos", "destination": "/website/termos-de-servico.html" },
-    { "source": "/termos-de-servico", "destination": "/website/termos-de-servico.html" },
-    { "source": "/delete-account", "destination": "/website/excluir-conta.html" },
-    { "source": "/excluir-conta", "destination": "/website/excluir-conta.html" }
+    {
+      "source": "/.well-known/assetlinks.json",
+      "destination": "/website/.well-known/assetlinks.json"
+    },
+    {
+      "source": "/abrir-produto.js",
+      "destination": "/website/abrir-produto.js"
+    },
+    {
+      "source": "/produto/:id",
+      "destination": "/website/abrir-produto.html"
+    },
+    {
+      "source": "/",
+      "destination": "/website/index.html"
+    },
+    {
+      "source": "/style.css",
+      "destination": "/website/style.css"
+    },
+    {
+      "source": "/google5259c5a0740ac005.html",
+      "destination": "/website/google5259c5a0740ac005.html"
+    },
+    {
+      "source": "/politica-de-privacidade.html",
+      "destination": "/website/politica-de-privacidade.html"
+    },
+    {
+      "source": "/termos-de-servico.html",
+      "destination": "/website/termos-de-servico.html"
+    },
+    {
+      "source": "/excluir-conta.html",
+      "destination": "/website/excluir-conta.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/website/politica-de-privacidade.html"
+    },
+    {
+      "source": "/privacidade",
+      "destination": "/website/politica-de-privacidade.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/website/termos-de-servico.html"
+    },
+    {
+      "source": "/termos",
+      "destination": "/website/termos-de-servico.html"
+    },
+    {
+      "source": "/termos-de-servico",
+      "destination": "/website/termos-de-servico.html"
+    },
+    {
+      "source": "/delete-account",
+      "destination": "/website/excluir-conta.html"
+    },
+    {
+      "source": "/excluir-conta",
+      "destination": "/website/excluir-conta.html"
+    }
   ],
   "headers": [
     {
+      "source": "/.well-known/assetlinks.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300"
+        }
+      ]
+    },
+    {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-XSS-Protection", "value": "1; mode=block" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
       ]
     }
   ]

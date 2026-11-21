@@ -1,10 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!-- Permissões para upload de imagens -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <!-- Permissões para upload de imagens.
+         A galeria usa o seletor de fotos do sistema (Photo Picker), que não
+         requer nenhuma permissão de mídia ou de armazenamento. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
     <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
 
     <!-- Permissões para localização e rastreamento -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
@@ -58,6 +58,7 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https"/>
                 <data android:host="carrodasdelicias.app"/>
+                <data android:host="carrodasdelicias.vercel.app"/>
                 <data android:pathPrefix="/produto"/>
             </intent-filter>
         </activity>

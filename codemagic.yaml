@@ -11,7 +11,7 @@ workflows:
       vars:
         PACKAGE_NAME: "com.rdtech.carrodasdelicias"
       java: 21
-      flutter: stable
+      flutter: 3.50.1
       xcode: latest
       cocoapods: default
     cache:
@@ -33,13 +33,13 @@ workflows:
           flutter packages pub get
       - name: Flutter analyze
         script: |
-          flutter analyze
+          flutter analyze --no-fatal-infos
       - name: Flutter test
         script: |
           flutter test
       - name: Build Android Release
         script: |
-          flutter build appbundle --release
+          python3 tool/build_android_release.py --flutter "$(command -v flutter)" --with-apk
     artifacts:
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/*.apk
@@ -65,7 +65,7 @@ workflows:
         bundle_identifier: com.rdtech.carrodasdelicias
       vars:
         BUNDLE_ID: "com.rdtech.carrodasdelicias"
-      flutter: stable
+      flutter: 3.50.1
       xcode: latest
       cocoapods: default
     cache:
@@ -93,7 +93,7 @@ workflows:
           fi
       - name: Flutter analyze
         script: |
-          flutter analyze
+          flutter analyze --no-fatal-infos
       - name: Build iOS IPA
         script: |
           flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist

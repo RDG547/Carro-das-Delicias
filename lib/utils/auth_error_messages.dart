@@ -36,6 +36,14 @@ class AuthErrorMessages {
       return 'Confirme seu e-mail antes de fazer login. Verifique sua caixa de entrada ou spam.';
     }
 
+    if (normalized.contains('otp_expired') ||
+        normalized.contains('token has expired') ||
+        normalized.contains('invalid otp')) {
+      return 'O código expirou ou não é válido. Confira o email ou solicite um novo código.';
+    }
+    if (normalized.contains('same_password')) {
+      return 'Escolha uma senha diferente da anterior.';
+    }
     if (normalized.contains('password')) {
       return 'A senha deve ter pelo menos 6 caracteres.';
     }

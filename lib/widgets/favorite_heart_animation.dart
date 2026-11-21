@@ -1,115 +1,160 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 
-/// Mostra animações Lottie de coração ao favoritar/desfavoritar um produto.
-/// A animação é exibida como overlay centralizado na tela e desaparece automaticamente.
 class FavoriteHeartAnimation {
   static OverlayEntry? _currentOverlay;
-
-  /// Exibe a animação de coração (favoritar).
-  static void show(BuildContext context) {
-    _showWithOverlay(Overlay.of(context), isFavoriting: true);
-  }
-
-  /// Exibe a animação de coração partido (desfavoritar).
-  static void showBreak(BuildContext context) {
-    _showWithOverlay(Overlay.of(context), isFavoriting: false);
-  }
-
-  /// Versão que aceita o OverlayState diretamente (para uso após async gaps).
-  static void showWithOverlay(OverlayState overlay, {bool isFavoriting = true}) {
-    _showWithOverlay(overlay, isFavoriting: isFavoriting);
-  }
-
-  static void _showWithOverlay(OverlayState overlay, {required bool isFavoriting}) {
-    // Remover animação anterior se existir
-    _currentOverlay?.remove();
-    _currentOverlay = null;
-
-    _currentOverlay = OverlayEntry(
-      builder: (context) => _HeartAnimationOverlay(isFavoriting: isFavoriting),
+  static final Map<bool, Future<LottieComposition>> _compositions = {};
+  static final Map<bool, LottieComposition> _loadedCompositions = {};
+  static Future<LottieComposition> _composition(bool favoriting) {
+    final loaded = _loadedCompositions[favoriting];
+    if (loaded != null) return SynchronousFuture(loaded);
+    return _compositions.putIfAbsent(
+      favoriting,
+      () =>
+          AssetLottie(
+            favoriting
+                ? 'assets/animations/heart_favorite.json'
+                : 'assets/animations/heart_break.json',
+          ).load().then((composition) {
+            _loadedCompositions[favoriting] = composition;
+            return composition;
+          }),
     );
+  }
 
-    overlay.insert(_currentOverlay!);
+  static Future<void> preload() async {
+    try {
+      await _composition(false);
+      await _composition(true);
+    } catch (_) {
+      // The overlay provides an animated icon if an asset cannot be decoded.
+    }
+  }
+
+  static void show(BuildContext context) => _showWithOverlay(
+    Overlay.of(context, rootOverlay: true),
+    isFavoriting: true,
+  );
+  static void showBreak(BuildContext context) => _showWithOverlay(
+    Overlay.of(context, rootOverlay: true),
+    isFavoriting: false,
+  );
+  static void showWithOverlay(
+    OverlayState overlay, {
+    bool isFavoriting = true,
+  }) => _showWithOverlay(overlay, isFavoriting: isFavoriting);
+  static void _showWithOverlay(
+    OverlayState overlay, {
+    required bool isFavoriting,
+  }) {
+    if (!overlay.mounted) return;
+    _currentOverlay?.remove();
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => _HeartAnimationOverlay(
+        isFavoriting: isFavoriting,
+        onComplete: () {
+          if (_currentOverlay != entry) return;
+          entry.remove();
+          _currentOverlay = null;
+        },
+      ),
+    );
+    _currentOverlay = entry;
+    overlay.insert(entry);
   }
 }
 
 class _HeartAnimationOverlay extends StatefulWidget {
+  const _HeartAnimationOverlay({
+    required this.isFavoriting,
+    required this.onComplete,
+  });
   final bool isFavoriting;
-
-  const _HeartAnimationOverlay({required this.isFavoriting});
-
+  final VoidCallback onComplete;
   @override
   State<_HeartAnimationOverlay> createState() => _HeartAnimationOverlayState();
 }
 
 class _HeartAnimationOverlayState extends State<_HeartAnimationOverlay>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
+  late final AnimationController _controller;
+  late final Future<LottieComposition> _composition;
+  Timer? _timeout;
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    );
-
-    // Iniciar a animação e remover o overlay quando terminar
-    _controller.forward().then((_) {
-      FavoriteHeartAnimation._currentOverlay?.remove();
-      FavoriteHeartAnimation._currentOverlay = null;
-    });
+    _controller =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 1200),
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) widget.onComplete();
+        });
+    _composition = FavoriteHeartAnimation._composition(widget.isFavoriting);
+    _timeout = Timer(const Duration(seconds: 5), widget.onComplete);
   }
 
   @override
   void dispose() {
+    _timeout?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    final assetPath = widget.isFavoriting
-        ? 'assets/animations/heart_favorite.json'
-        : 'assets/animations/heart_break.json';
-
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: RepaintBoundary(
-          child: Center(
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) {
-                // Fade out nos últimos 30%
-                final fadeValue = _controller.value > 0.7
-                    ? 1.0 - ((_controller.value - 0.7) / 0.3)
-                    : 1.0;
-                // Scale up nos primeiros 50%
-                final scaleValue = _controller.value < 0.5
-                    ? 0.5 + (_controller.value / 0.5) * 0.7
-                    : 1.2;
-
-                return Opacity(
-                  opacity: fadeValue.clamp(0.0, 1.0),
-                  child: Transform.scale(
-                    scale: scaleValue,
-                    child: child,
-                  ),
-                );
-              },
-              child: Lottie.asset(
-                assetPath,
-                width: 150,
-                height: 150,
-                controller: _controller,
-                fit: BoxFit.contain,
-                frameRate: FrameRate(30),
-              ),
-            ),
+  Widget build(BuildContext context) => Positioned.fill(
+    child: IgnorePointer(
+      child: RepaintBoundary(
+        child: Center(
+          child: FutureBuilder<LottieComposition>(
+            future: _composition,
+            builder: (_, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const SizedBox(width: 150, height: 150);
+              }
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted &&
+                    !_controller.isAnimating &&
+                    _controller.value == 0) {
+                  _controller.forward();
+                }
+              });
+              return AnimatedBuilder(
+                animation: _controller,
+                child: snapshot.hasData
+                    ? Lottie(
+                        composition: snapshot.data!,
+                        controller: _controller,
+                        width: 150,
+                        height: 150,
+                        fit: BoxFit.contain,
+                        frameRate: FrameRate(30),
+                        repeat: false,
+                      )
+                    : Icon(
+                        widget.isFavoriting
+                            ? Icons.favorite
+                            : Icons.heart_broken,
+                        color: Colors.pink,
+                        size: 120,
+                      ),
+                builder: (_, child) {
+                  final value = _controller.value;
+                  final fade = value > 0.7 ? 1 - (value - 0.7) / 0.3 : 1.0;
+                  final scale = value < 0.5 ? 0.5 + value / 0.5 * 0.7 : 1.2;
+                  return Opacity(
+                    opacity: fade.clamp(0.0, 1.0),
+                    child: Transform.scale(scale: scale, child: child),
+                  );
+                },
+              );
+            },
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }

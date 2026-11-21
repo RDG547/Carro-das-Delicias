@@ -1,4 +1,5 @@
-import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'product_variant_utils.dart';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
@@ -14,21 +15,56 @@ class FlavorIconAssets {
     'asset:assets/icons/sabores/Pizza_Presunto.png',
   ];
 
-  static Future<List<String>> loadIcons() async {
+  static Future<List<String>>? _iconsFuture;
+  static final Set<String> _preloaded = {};
+  static Future<List<String>> loadIcons() => _iconsFuture ??= _loadIcons();
+  static Future<List<String>> _loadIcons() async {
     try {
-      final manifestText = await rootBundle.loadString('AssetManifest.json');
-      final manifest = jsonDecode(manifestText) as Map<String, dynamic>;
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
       final icons =
-          manifest.keys
-              .where((assetPath) => assetPath.startsWith(directory))
+          manifest
+              .listAssets()
+              .where((asset) => asset.startsWith(directory))
               .where(_isSupportedImage)
-              .map((assetPath) => 'asset:$assetPath')
+              .map((asset) => 'asset:$asset')
               .toList()
             ..sort((a, b) => labelFor(a).compareTo(labelFor(b)));
-
       return icons.isEmpty ? fallbackIcons : icons;
     } catch (_) {
       return fallbackIcons;
+    }
+  }
+
+  static Future<void> precacheForProducts(
+    BuildContext context,
+    Iterable<Map<String, dynamic>> products,
+  ) async {
+    final icons = <String>{...await loadIcons()};
+    for (final product in products) {
+      for (final flavor in ProductVariantUtils.extractFlavors(
+        product['sabores'],
+      )) {
+        final icon = ProductVariantUtils.optionIcon(flavor);
+        if (icon != null) icons.add(icon);
+      }
+    }
+    for (final icon in icons) {
+      if (!context.mounted) return;
+      if (!_preloaded.add(icon)) continue;
+      ImageProvider? provider;
+      if (icon.startsWith('asset:') && !icon.toLowerCase().endsWith('.svg')) {
+        provider = AssetImage(icon.substring(6));
+      } else if (icon.startsWith('https://') || icon.startsWith('http://')) {
+        provider = NetworkImage(icon);
+      }
+      if (provider == null) continue;
+      await precacheImage(
+        ResizeImage(provider, width: 128, height: 128),
+        context,
+        onError: (_, _) {
+          _preloaded.remove(icon);
+        },
+      );
     }
   }
 

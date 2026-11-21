@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.rdtech.carrodasdelicias",
+      "sha256_cert_fingerprints": [
+        "0A:CE:6C:93:8B:67:FA:EA:2C:70:58:44:7B:F3:8A:BB:D9:DB:DD:A7:9D:6C:D7:76:3C:2B:67:CB:36:85:1C:F9",
+        "F2:0B:0B:5E:A2:AA:7A:44:C6:FE:17:5E:74:C4:E0:45:3D:6D:50:4B:D9:80:19:29:4F:10:2C:A6:85:31:9F:D9"
+      ]
+    }
+  }
+]

@@ -8,12 +8,14 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/app_settings_service.dart';
 import '../services/catalog_sync_service.dart';
 import '../services/image_service.dart';
+import '../services/fuzzy_search_service.dart';
 import '../services/location_tracking_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
 import '../utils/network_error_utils.dart';
 import '../utils/realtime_auth_utils.dart';
 import '../widgets/app_menu.dart';
+import '../widgets/admin_report_dialog.dart';
 import '../widgets/base_screen.dart';
 import '../widgets/category_icon_widget.dart';
 import '../widgets/edit_product_dialog.dart';
@@ -38,6 +40,10 @@ class _AdminScreenState extends State<AdminScreen>
   List<Map<String, dynamic>> _usuarios = [];
   List<Map<String, dynamic>> _pedidos = [];
   bool _isLoading = false;
+  bool _isOpeningProductEditor = false;
+  final _searchProductController = TextEditingController();
+  final _productSearchNotifier = ValueNotifier<String>('');
+  final _ordersFilterKey = GlobalKey();
   final ValueNotifier<String> _userFilterNotifier = ValueNotifier('todos');
   final ValueNotifier<String> _userSearchNotifier = ValueNotifier('');
 
@@ -88,7 +94,9 @@ class _AdminScreenState extends State<AdminScreen>
     _setupRealtimeSubscription();
     _checkTrackingStatus();
     _presenceRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (mounted && !_isPresenceRefreshBackoffActive) {
+      if (mounted &&
+          _tabController.index == 2 &&
+          !_isPresenceRefreshBackoffActive) {
         unawaited(_refreshUserPresence());
       }
     });
@@ -146,6 +154,8 @@ class _AdminScreenState extends State<AdminScreen>
     _tabController.dispose();
     _fadeController.dispose();
     _searchCategoryController.dispose();
+    _searchProductController.dispose();
+    _productSearchNotifier.dispose();
     _searchUserController.dispose();
     _pedidosSubscription?.cancel();
     _catalogRefreshDebounce?.cancel();
@@ -552,21 +562,7 @@ class _AdminScreenState extends State<AdminScreen>
           },
         );
 
-    _catalogChannel = Supabase.instance.client
-        .channel('admin-catalog-changes')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'produtos',
-          callback: (_) => _scheduleCatalogRefresh(),
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'categorias',
-          callback: (_) => _scheduleCatalogRefresh(),
-        )
-        .subscribe();
+    CatalogSyncService.instance.start();
 
     _profilesChannel = Supabase.instance.client
         .channel('admin-profile-changes')
@@ -1463,7 +1459,14 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
-  Widget _buildProdutosTab() {
+  Widget _buildProdutosTab() => ValueListenableBuilder<String>(
+    valueListenable: _productSearchNotifier,
+    builder: (_, query, _) => _buildProdutosContent(
+      FuzzySearchService.searchProducts(_produtos, query),
+    ),
+  );
+
+  Widget _buildProdutosContent(List<Map<String, dynamic>> products) {
     return Column(
       children: [
         // Barra de ações
@@ -1473,6 +1476,8 @@ class _AdminScreenState extends State<AdminScreen>
             children: [
               Expanded(
                 child: TextField(
+                  controller: _searchProductController,
+                  onChanged: (query) => _productSearchNotifier.value = query,
                   decoration: InputDecoration(
                     hintText: 'Buscar produtos...',
                     prefixIcon: const Icon(Icons.search),
@@ -1482,7 +1487,12 @@ class _AdminScreenState extends State<AdminScreen>
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              IconButton(
+                tooltip: 'Gerar relatório',
+                icon: const Icon(Icons.assessment_outlined),
+                onPressed: _showReportsDialog,
+              ),
+              const SizedBox(width: 8),
               FloatingActionButton(
                 onPressed: _showAddProductDialog,
                 backgroundColor: Colors.black,
@@ -1502,7 +1512,7 @@ class _AdminScreenState extends State<AdminScreen>
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refreshAdminData,
-            child: _produtos.isEmpty
+            child: products.isEmpty
                 ? const CustomScrollView(
                     physics: AlwaysScrollableScrollPhysics(),
                     slivers: [
@@ -1520,10 +1530,11 @@ class _AdminScreenState extends State<AdminScreen>
                 : ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _produtos.length,
+                    itemCount: products.length,
                     itemBuilder: (context, index) {
-                      final produto = _produtos[index];
+                      final produto = products[index];
                       return Card(
+                        key: ValueKey('admin-product-${produto['id']}'),
                         margin: const EdgeInsets.only(bottom: 12),
                         child: ListTile(
                           leading: Tooltip(
@@ -1759,19 +1770,8 @@ class _AdminScreenState extends State<AdminScreen>
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: _filteredCategorias.length,
-                    proxyDecorator: (child, index, animation) {
-                      return Material(
-                        elevation: 4,
-                        borderRadius: BorderRadius.circular(12),
-                        clipBehavior: Clip.antiAlias,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width - 32,
-                          ),
-                          child: child,
-                        ),
-                      );
-                    },
+                    proxyDecorator: (child, index, animation) =>
+                        RepaintBoundary(child: child),
                     onReorderItem: (oldIndex, newIndex) async {
                       setState(() {
                         final item = _filteredCategorias.removeAt(oldIndex);
@@ -2823,20 +2823,34 @@ class _AdminScreenState extends State<AdminScreen>
   void _showAddProductDialog() {
     showDialog(
       context: context,
-      builder: (context) =>
-          AddProductDialog(categorias: _categorias, onProductAdded: _loadData),
+      builder: (context) => AddProductDialog(
+        categorias: _categorias,
+        onProductAdded: _scheduleCatalogRefresh,
+      ),
     );
   }
 
-  void _showEditProductDialog(Map<String, dynamic> produto) {
-    showDialog(
-      context: context,
-      builder: (context) => EditProductDialog(
-        produto: produto,
-        categorias: _categorias,
-        onProductUpdated: _loadData,
-      ),
-    );
+  Future<void> _showEditProductDialog(Map<String, dynamic> produto) async {
+    if (!mounted || _isOpeningProductEditor) return;
+    _isOpeningProductEditor = true;
+    try {
+      final latest =
+          _produtos
+              .where((p) => p['id'].toString() == produto['id'].toString())
+              .firstOrNull ??
+          produto;
+      await showDialog<void>(
+        context: context,
+        useRootNavigator: true,
+        builder: (_) => EditProductDialog(
+          produto: Map<String, dynamic>.from(latest),
+          categorias: List<Map<String, dynamic>>.from(_categorias),
+          onProductUpdated: _scheduleCatalogRefresh,
+        ),
+      );
+    } finally {
+      _isOpeningProductEditor = false;
+    }
   }
 
   Future<void> _changeProductImage(Map<String, dynamic> produto) async {
@@ -3570,169 +3584,10 @@ class _AdminScreenState extends State<AdminScreen>
     );
   }
 
-  Future<void> _showReportsDialog() async {
-    try {
-      // Estatísticas básicas
-      final totalProdutos = _produtos.length;
-      final totalCategorias = _categorias.length;
-      final totalUsuarios = _usuarios.length;
-
-      // Produtos por categoria
-      Map<String, int> produtosPorCategoria = {};
-      for (var produto in _produtos) {
-        final categoria =
-            produto['categoria_nome']?.toString() ??
-            produto['categorias']?['nome']?.toString() ??
-            'Sem categoria';
-        produtosPorCategoria[categoria] =
-            (produtosPorCategoria[categoria] ?? 0) + 1;
-      }
-      final produtosPorCategoriaOrdenados =
-          produtosPorCategoria.entries.toList()
-            ..sort((a, b) => b.value.compareTo(a.value));
-
-      // Média de preços
-      double mediaPrecos = 0;
-      if (_produtos.isNotEmpty) {
-        double somaPrecos = _produtos.fold(
-          0,
-          (sum, produto) => sum + (produto['preco'] ?? 0),
-        );
-        mediaPrecos = somaPrecos / _produtos.length;
-      }
-
-      // Produtos ativos vs inativos
-      int produtosAtivos = _produtos.where((p) => p['ativo'] == true).length;
-      int produtosInativos = _produtos.where((p) => p['ativo'] == false).length;
-
-      showDialog(
-        context: context,
-        builder: (dialogContext) => _buildAdminDialog(
-          dialogContext,
-          icon: Icons.assessment,
-          iconColor: Colors.purple,
-          title: 'Relatórios Administrativos',
-          maxWidth: 460,
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Align(
-                alignment: Alignment.center,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 320),
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'Estatísticas Gerais',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Total de Produtos: $totalProdutos',
-                            textAlign: TextAlign.center,
-                          ),
-                          Text(
-                            '• Ativos: $produtosAtivos',
-                            textAlign: TextAlign.center,
-                          ),
-                          Text(
-                            '• Inativos: $produtosInativos',
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Total de Categorias: $totalCategorias',
-                            textAlign: TextAlign.center,
-                          ),
-                          Text(
-                            'Total de Usuários: $totalUsuarios',
-                            textAlign: TextAlign.center,
-                          ),
-                          Text(
-                            'Preço Médio: ${CurrencyFormatter.format(mediaPrecos)}',
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (produtosPorCategoriaOrdenados.isNotEmpty) ...[
-                const Text(
-                  'Produtos por Categoria',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                ...produtosPorCategoriaOrdenados.map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(entry.key, textAlign: TextAlign.center),
-                        ),
-                        const SizedBox(width: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            '${entry.value}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          actions: _buildResponsiveDialogActions(
-            secondaryAction: _buildDialogSecondaryButton(
-              label: 'Fechar',
-              onPressed: () => Navigator.of(dialogContext).pop(),
-            ),
-            primaryAction: _buildDialogPrimaryButton(
-              label: 'Atualizar dados',
-              icon: Icons.refresh,
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                _loadData();
-              },
-            ),
-          ),
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao carregar relatórios: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
+  Future<void> _showReportsDialog() => showDialog<void>(
+    context: context,
+    builder: (_) => const AdminReportDialog(),
+  );
 
   void _showSettingsDialog() {
     showDialog(
@@ -3758,6 +3613,34 @@ class _AdminScreenState extends State<AdminScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                ValueListenableBuilder<bool>(
+                  valueListenable: AppSettingsService.showProductsWithoutPhotos,
+                  builder: (_, showWithoutPhotos, _) => SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    secondary: const Icon(Icons.hide_image_outlined),
+                    title: const Text('Mostrar produtos sem foto'),
+                    subtitle: const Text(
+                      'A alteração aparece para todos em tempo real. Administradores continuam vendo todos os produtos.',
+                    ),
+                    value: showWithoutPhotos,
+                    onChanged: (value) async {
+                      try {
+                        await AppSettingsService.saveCatalogVisibility(value);
+                      } catch (_) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(this.context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Não foi possível salvar a visibilidade. Tente novamente.',
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
                 // Configurações de Dados
                 _buildSettingsSection(
                   title: 'Gerenciamento de Dados',
@@ -4393,130 +4276,72 @@ class _AdminScreenState extends State<AdminScreen>
     },
   ];
 
-  Future<void> _showPedidosFilterDialog() async {
+  Future<void> _showPedidosFilterMenu() async {
+    final button =
+        _ordersFilterKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (button == null || overlay == null) return;
+    final offset = button.localToGlobal(Offset.zero, ancestor: overlay);
     final selectedValue = _selectedStatusFilter ?? 'todos';
-    final selectedOption = await showDialog<String>(
+    final value = await showMenu<String>(
       context: context,
-      builder: (dialogContext) {
-        final maxHeight = MediaQuery.of(dialogContext).size.height * 0.72;
-
-        return Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: 24,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 320, maxHeight: maxHeight),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.filter_list, color: Colors.blueGrey),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          'Filtrar pedidos',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        icon: Image.asset(
-                          'assets/icons/menu/cancel_button.png',
-                          width: 20,
-                          height: 20,
-                        ),
-                        tooltip: 'Fechar',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Flexible(
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: _statusFilterOptions.length,
-                      separatorBuilder: (_, index) => const SizedBox(height: 6),
-                      itemBuilder: (context, index) {
-                        final option = _statusFilterOptions[index];
-                        final value = option['value'] as String;
-                        final isSelected = value == selectedValue;
-
-                        return Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(16),
-                            onTap: () => Navigator.of(dialogContext).pop(value),
-                            child: Ink(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? Colors.grey.shade100
-                                    : Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? Colors.black
-                                      : Colors.grey.shade200,
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    option['icon'] as IconData,
-                                    size: 20,
-                                    color: option['color'] as Color,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      option['label'] as String,
-                                      style: TextStyle(
-                                        fontWeight: isSelected
-                                            ? FontWeight.w700
-                                            : FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                  if (isSelected)
-                                    const Icon(
-                                      Icons.check_circle,
-                                      size: 18,
-                                      color: Colors.black,
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+      position: RelativeRect.fromLTRB(
+        offset.dx,
+        offset.dy + button.size.height + 6,
+        overlay.size.width - offset.dx - button.size.width,
+        0,
+      ),
+      constraints: BoxConstraints(
+        minWidth: button.size.width,
+        maxWidth: button.size.width,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.65,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      color: Colors.white,
+      items: _statusFilterOptions.map((option) {
+        final isSelected = option['value'] == selectedValue;
+        return PopupMenuItem<String>(
+          value: option['value'] as String,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: isSelected ? Colors.grey.shade100 : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isSelected ? Colors.black : Colors.grey.shade200,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  option['icon'] as IconData,
+                  size: 20,
+                  color: option['color'] as Color,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    option['label'] as String,
+                    style: TextStyle(
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
                     ),
                   ),
-                ],
-              ),
+                ),
+                if (isSelected)
+                  const Icon(Icons.check_circle, size: 18, color: Colors.black),
+              ],
             ),
           ),
         );
-      },
+      }).toList(),
     );
-
-    if (selectedOption == null || !mounted) return;
-
-    setState(() {
-      _selectedStatusFilter = selectedOption == 'todos' ? null : selectedOption;
-    });
+    if (value != null && mounted) {
+      setState(() => _selectedStatusFilter = value == 'todos' ? null : value);
+    }
   }
 
   Widget _buildPedidosTab() {
@@ -4570,7 +4395,8 @@ class _AdminScreenState extends State<AdminScreen>
                         color: Colors.transparent,
                         child: InkWell(
                           borderRadius: BorderRadius.circular(16),
-                          onTap: _showPedidosFilterDialog,
+                          key: _ordersFilterKey,
+                          onTap: _showPedidosFilterMenu,
                           child: InputDecorator(
                             decoration: InputDecoration(
                               labelText: 'Filtrar pedidos',

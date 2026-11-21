@@ -61,6 +61,8 @@ class CategoryIconWidget extends StatelessWidget {
       } else {
         return Image.asset(
           assetPath,
+          cacheWidth: 128,
+          cacheHeight: 128,
           width: size,
           height: size,
           errorBuilder: (context, error, stackTrace) =>
@@ -70,6 +72,8 @@ class CategoryIconWidget extends StatelessWidget {
     } else if (icon.startsWith('http')) {
       return Image.network(
         icon,
+        cacheWidth: 128,
+        cacheHeight: 128,
         width: size,
         height: size,
         errorBuilder: (context, error, stackTrace) =>

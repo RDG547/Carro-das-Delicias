@@ -280,7 +280,7 @@ class OrderPaymentService {
         }
       }
 
-      return fetchOrderById(pedido['id']);
+      return await fetchOrderById(pedido['id']);
     } catch (error) {
       debugPrint(
         'Erro ao sincronizar pagamento do pedido ${pedido['id']}: $error',

@@ -27,6 +27,8 @@ android {
 
     buildFeatures {
         buildConfig = true
+        // AGP 9 desativa resValues por padrão; o app usa resValue() no defaultConfig
+        resValues = true
     }
 
     compileOptions {
@@ -51,6 +53,7 @@ android {
             ?: localProperties.getProperty("MAPBOX_ACCESS_TOKEN")
             ?: ""
         manifestPlaceholders["MAPBOX_ACCESS_TOKEN"] = mapboxToken
+        resValue("string", "mapbox_access_token", mapboxToken)
 
         val googleWebClientId = System.getenv("GOOGLE_WEB_CLIENT_ID")
             ?: localProperties.getProperty("GOOGLE_WEB_CLIENT_ID")
@@ -77,11 +80,8 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (System.getenv("CM_KEYSTORE_PATH") != null || keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            // Um artefato de produção sempre precisa da chave de upload configurada.
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
@@ -93,8 +93,6 @@ flutter {
 dependencies {
     // Desugaring para suportar APIs Java 8+ em versões antigas do Android
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
-    // Edge-to-edge support for Android 15+
-    implementation("androidx.activity:activity:1.12.4")
 }
 
 // Workaround: Copy APK and AAB to expected Flutter location

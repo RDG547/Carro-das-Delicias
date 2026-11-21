@@ -793,30 +793,9 @@ class _AddProductDialogState extends State<AddProductDialog> {
 
     return ProductFormDialogShell(
       width: dialogWidth,
-      title: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Colors.green, Colors.teal],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.add_shopping_cart, color: Colors.white, size: 28),
-            SizedBox(width: 12),
-            Text(
-              'Novo Produto',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-              ),
-            ),
-          ],
-        ),
+      title: const ProductFormDialogHeader(
+        title: 'Novo Produto',
+        icon: Icons.add_shopping_cart,
       ),
       body: Column(
         mainAxisSize: MainAxisSize.min,
@@ -827,13 +806,13 @@ class _AddProductDialogState extends State<AddProductDialog> {
             controller: _nomeController,
             decoration: productDialogInputDecoration(
               labelText: 'Nome do Produto *',
-              borderColor: Colors.green[200]!,
-              fillColor: Colors.green[50]!,
+              borderColor: Colors.teal[200]!,
+              fillColor: Colors.teal[50]!,
               labelStyle: const TextStyle(
-                color: Colors.green,
+                color: Colors.teal,
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.green),
+              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.teal),
               hintText: 'Digite o nome do produto',
               hintStyle: const TextStyle(color: Colors.grey),
             ),
@@ -863,15 +842,15 @@ class _AddProductDialogState extends State<AddProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Preço *',
-                borderColor: Colors.green[200]!,
-                fillColor: Colors.green[50]!,
+                borderColor: Colors.teal[200]!,
+                fillColor: Colors.teal[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.green,
+                  color: Colors.teal,
                   fontWeight: FontWeight.w600,
                 ),
                 prefixIcon: const Icon(
                   Icons.payments_outlined,
-                  color: Colors.green,
+                  color: Colors.teal,
                 ),
                 hintText: 'R\$ 0,00',
                 hintStyle: TextStyle(
@@ -908,13 +887,13 @@ class _AddProductDialogState extends State<AddProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Preço com Desconto *',
-                borderColor: Colors.green[200]!,
-                fillColor: Colors.green[50]!,
+                borderColor: Colors.teal[200]!,
+                fillColor: Colors.teal[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.green,
+                  color: Colors.teal,
                   fontWeight: FontWeight.w600,
                 ),
-                prefixIcon: const Icon(Icons.local_offer, color: Colors.green),
+                prefixIcon: const Icon(Icons.local_offer, color: Colors.teal),
                 hintText: 'R\$ 0,00',
                 hintStyle: TextStyle(
                   color: Colors.grey.withValues(alpha: 0.28),
@@ -930,13 +909,13 @@ class _AddProductDialogState extends State<AddProductDialog> {
             isExpanded: true,
             decoration: productDialogInputDecoration(
               labelText: 'Categoria *',
-              borderColor: Colors.green[200]!,
-              fillColor: Colors.green[50]!,
+              borderColor: Colors.teal[200]!,
+              fillColor: Colors.teal[50]!,
               labelStyle: const TextStyle(
-                color: Colors.green,
+                color: Colors.teal,
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(Icons.category, color: Colors.green),
+              prefixIcon: const Icon(Icons.category, color: Colors.teal),
             ),
             items: widget.categorias.map((categoria) {
               return DropdownMenuItem<String>(
@@ -1004,7 +983,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: index == 0 ? Colors.green : Colors.grey[300]!,
+                          color: index == 0 ? Colors.teal : Colors.grey[300]!,
                           width: index == 0 ? 2 : 1,
                         ),
                       ),
@@ -1035,7 +1014,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                           vertical: 4,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Colors.green,
+                                          color: Colors.teal,
                                           borderRadius: BorderRadius.circular(
                                             4,
                                           ),
@@ -1149,7 +1128,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
+                          backgroundColor: Colors.teal,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
@@ -1166,7 +1145,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
+                          backgroundColor: Colors.teal,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
@@ -1204,9 +1183,9 @@ class _AddProductDialogState extends State<AddProductDialog> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.green[50],
+              color: Colors.teal[50],
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.green[100]!),
+              border: Border.all(color: Colors.teal[100]!),
             ),
             child: Column(
               children: [
@@ -1214,7 +1193,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                   children: [
                     Icon(
                       _isDisponivel ? Icons.check_circle : Icons.cancel,
-                      color: _isDisponivel ? Colors.green : Colors.red,
+                      color: _isDisponivel ? Colors.teal : Colors.red,
                     ),
                     const SizedBox(width: 12),
                     const Expanded(
@@ -1228,7 +1207,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                     ),
                     Switch(
                       value: _isDisponivel,
-                      activeThumbColor: Colors.green,
+                      activeThumbColor: Colors.teal,
                       onChanged: (value) {
                         setState(() {
                           _isDisponivel = value;
@@ -1354,23 +1333,23 @@ class _AddProductDialogState extends State<AddProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Valor do Desconto (em R\$)',
-                borderColor: Colors.green[200]!,
-                fillColor: Colors.green[50]!,
+                borderColor: Colors.teal[200]!,
+                fillColor: Colors.teal[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.green,
+                  color: Colors.teal,
                   fontWeight: FontWeight.w600,
                 ),
                 hintText: _hasMultipleSizes
                     ? 'Ex: R\$ 5,00'
                     : 'Valor a ser deduzido do preço',
                 hintStyle: const TextStyle(fontSize: 12),
-                prefixIcon: const Icon(Icons.local_offer, color: Colors.green),
+                prefixIcon: const Icon(Icons.local_offer, color: Colors.teal),
                 helperText: _hasMultipleSizes
                     ? 'Este valor será deduzido automaticamente de todos os preços'
                     : null,
                 helperStyle: TextStyle(
                   fontSize: 12,
-                  color: Colors.green[700],
+                  color: Colors.teal[700],
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -1612,7 +1591,9 @@ class _AddProductDialogState extends State<AddProductDialog> {
               children: [
                 Icon(
                   Icons.tune,
-                  color: _hasMultipleFlavors ? Colors.teal : Colors.grey,
+                  color: _hasMultipleFlavors
+                      ? const Color(0xFF00695C)
+                      : Colors.grey,
                 ),
                 const SizedBox(width: 12),
                 const Expanded(
@@ -1636,7 +1617,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                 ),
                 Switch(
                   value: _hasMultipleFlavors,
-                  activeThumbColor: Colors.teal,
+                  activeThumbColor: const Color(0xFF00695C),
                   onChanged: (value) {
                     setState(() {
                       _hasMultipleFlavors = value;
@@ -1679,7 +1660,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: Colors.teal,
+                            color: const Color(0xFF00695C),
                           ),
                         ),
                       ),
@@ -1769,7 +1750,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                               icon: const Icon(Icons.upload, size: 16),
                               label: const Text('Enviar icone'),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.teal,
+                                foregroundColor: const Color(0xFF00695C),
                                 visualDensity: VisualDensity.compact,
                                 textStyle: const TextStyle(
                                   fontSize: 12,
@@ -1823,7 +1804,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       ),
                       label: const Text('Adicionar'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal,
+                        backgroundColor: const Color(0xFF00695C),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -1838,76 +1819,10 @@ class _AddProductDialogState extends State<AddProductDialog> {
           ],
         ],
       ),
-      actions: SizedBox(
-        width: double.infinity,
-        child: Row(
-          children: [
-            Expanded(
-              child: TextButton(
-                onPressed: () => Navigator.pop(context),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Image.asset(
-                      'assets/icons/menu/cancel_button.png',
-                      width: 18,
-                      height: 18,
-                    ),
-                    const SizedBox(width: 4),
-                    const Text(
-                      'Cancelar',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: ElevatedButton(
-                onPressed: _addProduct,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  elevation: 2,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Image.asset(
-                      'assets/icons/menu/add_button.png',
-                      width: 18,
-                      height: 18,
-                      color: Colors.white,
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'Adicionar',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+      actions: ProductFormDialogActions(
+        onSubmit: _addProduct,
+        submitLabel: 'Adicionar',
+        submitIcon: Icons.add,
       ),
     );
   }

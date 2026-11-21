@@ -1,3 +1,4 @@
+import '../utils/product_links.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/cart_service.dart';
 import '../services/catalog_sync_service.dart';
+import '../services/app_settings_service.dart';
+import '../providers/admin_status_provider.dart';
 import '../services/favorites_service.dart';
 import '../utils/constants.dart';
 import '../utils/app_snackbar.dart';
@@ -40,7 +43,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   bool _isScrollIndicatorAnimating = false;
   bool _keyboardVisible = false;
   late final AnimationController _scrollIndicatorController;
-  RealtimeChannel? _productsChannel;
+  late Map<String, dynamic> _produto;
+  bool _refreshingProduct = false;
+  bool _refreshAgain = false;
   Timer? _similarProductsRefreshDebounce;
   late final VoidCallback _catalogSyncListener;
   bool _hasScrolledDown = false;
@@ -77,6 +82,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   @override
   void initState() {
     super.initState();
+    _produto = Map<String, dynamic>.from(widget.produto);
     WidgetsBinding.instance.addObserver(this);
     _keyboardVisible = _isKeyboardVisibleFromWindow();
     _scrollIndicatorController = AnimationController(
@@ -92,22 +98,18 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       }
     });
     // Se o produto tem tamanhos, selecionar o primeiro por padrão
-    final tamanhos = ProductVariantUtils.extractSizes(
-      widget.produto['tamanhos'],
-    );
+    final tamanhos = ProductVariantUtils.extractSizes(_produto['tamanhos']);
     if (tamanhos.isNotEmpty) {
       _selectedSize = tamanhos.first;
     }
-    final sabores = ProductVariantUtils.extractFlavors(
-      widget.produto['sabores'],
-    );
+    final sabores = ProductVariantUtils.extractFlavors(_produto['sabores']);
     if (sabores.isNotEmpty) {
       _selectedFlavor = sabores.first;
     }
     _pageController = PageController(
       initialPage: _alignedImagePage(
         ProductVariantUtils.productImages(
-          widget.produto,
+          _produto,
           selectedFlavor: _selectedFlavor,
         ).length,
       ),
@@ -118,7 +120,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       _scheduleSimilarProductsRefresh();
     };
     CatalogSyncService.instance.addListener(_catalogSyncListener);
-    _setupRealtimeSubscription();
+    CatalogSyncService.instance.start();
+    AppSettingsService.showProductsWithoutPhotos.addListener(
+      _catalogSyncListener,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scheduleScrollIndicatorAvailabilityChecks();
     });
@@ -130,9 +135,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     _favoritesService.removeListener(_onFavoritesChanged);
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
     _similarProductsRefreshDebounce?.cancel();
-    if (_productsChannel != null) {
-      Supabase.instance.client.removeChannel(_productsChannel!);
-    }
+    AppSettingsService.showProductsWithoutPhotos.removeListener(
+      _catalogSyncListener,
+    );
     _observacoesController.dispose();
     _pageController.dispose();
     _scrollController.dispose();
@@ -161,35 +166,75 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     }
   }
 
-  void _setupRealtimeSubscription() {
-    try {
-      _productsChannel = Supabase.instance.client
-          .channel('product-detail-products-changes-${widget.produto['id']}')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'produtos',
-            callback: (_) => _scheduleSimilarProductsRefresh(),
-          )
-          .subscribe();
-    } catch (e) {
-      debugPrint('Erro ao configurar realtime dos detalhes: $e');
-    }
-  }
-
   void _scheduleSimilarProductsRefresh() {
     _similarProductsRefreshDebounce?.cancel();
     _similarProductsRefreshDebounce = Timer(
       const Duration(milliseconds: 250),
-      () {
-        if (!mounted) return;
-
-        setState(() {
-          _cachedSimilarProducts = null;
-        });
-        _scheduleScrollIndicatorAvailabilityChecks();
-      },
+      _refreshProduct,
     );
+  }
+
+  Map<String, dynamic>? _updatedSelection(
+    List<Map<String, dynamic>> options,
+    Map<String, dynamic>? selected,
+  ) {
+    if (options.isEmpty) return null;
+    return options
+            .where(
+              (option) =>
+                  ProductVariantUtils.optionName(option) ==
+                  ProductVariantUtils.optionName(selected),
+            )
+            .firstOrNull ??
+        options.first;
+  }
+
+  Future<void> _refreshProduct() async {
+    if (!mounted) return;
+    if (_refreshingProduct) {
+      _refreshAgain = true;
+      return;
+    }
+    _refreshingProduct = true;
+    try {
+      final row = await Supabase.instance.client
+          .from('produtos')
+          .select('*, categorias:categoria_id(nome, icone)')
+          .eq('id', _produto['id'])
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() {
+        if (row == null) {
+          _produto = {..._produto, 'ativo': false};
+        } else {
+          _produto = Map<String, dynamic>.from(row);
+          final category = row['categorias'];
+          if (category is Map) {
+            _produto['categoria_nome'] = category['nome'];
+            _produto['categoria_icone'] = category['icone'];
+          }
+          _selectedSize = _updatedSelection(
+            ProductVariantUtils.extractSizes(row['tamanhos']),
+            _selectedSize,
+          );
+          _selectedFlavor = _updatedSelection(
+            ProductVariantUtils.extractFlavors(row['sabores']),
+            _selectedFlavor,
+          );
+        }
+        _cachedSimilarProducts = null;
+        _currentImageIndex = 0;
+      });
+      _scheduleScrollIndicatorAvailabilityChecks();
+    } catch (error) {
+      debugPrint('Não foi possível atualizar o produto: $error');
+    } finally {
+      _refreshingProduct = false;
+      if (_refreshAgain && mounted) {
+        _refreshAgain = false;
+        _scheduleSimilarProductsRefresh();
+      }
+    }
   }
 
   void _scheduleScrollIndicatorAvailabilityChecks() {
@@ -208,7 +253,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   bool _isProductAvailable(Map<String, dynamic> produto) {
-    return produto['ativo'] != false;
+    return produto['ativo'] != false &&
+        AppSettingsService.isProductVisible(
+          produto,
+          isAdmin: AdminStatusProvider.of(context)?.isAdmin ?? false,
+        );
   }
 
   void _showUnavailableProductMessage() {
@@ -299,16 +348,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   Future<void> _toggleFavorite(Map<String, dynamic> produto) async {
     final productId = produto['id'].toString();
     final wasFavorite = _favoritesService.isFavorite(productId);
-    final overlay = Overlay.of(context);
-
+    final overlay = Overlay.of(context, rootOverlay: true);
+    FavoriteHeartAnimation.showWithOverlay(overlay, isFavoriting: !wasFavorite);
     await _favoritesService.toggleFavorite(productId);
-
     if (mounted) {
-      FavoriteHeartAnimation.showWithOverlay(
-        overlay,
-        isFavoriting: !wasFavorite,
-      );
-
       AppSnackBar.showBottom(
         context,
         duration: const Duration(seconds: 2),
@@ -373,14 +416,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                     ),
                     child: IconButton(
                       icon: Icon(
-                        _isFavorite(widget.produto)
+                        _isFavorite(_produto)
                             ? Icons.favorite
                             : Icons.favorite_border,
-                        color: _isFavorite(widget.produto)
+                        color: _isFavorite(_produto)
                             ? Colors.pink
                             : Colors.black87,
                       ),
-                      onPressed: () => _toggleFavorite(widget.produto),
+                      onPressed: () => _toggleFavorite(_produto),
                     ),
                   ),
                   Container(
@@ -481,7 +524,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
   Widget _buildProductImage() {
     final imagens = ProductVariantUtils.productImages(
-      widget.produto,
+      _produto,
       selectedFlavor: _selectedFlavor,
     );
 
@@ -608,7 +651,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // Categoria acima do nome, centralizada
-        if (widget.produto['categoria_nome'] != null) ...[
+        if (_produto['categoria_nome'] != null) ...[
           Center(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -624,14 +667,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                     width: 18,
                     height: 18,
                     child: CategoryIconWidget(
-                      icone: widget.produto['categoria_icone'] ?? '📦',
-                      categoryName: widget.produto['categoria_nome'],
+                      icone: _produto['categoria_icone'] ?? '📦',
+                      categoryName: _produto['categoria_nome'],
                       size: 16,
                     ),
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    widget.produto['categoria_nome'],
+                    _produto['categoria_nome'],
                     style: TextStyle(
                       fontSize: 14,
                       color: Colors.grey[700],
@@ -647,7 +690,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
         // Nome do produto
         Text(
-          widget.produto['nome'] ?? 'Produto sem nome',
+          _produto['nome'] ?? 'Produto sem nome',
           textAlign: TextAlign.center,
           style: const TextStyle(
             fontSize: 28,
@@ -664,9 +707,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Widget _buildSizeSelector() {
-    final tamanhos = ProductVariantUtils.extractSizes(
-      widget.produto['tamanhos'],
-    );
+    final tamanhos = ProductVariantUtils.extractSizes(_produto['tamanhos']);
 
     // Se não tem tamanhos, não mostrar nada
     if (tamanhos.isEmpty) {
@@ -745,9 +786,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Widget _buildPriceAndFlavorSection() {
-    final sabores = ProductVariantUtils.extractFlavors(
-      widget.produto['sabores'],
-    );
+    final sabores = ProductVariantUtils.extractFlavors(_produto['sabores']);
 
     if (sabores.isEmpty) {
       return _buildPriceSection();
@@ -796,7 +835,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                 });
                 if (_pageController.hasClients) {
                   final imageCount = ProductVariantUtils.productImages(
-                    widget.produto,
+                    _produto,
                     selectedFlavor: value,
                   ).length;
                   _pageController.jumpToPage(_alignedImagePage(imageCount));
@@ -910,11 +949,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Widget _buildPriceSection() {
-    final tamanhos = ProductVariantUtils.extractSizes(
-      widget.produto['tamanhos'],
-    );
-    final preco = widget.produto['preco'];
-    final precoAnterior = widget.produto['preco_anterior'];
+    final tamanhos = ProductVariantUtils.extractSizes(_produto['tamanhos']);
+    final preco = _produto['preco'];
+    final precoAnterior = _produto['preco_anterior'];
 
     // Se tem múltiplos tamanhos, mostrar o menor preço
     if (tamanhos.isNotEmpty) {
@@ -1188,11 +1225,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   Widget _buildBadges() {
     List<Widget> badges = [];
 
-    if (widget.produto['mais_vendido'] == true) {
+    if (_produto['mais_vendido'] == true) {
       badges.add(_buildBadge('🔥 Mais Vendido', Colors.red));
     }
 
-    if (widget.produto['novidade'] == true) {
+    if (_produto['novidade'] == true) {
       badges.add(_buildBadge('✨ Novidade', Colors.purple));
     }
 
@@ -1223,7 +1260,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Widget _buildDescription() {
-    final description = widget.produto['descricao']?.toString() ?? '';
+    final description = _produto['descricao']?.toString() ?? '';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1355,8 +1392,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Widget _buildSimilarProducts() {
-    final categoriaId = widget.produto['categoria_id'];
-    final produtoAtualId = widget.produto['id'];
+    final categoriaId = _produto['categoria_id'];
+    final produtoAtualId = _produto['id'];
 
     if (categoriaId == null) {
       return const SizedBox.shrink();
@@ -1468,6 +1505,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     int categoriaId,
     int produtoAtualId,
   ) async {
+    final isAdmin = AdminStatusProvider.of(context)?.isAdmin ?? false;
     try {
       debugPrint('📡 Buscando produtos semelhantes da categoria $categoriaId');
       final supabase = Supabase.instance.client;
@@ -1480,12 +1518,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
           .order('created_at', ascending: false)
           .limit(10);
 
-      final produtos = (response as List).cast<Map<String, dynamic>>()
-        ..sort((a, b) {
-          final aPriority = a['ativo'] == false ? 1 : 0;
-          final bPriority = b['ativo'] == false ? 1 : 0;
-          return aPriority.compareTo(bPriority);
-        });
+      final produtos =
+          (response as List)
+              .cast<Map<String, dynamic>>()
+              .where(
+                (product) => AppSettingsService.isProductVisible(
+                  product,
+                  isAdmin: isAdmin,
+                ),
+              )
+              .toList()
+            ..sort((a, b) {
+              final aPriority = a['ativo'] == false ? 1 : 0;
+              final bPriority = b['ativo'] == false ? 1 : 0;
+              return aPriority.compareTo(bPriority);
+            });
       debugPrint('✅ Encontrados ${produtos.length} produtos semelhantes');
       return produtos;
     } catch (e) {
@@ -2004,7 +2051,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                             } else {
                               precoUnitario =
                                   ProductVariantUtils.toDouble(
-                                    widget.produto['preco'],
+                                    _produto['preco'],
                                   ) ??
                                   0.0;
                             }
@@ -2043,13 +2090,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
   Future<void> _addToCart() async {
     try {
-      if (!_isProductAvailable(widget.produto)) {
+      if (!_isProductAvailable(_produto)) {
         _showUnavailableProductMessage();
         return;
       }
 
       final produtoParaCarrinho = ProductVariantUtils.applySelections(
-        widget.produto,
+        _produto,
         selectedSize: _selectedSize,
         selectedFlavor: _selectedFlavor,
       );
@@ -2077,7 +2124,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
           flavorName: ProductVariantUtils.optionName(_selectedFlavor),
         );
         _showAddedToCartSnackBar(
-          '${widget.produto['nome']}$suffix adicionado ao carrinho!',
+          '${_produto['nome']}$suffix adicionado ao carrinho!',
         );
       }
     } catch (e) {
@@ -2099,13 +2146,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
   Future<void> _buyNow() async {
     try {
-      if (!_isProductAvailable(widget.produto)) {
+      if (!_isProductAvailable(_produto)) {
         _showUnavailableProductMessage();
         return;
       }
 
       final produtoParaCarrinho = ProductVariantUtils.applySelections(
-        widget.produto,
+        _produto,
         selectedSize: _selectedSize,
         selectedFlavor: _selectedFlavor,
       );
@@ -2152,7 +2199,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   void _shareProduct() async {
-    final produto = widget.produto;
+    final produto = _produto;
     final nome = produto['nome'] ?? 'Produto delicioso';
     final precoAtual = ProductVariantUtils.toDouble(produto['preco']);
     final preco = precoAtual != null
@@ -2161,7 +2208,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
     // Gerar link do produto para deep linking
     final produtoId = produto['id'] ?? '';
-    final deepLink = 'https://carrodasdelicias.app/produto/$produtoId';
+    final deepLink = ProductLinks.forProduct(produtoId).toString();
 
     final texto =
         '''
@@ -2179,10 +2226,18 @@ Entre em contato conosco para fazer seu pedido!
     '''
             .trim();
 
+    final box = context.findRenderObject() as RenderBox?;
+    final shareOrigin = box == null
+        ? null
+        : box.localToGlobal(Offset.zero) & box.size;
     try {
       // Compartilhar usando o sistema nativo (WhatsApp, Facebook, etc.)
       await SharePlus.instance.share(
-        ShareParams(text: texto, subject: 'Produto: $nome'),
+        ShareParams(
+          text: texto,
+          subject: 'Produto: $nome',
+          sharePositionOrigin: shareOrigin,
+        ),
       );
     } catch (e) {
       // Em caso de erro, mostrar mensagem

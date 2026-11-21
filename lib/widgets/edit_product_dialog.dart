@@ -486,23 +486,6 @@ class _EditProductDialogState extends State<EditProductDialog> {
     }
   }
 
-  Widget _buildFeatureCheckbox({
-    required String title,
-    required bool value,
-    required Color activeColor,
-    required ValueChanged<bool?> onChanged,
-  }) {
-    return Material(
-      type: MaterialType.transparency,
-      child: CheckboxListTile(
-        title: Text(title),
-        value: value,
-        activeColor: activeColor,
-        onChanged: onChanged,
-      ),
-    );
-  }
-
   Future<void> _ensureFlavorPersistence(
     dynamic produtoId,
     List<Map<String, dynamic>>? expectedSabores,
@@ -936,33 +919,9 @@ class _EditProductDialogState extends State<EditProductDialog> {
 
     return ProductFormDialogShell(
       width: dialogWidth,
-      title: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Colors.blue, Colors.indigo],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.edit, color: Colors.white, size: 28),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Editar ${widget.produto['nome']}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
+      title: const ProductFormDialogHeader(
+        title: 'Editar Produto',
+        icon: Icons.edit,
       ),
       body: Column(
         mainAxisSize: MainAxisSize.min,
@@ -974,13 +933,13 @@ class _EditProductDialogState extends State<EditProductDialog> {
             autocorrect: false,
             decoration: productDialogInputDecoration(
               labelText: 'Nome do Produto *',
-              borderColor: Colors.blue[200]!,
-              fillColor: Colors.blue[50]!,
+              borderColor: Colors.teal[200]!,
+              fillColor: Colors.teal[50]!,
               labelStyle: const TextStyle(
-                color: Colors.blue,
+                color: Colors.teal,
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.blue),
+              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.teal),
             ),
           ),
           const SizedBox(height: 16),
@@ -1007,15 +966,15 @@ class _EditProductDialogState extends State<EditProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Preço *',
-                borderColor: Colors.blue[200]!,
-                fillColor: Colors.blue[50]!,
+                borderColor: Colors.teal[200]!,
+                fillColor: Colors.teal[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.blue,
+                  color: Colors.teal,
                   fontWeight: FontWeight.w600,
                 ),
                 prefixIcon: const Icon(
                   Icons.payments_outlined,
-                  color: Colors.blue,
+                  color: Colors.teal,
                 ),
                 hintText: 'R\$ 0,00',
                 hintStyle: TextStyle(
@@ -1031,13 +990,13 @@ class _EditProductDialogState extends State<EditProductDialog> {
             isExpanded: true,
             decoration: productDialogInputDecoration(
               labelText: 'Categoria *',
-              borderColor: Colors.blue[200]!,
-              fillColor: Colors.blue[50]!,
+              borderColor: Colors.teal[200]!,
+              fillColor: Colors.teal[50]!,
               labelStyle: const TextStyle(
-                color: Colors.blue,
+                color: Colors.teal,
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(Icons.category, color: Colors.blue),
+              prefixIcon: const Icon(Icons.category, color: Colors.teal),
             ),
             items: widget.categorias.map((categoria) {
               return DropdownMenuItem<String>(
@@ -1082,14 +1041,16 @@ class _EditProductDialogState extends State<EditProductDialog> {
               children: [
                 Row(
                   children: [
-                    const Text(
-                      'Imagens do Produto',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                    const Expanded(
+                      child: Text(
+                        'Imagens do Produto',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 8),
                     if (_productImages.isNotEmpty)
                       Text(
                         '${_productImages.length} ${_productImages.length == 1 ? "imagem" : "imagens"}',
@@ -1126,7 +1087,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: index == 0 ? Colors.blue : Colors.grey[300]!,
+                            color: index == 0 ? Colors.teal : Colors.grey[300]!,
                             width: index == 0 ? 2 : 1,
                           ),
                         ),
@@ -1190,7 +1151,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                                         vertical: 4,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: Colors.blue,
+                                        color: Colors.teal,
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: const Text(
@@ -1398,7 +1359,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                               : 'Adicionar Mais',
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
+                          backgroundColor: Colors.teal,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -1464,105 +1425,183 @@ class _EditProductDialogState extends State<EditProductDialog> {
           ),
           const SizedBox(height: 20),
 
-          // Características
+          // Características (Switches)
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.orange[50],
+              color: Colors.teal[50],
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.orange[200]!),
+              border: Border.all(color: Colors.teal[100]!),
             ),
             child: Column(
               children: [
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.star, color: Colors.orange, size: 20),
-                    SizedBox(width: 8),
-                    Text(
-                      'Características',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.orange,
+                    Icon(
+                      _isDisponivel ? Icons.check_circle : Icons.cancel,
+                      color: _isDisponivel ? Colors.teal : Colors.red,
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Produto Disponível',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
+                    ),
+                    Switch(
+                      value: _isDisponivel,
+                      activeThumbColor: Colors.teal,
+                      onChanged: (value) {
+                        setState(() {
+                          _isDisponivel = value;
+                        });
+                      },
                     ),
                   ],
                 ),
-                _buildFeatureCheckbox(
-                  title: 'Produto Disponível',
-                  value: _isDisponivel,
-                  activeColor: Colors.green,
-                  onChanged: (value) {
-                    setState(() {
-                      _isDisponivel = value ?? true;
-                    });
-                  },
+                const Divider(),
+                Row(
+                  children: [
+                    Icon(
+                      _isMaisVendido ? Icons.star : Icons.star_border,
+                      color: _isMaisVendido ? Colors.amber : Colors.grey,
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Mais Vendido',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Switch(
+                      value: _isMaisVendido,
+                      activeThumbColor: Colors.amber,
+                      onChanged: (value) {
+                        setState(() {
+                          _isMaisVendido = value;
+                        });
+                      },
+                    ),
+                  ],
                 ),
-                _buildFeatureCheckbox(
-                  title: 'Mais Vendido',
-                  value: _isMaisVendido,
-                  activeColor: Colors.orange,
-                  onChanged: (value) {
-                    setState(() {
-                      _isMaisVendido = value ?? false;
-                    });
-                  },
-                ),
-                _buildFeatureCheckbox(
-                  title: 'Novidade',
-                  value: _isNovidade,
-                  activeColor: Colors.orange,
-                  onChanged: (value) {
-                    setState(() {
-                      _isNovidade = value ?? false;
-                    });
-                  },
-                ),
-                _buildFeatureCheckbox(
-                  title: 'Produto em Promoção',
-                  value: _isPromocao,
-                  activeColor: Colors.orange,
-                  onChanged: (value) {
-                    setState(() {
-                      _isPromocao = value ?? false;
-                    });
-                  },
+                const Divider(),
+                Row(
+                  children: [
+                    Icon(
+                      _isNovidade ? Icons.fiber_new : Icons.fiber_new_outlined,
+                      color: _isNovidade ? Colors.orange : Colors.grey,
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Novidade',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Switch(
+                      value: _isNovidade,
+                      activeThumbColor: Colors.orange,
+                      onChanged: (value) {
+                        setState(() {
+                          _isNovidade = value;
+                        });
+                      },
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
 
+          // Switch para Produto com Desconto
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.orange[50],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.orange[100]!),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _isPromocao ? Icons.discount : Icons.discount_outlined,
+                  color: _isPromocao ? Colors.orange : Colors.grey,
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Produto com Desconto',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Ative para definir preço anterior e preço com desconto',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _isPromocao,
+                  activeThumbColor: Colors.orange,
+                  onChanged: (value) {
+                    setState(() {
+                      _isPromocao = value;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+
           // Campo de Desconto (visível quando marcado como promoção)
-          if (_isPromocao)
+          if (_isPromocao) ...[
+            const SizedBox(height: 16),
             TextField(
               controller: _valorDescontoController,
               keyboardType: TextInputType.number,
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Valor do Desconto (em R\$)',
-                borderColor: Colors.green[200]!,
-                fillColor: Colors.green[50]!,
+                borderColor: Colors.teal[200]!,
+                fillColor: Colors.teal[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.green,
+                  color: Colors.teal,
                   fontWeight: FontWeight.w600,
                 ),
                 hintText: _hasMultipleSizes
                     ? 'Ex: R\$ 5,00'
                     : 'Valor a ser deduzido do preço',
                 hintStyle: const TextStyle(fontSize: 12),
-                prefixIcon: const Icon(Icons.local_offer, color: Colors.green),
+                prefixIcon: const Icon(Icons.local_offer, color: Colors.teal),
                 helperText: _hasMultipleSizes
                     ? 'Este valor será deduzido automaticamente de todos os preços'
                     : null,
                 helperStyle: TextStyle(
                   fontSize: 12,
-                  color: Colors.green[700],
+                  color: Colors.teal[700],
                   fontStyle: FontStyle.italic,
                 ),
               ),
             ),
-          if (_isPromocao) const SizedBox(height: 16),
+          ],
+          const SizedBox(height: 16),
 
           // Switch para Múltiplos Tamanhos
           Container(
@@ -1970,51 +2009,10 @@ class _EditProductDialogState extends State<EditProductDialog> {
           ],
         ], // Fecha children do Column
       ), // Fecha Column
-      actions: SizedBox(
-        width: double.infinity,
-        child: Row(
-          children: [
-            Expanded(
-              child: TextButton(
-                onPressed: () => Navigator.pop(context),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Image.asset(
-                      'assets/icons/menu/cancel_button.png',
-                      width: 18,
-                      height: 18,
-                    ),
-                    const SizedBox(width: 4),
-                    const Text(
-                      'Cancelar',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _updateProduct,
-                icon: const Icon(Icons.save, size: 18),
-                label: const Text(
-                  'Salvar Alterações',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ),
-          ],
-        ),
+      actions: ProductFormDialogActions(
+        onSubmit: _updateProduct,
+        submitLabel: 'Salvar alterações',
+        submitIcon: Icons.save,
       ),
     );
   }

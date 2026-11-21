@@ -1,3 +1,4 @@
+import 'password_recovery_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -451,17 +452,9 @@ class _RegisterScreenState extends State<RegisterScreen>
         if (response.session != null) {
           _returnToAuthRoot();
         } else {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => _ConfirmEmailDialog(
-              email: email,
-              onDone: () {
-                Navigator.of(context).pop();
-                if (Navigator.of(context).canPop()) {
-                  Navigator.of(context).pop();
-                }
-              },
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => EmailConfirmationScreen(email: email),
             ),
           );
         }
@@ -506,7 +499,7 @@ class _RegisterScreenState extends State<RegisterScreen>
       email: email,
       password: password,
       data: userMetadata,
-      emailRedirectTo: 'carrodasdelicias://auth-callback',
+      emailRedirectTo: AuthEmailLinks.callback,
     );
   }
 

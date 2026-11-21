@@ -23,6 +23,8 @@ import '../utils/scroll_indicator_layout.dart';
 import '../services/favorites_service.dart';
 import '../services/cart_service.dart';
 import '../services/catalog_sync_service.dart';
+import '../services/app_settings_service.dart';
+import '../utils/flavor_icon_assets.dart';
 import '../services/fuzzy_search_service.dart';
 import '../services/main_navigation_service.dart';
 import '../widgets/main_navigation_provider.dart';
@@ -96,6 +98,9 @@ class _HomeScreenState extends State<HomeScreen>
   List<Map<String, dynamic>> _produtos = [];
   List<Map<String, dynamic>> _categorias = [];
   bool _isLoading = true;
+  bool _isOpeningProductEditor = false;
+  bool _catalogLoadInProgress = false;
+  bool _catalogReloadRequested = false;
   bool _isAdmin = false;
   bool _isOfflineMode = false;
   bool _adminStatusChecked = false;
@@ -368,6 +373,9 @@ class _HomeScreenState extends State<HomeScreen>
 
     // Carregar favoritos e escutar mudanças
     _favoritesService.addListener(_onFavoritesChanged);
+    AppSettingsService.showProductsWithoutPhotos.addListener(
+      _onFavoritesChanged,
+    );
     _favoritesService.loadFavorites();
     _catalogSyncListener = () {
       _scheduleCatalogReload(preserveScrollPosition: true);
@@ -383,61 +391,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _setupRealtimeSubscription() {
-    try {
-      final supabase = Supabase.instance.client;
-      final previousChannel = _productsChannel;
-      if (previousChannel != null) {
-        unawaited(supabase.removeChannel(previousChannel));
-      }
-      final previousCategoriesChannel = _categoriesChannel;
-      if (previousCategoriesChannel != null) {
-        unawaited(supabase.removeChannel(previousCategoriesChannel));
-      }
-      _realtimeReconnectTimer?.cancel();
-
-      _productsChannel = supabase
-          .channel('home-catalog-changes:$hashCode')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'produtos',
-            callback: (_) {
-              _scheduleCatalogReload(preserveScrollPosition: true);
-            },
-          )
-          .subscribe((status, error) {
-            if (!mounted) return;
-            if (status == RealtimeSubscribeStatus.channelError ||
-                status == RealtimeSubscribeStatus.timedOut) {
-              debugPrint('Erro no realtime da tela inicial: $error');
-              _realtimeReconnectTimer?.cancel();
-              _realtimeReconnectTimer = Timer(
-                const Duration(seconds: 3),
-                _setupRealtimeSubscription,
-              );
-            }
-          });
-      _categoriesChannel = supabase
-          .channel('home-category-changes:$hashCode')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'categorias',
-            callback: (_) {
-              _scheduleCatalogReload(preserveScrollPosition: true);
-            },
-          )
-          .subscribe((status, error) {
-            if (status == RealtimeSubscribeStatus.channelError ||
-                status == RealtimeSubscribeStatus.timedOut) {
-              debugPrint('Realtime de categorias indisponível: $error');
-            }
-          });
-
-      debugPrint('✅ Subscription de tempo real configurada');
-    } catch (e) {
-      debugPrint('❌ Erro ao configurar subscription: $e');
-    }
+    CatalogSyncService.instance.start();
   }
 
   void _onFavoritesChanged() {
@@ -514,6 +468,9 @@ class _HomeScreenState extends State<HomeScreen>
     _selectedCategoryNotifier.dispose();
     _sortOptionNotifier.dispose();
     _favoritesService.removeListener(_onFavoritesChanged);
+    AppSettingsService.showProductsWithoutPhotos.removeListener(
+      _onFavoritesChanged,
+    );
     CatalogSyncService.instance.removeListener(_catalogSyncListener);
     _productsChannel?.unsubscribe();
     _categoriesChannel?.unsubscribe();
@@ -570,6 +527,32 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadData({
+    bool preserveScrollPosition = false,
+    bool showLoadingIndicator = true,
+  }) async {
+    if (_catalogLoadInProgress) {
+      _catalogReloadRequested = true;
+      return;
+    }
+    _catalogLoadInProgress = true;
+    try {
+      await _loadDataInternal(
+        preserveScrollPosition: preserveScrollPosition,
+        showLoadingIndicator: showLoadingIndicator,
+      );
+      if (mounted) {
+        unawaited(FlavorIconAssets.precacheForProducts(context, _produtos));
+      }
+    } finally {
+      _catalogLoadInProgress = false;
+      if (_catalogReloadRequested && mounted) {
+        _catalogReloadRequested = false;
+        _scheduleCatalogReload(preserveScrollPosition: true);
+      }
+    }
+  }
+
+  Future<void> _loadDataInternal({
     bool preserveScrollPosition = false,
     bool showLoadingIndicator = true,
   }) async {
@@ -888,6 +871,13 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  List<Map<String, dynamic>> get _visibleProducts => _produtos
+      .where(
+        (product) =>
+            AppSettingsService.isProductVisible(product, isAdmin: _isAdmin),
+      )
+      .toList();
+
   List<Map<String, dynamic>> get _filteredProducts {
     // Verificar se precisa reprocessar o cache
     if (_cachedFilteredProducts == null ||
@@ -899,7 +889,7 @@ class _HomeScreenState extends State<HomeScreen>
       );
 
       // Primeiro, filtrar por categoria
-      var categoryFiltered = _produtos.where((produto) {
+      var categoryFiltered = _visibleProducts.where((produto) {
         if (_selectedCategory == 'Todos') return true;
         if (_selectedCategory == 'Favoritos') {
           final productId = produto['id'].toString();
@@ -918,30 +908,42 @@ class _HomeScreenState extends State<HomeScreen>
         _cachedFilteredProducts = categoryFiltered;
       }
 
-      final filteredProducts =
-          _cachedFilteredProducts ?? <Map<String, dynamic>>[];
-      _cachedFilteredProducts =
-          List<Map<String, dynamic>>.from(filteredProducts)..sort((a, b) {
-            final availabilityCompare = (a['ativo'] == false ? 1 : 0).compareTo(
-              b['ativo'] == false ? 1 : 0,
-            );
-            if (availabilityCompare != 0) {
-              return availabilityCompare;
-            }
+      final ranked = _cachedFilteredProducts ?? <Map<String, dynamic>>[];
+      if (_searchQuery.isNotEmpty) {
+        // Mantém a relevância da busca; a ordenação por data não pode sobrescrevê-la.
+        _cachedFilteredProducts = [
+          ...ranked.where((p) => p['ativo'] != false),
+          ...ranked.where((p) => p['ativo'] == false),
+        ];
+      } else {
+        final filteredProducts =
+            _cachedFilteredProducts ?? <Map<String, dynamic>>[];
+        _cachedFilteredProducts =
+            List<Map<String, dynamic>>.from(filteredProducts)..sort((a, b) {
+              final availabilityCompare = (a['ativo'] == false ? 1 : 0)
+                  .compareTo(b['ativo'] == false ? 1 : 0);
+              if (availabilityCompare != 0) {
+                return availabilityCompare;
+              }
 
-            if (_sortOption == ProductSortOption.alphabetical) {
-              return (a['nome'] ?? '').toString().toLowerCase().compareTo(
-                (b['nome'] ?? '').toString().toLowerCase(),
+              if (_sortOption == ProductSortOption.alphabetical) {
+                return (a['nome'] ?? '').toString().toLowerCase().compareTo(
+                  (b['nome'] ?? '').toString().toLowerCase(),
+                );
+              }
+
+              final aDate = DateTime.tryParse(
+                a['created_at']?.toString() ?? '',
               );
-            }
-
-            final aDate = DateTime.tryParse(a['created_at']?.toString() ?? '');
-            final bDate = DateTime.tryParse(b['created_at']?.toString() ?? '');
-            if (aDate != null && bDate != null) {
-              return bDate.compareTo(aDate);
-            }
-            return 0;
-          });
+              final bDate = DateTime.tryParse(
+                b['created_at']?.toString() ?? '',
+              );
+              if (aDate != null && bDate != null) {
+                return bDate.compareTo(aDate);
+              }
+              return 0;
+            });
+      }
 
       // Atualizar cache
       _lastSearchQuery = _searchQuery;
@@ -953,7 +955,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<Map<String, dynamic>> get _maisVendidos {
-    var produtos = _produtos.where((p) => p['mais_vendido'] == true);
+    var produtos = _visibleProducts.where((p) => p['mais_vendido'] == true);
 
     // Filtrar por categoria se não for 'Todos' e não for 'Favoritos'
     if (_selectedCategory != 'Todos' && _selectedCategory != 'Favoritos') {
@@ -966,7 +968,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<Map<String, dynamic>> get _novidades {
-    var produtos = _produtos.where((p) => p['novidade'] == true);
+    var produtos = _visibleProducts.where((p) => p['novidade'] == true);
 
     // Filtrar por categoria se não for 'Todos' e não for 'Favoritos'
     if (_selectedCategory != 'Todos' && _selectedCategory != 'Favoritos') {
@@ -980,7 +982,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   List<Map<String, dynamic>> _getProdutosEmDestaque() {
     // Produtos em destaque são os que são novidades OU mais vendidos
-    var produtos = _produtos.where(
+    var produtos = _visibleProducts.where(
       (p) => p['novidade'] == true || p['mais_vendido'] == true,
     );
 
@@ -1853,8 +1855,8 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  void _showAdminOptions(Map<String, dynamic> produto) {
-    showModalBottomSheet(
+  Future<void> _showAdminOptions(Map<String, dynamic> produto) async {
+    final action = await showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -1887,8 +1889,7 @@ class _HomeScreenState extends State<HomeScreen>
                 leading: const Icon(Icons.edit, color: Colors.blue),
                 title: const Text('Editar Produto'),
                 onTap: () {
-                  Navigator.pop(context);
-                  _showEditProductDialog(produto);
+                  Navigator.pop(context, 'edit');
                 },
               ),
               const Divider(),
@@ -1901,8 +1902,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 title: const Text('Excluir Produto'),
                 onTap: () {
-                  Navigator.pop(context);
-                  _showDeleteConfirmation(produto);
+                  Navigator.pop(context, 'delete');
                 },
               ),
               const SizedBox(height: 10),
@@ -1911,48 +1911,50 @@ class _HomeScreenState extends State<HomeScreen>
         );
       },
     );
+    if (!mounted) return;
+    if (action == 'edit') await _showEditProductDialog(produto);
+    if (action == 'delete') _showDeleteConfirmation(produto);
   }
 
   Future<void> _showEditProductDialog(Map<String, dynamic> produto) async {
+    if (!mounted || _isOpeningProductEditor) return;
+    _isOpeningProductEditor = true;
     try {
-      // Buscar categorias do Supabase
-      final response = await Supabase.instance.client
-          .from('categorias')
-          .select()
-          .order('ordem', ascending: true);
-
-      final categorias = List<Map<String, dynamic>>.from(response);
-
+      final categories = _categorias.isNotEmpty
+          ? List<Map<String, dynamic>>.from(_categorias)
+          : List<Map<String, dynamic>>.from(
+              await Supabase.instance.client
+                  .from('categorias')
+                  .select()
+                  .order('ordem')
+                  .timeout(const Duration(seconds: 10)),
+            );
       if (!mounted) return;
-
-      showDialog(
+      final latest =
+          _produtos
+              .where((p) => p['id'].toString() == produto['id'].toString())
+              .firstOrNull ??
+          produto;
+      await showDialog<void>(
         context: context,
-        builder: (context) => EditProductDialog(
-          produto: produto,
-          categorias: categorias,
-          onProductUpdated: () {
-            // Recarregar dados
-            _refreshData();
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Produto atualizado com sucesso!'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            }
-          },
+        useRootNavigator: true,
+        builder: (_) => EditProductDialog(
+          produto: Map<String, dynamic>.from(latest),
+          categorias: categories,
+          onProductUpdated: () =>
+              _scheduleCatalogReload(preserveScrollPosition: true),
         ),
       );
-    } catch (e) {
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao carregar categorias: $e'),
-            backgroundColor: Colors.red,
+          const SnackBar(
+            content: Text('Não foi possível abrir o produto. Tente novamente.'),
           ),
         );
       }
+    } finally {
+      _isOpeningProductEditor = false;
     }
   }
 
@@ -2272,41 +2274,25 @@ class _HomeScreenState extends State<HomeScreen>
                               final wasFavorite = _favoritesService.isFavorite(
                                 productId,
                               );
-                              // Capture overlay before any async gaps
-                              final overlay = Overlay.of(context);
-
-                              // Feedback sonoro customizado
-                              try {
-                                debugPrint(
-                                  '🔊 Tentando reproduzir som de feedback...',
-                                );
-                                if (wasFavorite) {
-                                  await _audioPlayer.play(
-                                    AssetSource('sounds/favorite_off.wav'),
-                                    mode: PlayerMode.lowLatency,
-                                  );
-                                } else {
-                                  await _audioPlayer.play(
-                                    AssetSource('sounds/favorite_on.wav'),
-                                    mode: PlayerMode.lowLatency,
-                                  );
-                                }
-                                debugPrint('✅ Comando de som enviado');
-                              } catch (e) {
-                                debugPrint('❌ Erro ao reproduzir som: $e');
-                              }
-
+                              FavoriteHeartAnimation.showWithOverlay(
+                                Overlay.of(this.context, rootOverlay: true),
+                                isFavoriting: !wasFavorite,
+                              );
+                              unawaited(
+                                _audioPlayer
+                                    .play(
+                                      AssetSource(
+                                        wasFavorite
+                                            ? 'sounds/favorite_off.wav'
+                                            : 'sounds/favorite_on.wav',
+                                      ),
+                                      mode: PlayerMode.lowLatency,
+                                    )
+                                    .catchError((_) {}),
+                              );
                               await _favoritesService.toggleFavorite(productId);
-
+                              if (!mounted) return;
                               setState(() {});
-
-                              // Mostrar animação de coração
-                              if (mounted) {
-                                FavoriteHeartAnimation.showWithOverlay(
-                                  overlay,
-                                  isFavoriting: !wasFavorite,
-                                );
-                              }
 
                               if (mounted) {
                                 AppSnackBar.showBottom(

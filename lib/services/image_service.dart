@@ -159,19 +159,9 @@ class ImageService {
 
   /// Mostrar diálogo para seleção de imagem
   static Future<File?> showImagePickerDialog(BuildContext context) async {
-    // Verificar permissões antes de mostrar o diálogo
-    final hasPermissions = await PermissionService.requestPermissionsWithDialog(
-      context,
-    );
-
-    if (!hasPermissions) {
-      if (context.mounted) {
-        PermissionService.showPermissionDeniedMessage(context);
-      }
-      return null;
-    }
-
-    // Usar um novo context para o diálogo
+    // A galeria usa o seletor de fotos do sistema (Photo Picker), que não
+    // requer nenhuma permissão. A permissão de câmera só é solicitada se o
+    // usuário escolher a opção "Câmera".
     if (!context.mounted) return null;
 
     return showDialog<File?>(
@@ -197,6 +187,12 @@ class ImageService {
               leading: const Icon(Icons.camera_alt),
               title: const Text('Câmera'),
               onTap: () async {
+                // A câmera é a única opção que requer permissão
+                final hasPermission = await PermissionService
+                    .requestCameraPermissionWithDialog(dialogContext);
+                if (!hasPermission) {
+                  return;
+                }
                 // Pega a imagem primeiro
                 final image = await pickImageFromCamera();
                 // Depois fecha o diálogo retornando a imagem

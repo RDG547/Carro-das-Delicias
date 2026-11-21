@@ -60,6 +60,53 @@ class AppSettingsService {
   static final SupabaseClient _supabase = Supabase.instance.client;
   static const String _tableName = 'app_settings';
   static const String _cashPaymentKey = 'cash_payment';
+  static final ValueNotifier<bool> showProductsWithoutPhotos = ValueNotifier(
+    true,
+  );
+
+  static bool hasProductPhoto(Map<String, dynamic> product) {
+    if ((product['imagem_url']?.toString().trim() ?? '').isNotEmpty) {
+      return true;
+    }
+    final images = product['imagens'];
+    return images is List &&
+        images.any(
+          (image) => image != null && image.toString().trim().isNotEmpty,
+        );
+  }
+
+  static bool isProductVisible(
+    Map<String, dynamic> product, {
+    required bool isAdmin,
+  }) => isAdmin || showProductsWithoutPhotos.value || hasProductPhoto(product);
+
+  static Future<void> loadCatalogVisibility() async {
+    try {
+      final row = await _supabase
+          .from(_tableName)
+          .select('value')
+          .eq('key', 'catalog_visibility')
+          .maybeSingle()
+          .timeout(const Duration(seconds: 5));
+      final value = row?['value'];
+      showProductsWithoutPhotos.value = value is Map
+          ? value['show_products_without_photos'] != false
+          : true;
+    } catch (error) {
+      debugPrint(
+        'Não foi possível atualizar a visibilidade do catálogo: $error',
+      );
+    }
+  }
+
+  static Future<void> saveCatalogVisibility(bool showWithoutPhotos) async {
+    await _supabase.from(_tableName).upsert({
+      'key': 'catalog_visibility',
+      'value': {'show_products_without_photos': showWithoutPhotos},
+      'updated_at': DateTime.now().toIso8601String(),
+    }, onConflict: 'key');
+    showProductsWithoutPhotos.value = showWithoutPhotos;
+  }
 
   static Future<CashPaymentSettings> getCashPaymentSettings() async {
     try {

@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import '../config/supabase_config.dart';
+import '../services/delivery_geofence_service.dart';
 import '../services/location_tracking_service.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/main_navigation_provider.dart';
@@ -35,6 +33,8 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
   double _currentZoom = 16.0;
   String? _currentAddress;
   bool _isLoadingAddress = false;
+  String? _lastGeocodeKey;
+  int _addressRequestId = 0;
 
   // Multi-Kombi support
   List<Map<String, dynamic>> _allKombis = [];
@@ -301,146 +301,34 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
 
   Future<void> _reverseGeocode(double latitude, double longitude) async {
     if (!mounted) return;
-
-    debugPrint('🌍 Iniciando geocodificação reversa...');
-    debugPrint('📍 Lat: $latitude, Lng: $longitude');
-
+    final key =
+        '${latitude.toStringAsFixed(4)},${longitude.toStringAsFixed(4)}';
+    if (_lastGeocodeKey == key) return;
+    _lastGeocodeKey = key;
+    final requestId = ++_addressRequestId;
     setState(() => _isLoadingAddress = true);
-
     try {
-      // Usando Mapbox Geocoding API com token centralizado
-      final url = Uri.parse(
-        'https://api.mapbox.com/geocoding/v5/mapbox.places/$longitude,$latitude.json?access_token=${SupabaseConfig.mapboxAccessToken}&types=address,place,postcode,locality,neighborhood&language=pt',
-      );
-
-      debugPrint('🔗 URL da API: $url');
-
-      final response = await http.get(url);
-
-      debugPrint('📡 Status da resposta: ${response.statusCode}');
-      debugPrint(
-        '📄 Corpo da resposta: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}...',
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final features = data['features'] as List?;
-
-        if (features != null && features.isNotEmpty && mounted) {
-          final feature = features[0];
-          final placeName = feature['place_name'] as String?;
-
-          // Extrair componentes do endereço
-          String? rua, numero, bairro, cidade, estado, cep;
-
-          final context = feature['context'] as List?;
-          if (context != null) {
-            for (var item in context) {
-              final id = item['id'] as String;
-              final text = item['text'] as String;
-
-              if (id.startsWith('neighborhood')) {
-                bairro = text;
-              } else if (id.startsWith('place')) {
-                cidade = text;
-              } else if (id.startsWith('region')) {
-                estado = text;
-              } else if (id.startsWith('postcode')) {
-                cep = text;
-              }
-            }
-          }
-
-          // Rua e número vêm do place_name
-          if (placeName != null) {
-            final parts = placeName.split(',');
-            if (parts.isNotEmpty) {
-              final firstPart = parts[0].trim();
-              // Tentar extrair número usando split
-              String? extractedNumero;
-              String? extractedRua;
-
-              // Procurar por dígitos no texto
-              for (int i = 0; i < firstPart.length; i++) {
-                if (firstPart.codeUnitAt(i) >= 48 &&
-                    firstPart.codeUnitAt(i) <= 57) {
-                  // Encontrou um dígito
-                  int start = i;
-                  while (i < firstPart.length &&
-                      firstPart.codeUnitAt(i) >= 48 &&
-                      firstPart.codeUnitAt(i) <= 57) {
-                    i++;
-                  }
-                  extractedNumero = firstPart.substring(start, i);
-                  extractedRua = firstPart
-                      .replaceAll(extractedNumero, '')
-                      .trim();
-                  break;
-                }
-              }
-
-              if (extractedNumero != null && extractedRua != null) {
-                numero = extractedNumero;
-                rua = extractedRua;
-              } else {
-                rua = firstPart;
-              }
-            }
-          }
-
-          // Montar endereço formatado
-          final addressParts = <String>[];
-          if (rua != null && rua.isNotEmpty) {
-            if (numero != null) {
-              addressParts.add('$rua, $numero');
-            } else {
-              addressParts.add(rua);
-            }
-          }
-          if (bairro != null) addressParts.add(bairro);
-          if (cidade != null) addressParts.add(cidade);
-          if (estado != null) addressParts.add(estado);
-          if (cep != null) addressParts.add('CEP: $cep');
-
-          setState(() {
-            _currentAddress = addressParts.isNotEmpty
-                ? addressParts.join(' • ')
-                : placeName ?? 'Endereço não disponível';
-            _isLoadingAddress = false;
-          });
-
-          debugPrint('📍 Endereço obtido: $_currentAddress');
-        } else {
-          // Sem resultados - não é necessariamente um erro
-          if (mounted) {
-            setState(() {
-              _currentAddress = 'Localização não especificada';
-              _isLoadingAddress = false;
-            });
-          }
-          // Log apenas para debug, sem emoji de aviso
-          debugPrint(
-            'ℹ️ Geocodificação reversa sem resultados para estas coordenadas',
-          );
-        }
-      } else {
-        // Resposta não foi 200
-        if (mounted) {
-          setState(() {
-            _currentAddress = 'Não foi possível obter o endereço';
-            _isLoadingAddress = false;
-          });
-        }
-        debugPrint('❌ Erro na API de geocodificação: ${response.statusCode}');
-      }
-    } catch (e) {
-      debugPrint('❌ Erro ao obter endereço: $e');
-      if (mounted) {
-        setState(() {
-          _currentAddress = 'Não foi possível obter o endereço';
-          _isLoadingAddress = false;
-        });
-      }
+      final address = await DeliveryGeofenceService.instance
+          .reverseGeocodeCoordinates(latitude: latitude, longitude: longitude);
+      if (!mounted || requestId != _addressRequestId) return;
+      final parts = [
+        address?.endereco,
+        address?.numero,
+        address?.bairro,
+        address?.cidade,
+      ].whereType<String>().where((part) => part.trim().isNotEmpty);
+      setState(() {
+        _currentAddress = parts.isEmpty
+            ? 'Endereço não disponível'
+            : parts.join(', ');
+        _isLoadingAddress = false;
+      });
+    } catch (_) {
+      if (!mounted || requestId != _addressRequestId) return;
+      setState(() {
+        _currentAddress = 'Endereço não disponível';
+        _isLoadingAddress = false;
+      });
     }
   }
 

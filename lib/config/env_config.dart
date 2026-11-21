@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Helper para acessar configurações injetadas via --dart-define.
 ///
 /// Não injete chaves secretas em builds de release. Apps Flutter são
@@ -14,8 +16,12 @@ class EnvConfig {
   // desenvolvimento local; os serviços bloqueiam seu uso em kReleaseMode.
   static const Map<String, String> _dartDefines = {
     'GOOGLE_WEB_CLIENT_ID': String.fromEnvironment('GOOGLE_WEB_CLIENT_ID'),
-    'STRIPE_SECRET_KEY': String.fromEnvironment('STRIPE_SECRET_KEY'),
+    'STRIPE_SECRET_KEY': kReleaseMode
+        ? ''
+        : String.fromEnvironment('STRIPE_SECRET_KEY'),
     'STRIPE_PUBLISHABLE_KEY': String.fromEnvironment('STRIPE_PUBLISHABLE_KEY'),
-    'ABACATEPAY_API_KEY': String.fromEnvironment('ABACATEPAY_API_KEY'),
+    'ABACATEPAY_API_KEY': kReleaseMode
+        ? ''
+        : String.fromEnvironment('ABACATEPAY_API_KEY'),
   };
 }

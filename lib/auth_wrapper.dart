@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
+import 'screens/password_recovery_screen.dart';
 import 'screens/main_screen.dart';
 import 'services/auth_profile_sync_service.dart';
 import 'services/notification_service.dart';
@@ -20,6 +21,7 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   bool _isLoading = true;
+  bool _isPasswordRecovery = false;
   User? _user;
   StreamSubscription<AuthState>? _authSubscription;
   String? _authenticatedServicesUserId;
@@ -30,6 +32,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _checkAuth();
+    DeepLinkService().onPasswordRecovery = _enterPasswordRecovery;
 
     // Inicializar deep link service
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -42,6 +45,11 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       data,
     ) {
       final newUser = data.session?.user;
+      if (data.event == AuthChangeEvent.passwordRecovery &&
+          data.session != null) {
+        _enterPasswordRecovery();
+      }
+      if (data.event == AuthChangeEvent.signedOut) _isPasswordRecovery = false;
 
       if (mounted) {
         setState(() {
@@ -50,7 +58,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
         });
 
         // Gerenciar listener de notificações baseado no estado de autenticação
-        if (newUser != null) {
+        if (newUser != null && !_isPasswordRecovery) {
           unawaited(_startAuthenticatedServices(newUser));
         } else {
           // Usuário fez logout - parar escuta de notificações
@@ -64,10 +72,19 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     });
   }
 
+  void _enterPasswordRecovery() {
+    if (!mounted) return;
+    setState(() => _isPasswordRecovery = true);
+    // A recovery link can arrive while a product or another page is open.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final user = _user;
-    if (user == null) return;
+    if (user == null || _isPasswordRecovery) return;
 
     if (state == AppLifecycleState.resumed) {
       unawaited(UserPresenceService.instance.start(user));
@@ -186,6 +203,9 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       );
     }
 
+    if (_isPasswordRecovery && _user != null) {
+      return const PasswordRecoveryScreen(recoverySession: true);
+    }
     return _user != null ? const MainScreen() : const LoginScreen();
   }
 }

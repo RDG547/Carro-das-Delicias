@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../utils/constants.dart';
+import '../utils/flavor_icon_assets.dart';
 import '../utils/product_variant_utils.dart';
 import 'adaptive_dropdown_menu.dart';
 import 'flavor_icon_widget.dart';
@@ -52,6 +54,18 @@ class _SizeSelectorDialogState extends State<SizeSelectorDialog> {
     }
     if (_flavors.isNotEmpty) {
       _selectedFlavor = _flavors.first;
+    }
+  }
+
+  bool _iconsPrecached = false;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_iconsPrecached) {
+      _iconsPrecached = true;
+      unawaited(
+        FlavorIconAssets.precacheForProducts(context, [widget.produto]),
+      );
     }
   }
 

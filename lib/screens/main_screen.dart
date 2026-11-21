@@ -240,7 +240,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   const KombiTrackingScreen(), // índice 5 (com navbar)
                   const AdminScreen(), // índice 6 (apenas para admin, sem navbar)
                   const SupportLegalScreen(), // índice 7 (com navbar)
-                ],
+                ].asMap().entries.map((entry) => TickerMode(
+                  enabled: _currentIndex == entry.key, child: entry.value,
+                )).toList(),
               ),
             ),
           ),

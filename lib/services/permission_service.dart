@@ -14,40 +14,25 @@ class PermissionService {
     return 0;
   }
 
-  /// Solicita permissões necessárias para upload de imagens
-  static Future<bool> requestImagePermissions() async {
+  /// Solicita permissão de câmera para tirar fotos.
+  ///
+  /// A seleção de imagens da galeria usa o seletor de fotos do sistema
+  /// (Photo Picker) e NÃO requer nenhuma permissão de mídia
+  /// (READ_MEDIA_IMAGES / READ_EXTERNAL_STORAGE), conforme exigido pela
+  /// política do Google Play.
+  static Future<bool> requestCameraPermission() async {
     try {
-      final androidVersion = await getAndroidVersion();
-      List<Permission> permissions = [];
+      final status = await Permission.camera.request();
 
-      // Câmera sempre é necessária
-      permissions.add(Permission.camera);
-
-      // Para Android 13+ (API 33+), usar photos ao invés de storage
-      if (androidVersion >= 33) {
-        permissions.add(Permission.photos);
-      } else {
-        // Para versões antigas, usar storage
-        permissions.add(Permission.storage);
+      if (status == PermissionStatus.granted ||
+          status == PermissionStatus.limited) {
+        return true;
       }
 
-      // Solicitar permissões
-      final statuses = await permissions.request();
-
-      // Verificar se todas as permissões foram concedidas
-      bool allGranted = true;
-      for (final status in statuses.values) {
-        if (status != PermissionStatus.granted &&
-            status != PermissionStatus.limited) {
-          allGranted = false;
-          debugPrint('Permissão negada: $status');
-          break;
-        }
-      }
-
-      return allGranted;
+      debugPrint('Permissão de câmera negada: $status');
+      return false;
     } catch (e) {
-      debugPrint('Erro ao solicitar permissões: $e');
+      debugPrint('Erro ao solicitar permissão de câmera: $e');
       return false;
     }
   }
@@ -100,43 +85,19 @@ class PermissionService {
     }
   }
 
-  /// Verifica se as permissões necessárias já foram concedidas
-  static Future<bool> hasImagePermissions() async {
+  /// Verifica se a permissão de câmera já foi concedida
+  static Future<bool> hasCameraPermission() async {
     try {
-      final androidVersion = await getAndroidVersion();
-      List<Permission> permissions = [];
-
-      // Câmera sempre é necessária
-      permissions.add(Permission.camera);
-
-      // Para Android 13+ (API 33+), usar photos ao invés de storage
-      if (androidVersion >= 33) {
-        permissions.add(Permission.photos);
-      } else {
-        // Para versões antigas, usar storage
-        permissions.add(Permission.storage);
-      }
-
-      for (final permission in permissions) {
-        final status = await permission.status;
-        // Aceitar granted ou limited (iOS pode retornar limited)
-        if (status != PermissionStatus.granted &&
-            status != PermissionStatus.limited) {
-          debugPrint(
-            'Permissão ${permission.toString()} não concedida: $status',
-          );
-          return false;
-        }
-      }
-
-      return true;
+      final status = await Permission.camera.status;
+      return status == PermissionStatus.granted ||
+          status == PermissionStatus.limited;
     } catch (e) {
-      debugPrint('Erro ao verificar permissões: $e');
+      debugPrint('Erro ao verificar permissão de câmera: $e');
       return false;
     }
   }
 
-  /// Mostra um diálogo explicativo sobre as permissões
+  /// Mostra um diálogo explicativo sobre a permissão de câmera
   static Future<void> showPermissionDialog(BuildContext context) async {
     if (!context.mounted) return;
 
@@ -149,7 +110,7 @@ class PermissionService {
             children: [
               Icon(Icons.security, color: Colors.blue[700]),
               const SizedBox(width: 12),
-              const Text('Permissões Necessárias'),
+              const Text('Permissão Necessária'),
             ],
           ),
           content: const Column(
@@ -157,7 +118,7 @@ class PermissionService {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Este aplicativo precisa das seguintes permissões:',
+                'Este aplicativo precisa da seguinte permissão:',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               SizedBox(height: 16),
@@ -170,25 +131,10 @@ class PermissionService {
                   ),
                 ],
               ),
-              SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.photo_library, color: Colors.green, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(child: Text('Galeria - Para selecionar imagens')),
-                ],
-              ),
-              SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.storage, color: Colors.orange, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(child: Text('Armazenamento - Para salvar imagens')),
-                ],
-              ),
               SizedBox(height: 16),
               Text(
-                'Essas permissões são necessárias apenas para o upload de imagens dos produtos e fotos de perfil.',
+                'A seleção de imagens da galeria usa o seletor de fotos do '
+                'sistema e não requer nenhuma permissão.',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.grey,
@@ -230,18 +176,20 @@ class PermissionService {
     );
   }
 
-  /// Solicita permissões com feedback visual
-  static Future<bool> requestPermissionsWithDialog(BuildContext context) async {
-    // Verificar se já tem as permissões
-    if (await hasImagePermissions()) {
+  /// Solicita permissão de câmera com feedback visual
+  static Future<bool> requestCameraPermissionWithDialog(
+    BuildContext context,
+  ) async {
+    // Verificar se já tem a permissão
+    if (await hasCameraPermission()) {
       return true;
     }
 
-    // Solicitar permissões diretamente
-    final granted = await requestImagePermissions();
+    // Solicitar permissão diretamente
+    final granted = await requestCameraPermission();
 
     if (!granted) {
-      // Mostrar mensagem se as permissões não foram concedidas
+      // Mostrar mensagem se a permissão não foi concedida
       if (context.mounted) {
         showPermissionDeniedMessage(context);
       }
@@ -250,15 +198,15 @@ class PermissionService {
     return granted;
   }
 
-  /// Mostra mensagem de erro quando permissões não são concedidas
+  /// Mostra mensagem de erro quando a permissão de câmera não é concedida
   static void showPermissionDeniedMessage(BuildContext context) {
     if (!context.mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text(
-          'Permissões necessárias não foram concedidas. '
-          'Você pode ativá-las nas configurações do aplicativo.',
+          'Permissão de câmera não foi concedida. '
+          'Você pode ativá-la nas configurações do aplicativo.',
         ),
         backgroundColor: Colors.orange,
         action: SnackBarAction(

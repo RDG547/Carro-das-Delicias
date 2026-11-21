@@ -1,21 +1,79 @@
 {
   "rewrites": [
-    { "source": "/privacy", "destination": "/politica-de-privacidade.html" },
-    { "source": "/privacidade", "destination": "/politica-de-privacidade.html" },
-    { "source": "/terms", "destination": "/termos-de-servico.html" },
-    { "source": "/termos", "destination": "/termos-de-servico.html" },
-    { "source": "/termos-de-servico", "destination": "/termos-de-servico.html" },
-    { "source": "/delete-account", "destination": "/excluir-conta.html" },
-    { "source": "/excluir-conta", "destination": "/excluir-conta.html" }
+    {
+      "source": "/.well-known/assetlinks.json",
+      "destination": "/.well-known/assetlinks.json"
+    },
+    {
+      "source": "/abrir-produto.js",
+      "destination": "/abrir-produto.js"
+    },
+    {
+      "source": "/produto/:id",
+      "destination": "/abrir-produto.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/politica-de-privacidade.html"
+    },
+    {
+      "source": "/privacidade",
+      "destination": "/politica-de-privacidade.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/termos-de-servico.html"
+    },
+    {
+      "source": "/termos",
+      "destination": "/termos-de-servico.html"
+    },
+    {
+      "source": "/termos-de-servico",
+      "destination": "/termos-de-servico.html"
+    },
+    {
+      "source": "/delete-account",
+      "destination": "/excluir-conta.html"
+    },
+    {
+      "source": "/excluir-conta",
+      "destination": "/excluir-conta.html"
+    }
   ],
   "headers": [
     {
+      "source": "/.well-known/assetlinks.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300"
+        }
+      ]
+    },
+    {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-XSS-Protection", "value": "1; mode=block" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
       ]
     }
   ]

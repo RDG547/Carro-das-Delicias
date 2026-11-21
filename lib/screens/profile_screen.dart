@@ -1,3 +1,4 @@
+import 'password_recovery_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -536,7 +537,20 @@ class _ProfileScreenState extends State<ProfileScreen>
       onBackPressed: _goToHome,
       title: 'Perfil',
       showBackButton: true, // Garantir que o botão de voltar seja mostrado
-      actions: [AppMenu(isGuestMode: widget.isGuestMode, isAdmin: _isAdmin)],
+      actions: [
+        if (!widget.isGuestMode)
+          IconButton(
+            tooltip: 'Alterar senha',
+            icon: const Icon(Icons.lock_reset),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) =>
+                    const PasswordRecoveryScreen(changePassword: true),
+              ),
+            ),
+          ),
+        AppMenu(isGuestMode: widget.isGuestMode, isAdmin: _isAdmin),
+      ],
       child: FadeTransition(
         opacity: _fadeAnimation,
         child: _isLoading
