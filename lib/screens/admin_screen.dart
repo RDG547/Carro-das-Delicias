@@ -40,6 +40,9 @@ class _AdminScreenState extends State<AdminScreen>
   List<Map<String, dynamic>> _usuarios = [];
   List<Map<String, dynamic>> _pedidos = [];
   bool _isLoading = false;
+  bool _isLoadingData = false;
+  bool _dataReloadQueued = false;
+  Future<List<Map<String, dynamic>>>? _usersRequest;
   bool _isOpeningProductEditor = false;
   final _searchProductController = TextEditingController();
   final _productSearchNotifier = ValueNotifier<String>('');
@@ -95,7 +98,7 @@ class _AdminScreenState extends State<AdminScreen>
     _checkTrackingStatus();
     _presenceRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted &&
-          _tabController.index == 2 &&
+          _tabController.index == 4 &&
           !_isPresenceRefreshBackoffActive) {
         unawaited(_refreshUserPresence());
       }
@@ -223,67 +226,28 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   Future<void> _loadData({bool showLoading = true}) async {
-    if (showLoading) {
-      setState(() => _isLoading = true);
+    if (!mounted) return;
+    if (_isLoadingData) {
+      _dataReloadQueued = true;
+      return;
     }
-
+    _isLoadingData = true;
+    if (showLoading) setState(() => _isLoading = true);
     try {
-      final produtosResponse = await Supabase.instance.client
-          .from('produtos')
-          .select('*, categorias!categoria_id(nome, icone)')
-          .order('created_at', ascending: false);
-
-      final categoriasResponse = await Supabase.instance.client
-          .from('categorias')
-          .select()
-          .order('ordem', ascending: true);
-
-      final mergedUsuarios = await _fetchUsuarios();
-
-      // Carregar pedidos com itens
-      final pedidosResponse = await Supabase.instance.client
-          .from('pedidos')
-          .select('''
-            *,
-            pedido_itens(
-              *,
-              produtos(
-                id,
-                nome,
-                preco,
-                imagem_url,
-                imagens
-              )
-            )
-          ''')
-          .order('created_at', ascending: false);
-
-      // Carregar perfis dos usuários separadamente
-      final userIds = pedidosResponse
-          .map((p) => p['user_id'])
-          .whereType<String>()
-          .toSet();
-      final profilesResponse = userIds.isNotEmpty
-          ? await Supabase.instance.client
-                .from('profiles')
-                .select()
-                .inFilter('id', userIds.toList())
-          : <Map<String, dynamic>>[];
-
-      // Mapear perfis por ID
-      final profilesMap = Map.fromEntries(
-        profilesResponse.map((p) => MapEntry(p['id'], p)),
-      );
-
-      // Combinar pedidos com perfis
-      final pedidosWithProfiles = pedidosResponse.map((pedido) {
-        final userId = pedido['user_id'];
-        final profile = profilesMap[userId];
-        return {...pedido, 'profiles': profile};
-      }).toList();
-
+      final client = Supabase.instance.client;
+      final results = await Future.wait([
+        client
+            .from('produtos')
+            .select('*, categorias!categoria_id(nome, icone)')
+            .order('created_at', ascending: false),
+        client.from('categorias').select().order('ordem'),
+        _fetchUsuarios(),
+        _fetchPedidosWithProfiles(),
+      ]);
+      if (!mounted) return;
+      final categoryQuery = _searchCategoryController.text.trim().toLowerCase();
       setState(() {
-        _produtos = produtosResponse.map<Map<String, dynamic>>((produto) {
+        _produtos = results[0].map<Map<String, dynamic>>((produto) {
           final categoria = produto['categorias'] as Map<String, dynamic>?;
           return {
             ...produto,
@@ -291,28 +255,32 @@ class _AdminScreenState extends State<AdminScreen>
             'categoria_icone': categoria?['icone'],
           };
         }).toList();
-        _categorias = List<Map<String, dynamic>>.from(categoriasResponse);
-        // Respeitar a ordem do banco de dados (campo 'ordem')
-        // As categorias já vêm ordenadas pela query .order('ordem', ascending: true)
-        _filteredCategorias = List.from(_categorias);
-        _usuarios = List<Map<String, dynamic>>.from(mergedUsuarios);
-        _pedidos = List<Map<String, dynamic>>.from(pedidosWithProfiles);
+        _categorias = List<Map<String, dynamic>>.from(results[1]);
+        _filteredCategorias = _categorias
+            .where(
+              (category) => (category['nome'] ?? '')
+                  .toString()
+                  .toLowerCase()
+                  .contains(categoryQuery),
+            )
+            .toList();
+        _usuarios = List<Map<String, dynamic>>.from(results[2]);
+        _pedidos = List<Map<String, dynamic>>.from(results[3]);
       });
-
-      debugPrint('📊 Dados carregados:');
-      debugPrint('   - Produtos: ${_produtos.length}');
-      debugPrint('   - Categorias: ${_categorias.length}');
-      debugPrint('   - Usuários: ${_usuarios.length}');
-      debugPrint('   - Pedidos: ${_pedidos.length}');
-    } catch (e) {
+    } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Erro ao carregar dados: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao carregar dados: $error')),
+        );
       }
     } finally {
-      if (mounted && showLoading) {
-        setState(() => _isLoading = false);
+      _isLoadingData = false;
+      if (mounted) {
+        if (showLoading) setState(() => _isLoading = false);
+        if (_dataReloadQueued) {
+          _dataReloadQueued = false;
+          unawaited(_loadData(showLoading: false));
+        }
       }
     }
   }
@@ -411,6 +379,18 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   Future<List<Map<String, dynamic>>> _fetchUsuarios() async {
+    final pending = _usersRequest;
+    if (pending != null) return pending;
+    final request = _fetchUsuariosInternal();
+    _usersRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (identical(_usersRequest, request)) _usersRequest = null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchUsuariosInternal() async {
     List<dynamic> usuariosResponse = [];
     try {
       debugPrint('👥 Tentando carregar usuários via RPC get_all_users...');

@@ -2,7 +2,7 @@
 
 - Pacote: `com.rdtech.carrodasdelicias`
 - Nome da versão: `1.0.14`
-- Código da versão: `2026112101` (anterior no repositório: `2026072302`)
+- Código da versão: `2026112102` (build anterior: `2026112101`)
 - Flutter: `3.50.1`; Dart: `3.14.0`; Gradle: `9.5.0`; AGP: `9.3.1`.
 - AAB: `build/app/outputs/bundle/release/app-release.aab`.
 - APK para testes arm64: `build/app/outputs/flutter-apk/app-release.apk`.
@@ -23,12 +23,12 @@ O script filtra a configuração por uma lista de chaves públicas e remove o ar
 
 ## Validação
 
-O resultado final das verificações está em [validacao.md](validacao.md). Os arquivos binários e logs ficam em `build/`, fora do Git. O pacote de entrega inclui os hashes SHA-256 para conferência de integridade.
+O resultado final das verificações está em [validacao-2026112102.md](validacao-2026112102.md). Os arquivos binários e logs ficam em `build/`, fora do Git. O pacote de entrega inclui os hashes SHA-256 para conferência de integridade.
 
 ## Enviar à Play Store
 
 1. Abra o aplicativo existente no Play Console e crie uma versão na faixa desejada. Para conferir o comportamento no telefone antes da publicação, use a faixa de testes internos.
-2. Envie o AAB desta entrega. Confira o pacote, a versão e a chave de upload cadastrada. O código `2026112101` precisa ainda estar disponível no histórico do Play Console; o valor anterior verificado foi o do repositório.
+2. Envie o AAB desta entrega. Confira o pacote, a versão e a chave de upload cadastrada. O código `2026112102` precisa ainda estar disponível no histórico do Play Console; o valor anterior verificado foi o do repositório.
 3. Use `1.0.14` como nome da versão e cole o conteúdo de `notas-play-store-pt-BR.txt` no idioma português do Brasil.
 4. Mantenha os endereços existentes de [privacidade](https://carrodasdelicias.vercel.app/politica-de-privacidade.html), [termos](https://carrodasdelicias.vercel.app/termos-de-servico.html) e [exclusão de conta](https://carrodasdelicias.vercel.app/excluir-conta.html). As declarações de dados e de localização em segundo plano devem corresponder à operação real do app. Esta entrega não altera respostas do Play Console.
 5. Em **Integridade do app > Assinatura de apps**, confira o SHA-256 do **certificado de assinatura do app**. Se o Google Play usa um certificado diferente da chave de upload local, adicione esse SHA-256 ao `website/.well-known/assetlinks.json` e publique o site novamente. O arquivo atual contém os certificados locais de depuração e upload; a página de compartilhamento também oferece abertura por intent e encaminhamento à loja.

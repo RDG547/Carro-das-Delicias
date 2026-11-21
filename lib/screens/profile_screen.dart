@@ -126,16 +126,15 @@ class _ProfileScreenState extends State<ProfileScreen>
           .eq('id', user.id)
           .maybeSingle();
 
-      debugPrint('📊 Profile - Resposta da query: $response');
-
-      if (mounted && response != null) {
+      if (!mounted) return;
+      if (response != null) {
         final isAdmin = response['role'] == 'admin';
         debugPrint('✅ Profile - is_admin definido como: $isAdmin');
         if (_isAdmin != isAdmin) {
           setState(() => _isAdmin = isAdmin);
         }
       } else {
-        debugPrint('⚠️ Profile - Response null ou widget desmontado');
+        debugPrint('Perfil não encontrado ao consultar permissões.');
       }
     } catch (e) {
       debugPrint('❌ Profile - Erro ao verificar status admin: $e');

@@ -12,6 +12,7 @@ import 'kombi_tracking_screen.dart';
 import 'admin_screen.dart';
 import 'support_legal_screen.dart';
 import '../widgets/cart_navbar_menu.dart';
+import '../widgets/app_page_view.dart';
 
 class MainScreen extends StatefulWidget {
   final bool isGuestMode;
@@ -112,11 +113,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void _navigateToPageDirect(int pageIndex) {
-    _pageController.animateToPage(
-      pageIndex,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    if (pageIndex >= 8) return;
+    AppPageView.navigateTo(_pageController, pageIndex);
   }
 
   void _onTabTapped(int index) {
@@ -141,11 +139,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     setState(() {
       _currentIndex = index;
     });
-    _pageController.animateToPage(
-      pageIndex,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    _navigateToPageDirect(pageIndex);
   }
 
   void _onPageChanged(int index) {
@@ -215,22 +209,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   pageIndex = 3; // Perfil: NavBar 4 -> PageView 3
                 }
 
-                _pageController.animateToPage(
-                  pageIndex,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
+                _navigateToPageDirect(pageIndex);
               },
               navigateToPageDirect: (pageIndex) {
                 // Navega diretamente para o índice do PageView (usado para Carrinho)
                 _navigateToPageDirect(pageIndex);
               },
-              child: PageView(
+              child: AppPageView(
                 controller: _pageController,
                 onPageChanged: _onPageChanged,
-                // Evita o "vazamento" lateral entre telas; a navegação segue
-                // controlada pela navbar e pelo menu.
-                physics: const NeverScrollableScrollPhysics(),
                 children: [
                   HomeScreen(isGuestMode: widget.isGuestMode), // índice 0
                   const DescontosScreen(), // índice 1
@@ -240,9 +227,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   const KombiTrackingScreen(), // índice 5 (com navbar)
                   const AdminScreen(), // índice 6 (apenas para admin, sem navbar)
                   const SupportLegalScreen(), // índice 7 (com navbar)
-                ].asMap().entries.map((entry) => TickerMode(
-                  enabled: _currentIndex == entry.key, child: entry.value,
-                )).toList(),
+                ],
               ),
             ),
           ),

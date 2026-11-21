@@ -51,9 +51,6 @@ class _AppMenuState extends State<AppMenu> {
   @override
   void initState() {
     super.initState();
-    debugPrint(
-      '🚀 AppMenu - initState chamado, isGuestMode: ${widget.isGuestMode}',
-    );
     if (!widget.isGuestMode) {
       _loadUserAvatar();
       _loadUnreadNotificationCount();

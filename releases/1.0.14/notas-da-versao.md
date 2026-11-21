@@ -1,6 +1,6 @@
 # Carro das Delícias 1.0.14
 
-Versão Android: **1.0.14** · código **2026112101** · pacote **com.rdtech.carrodasdelicias**.
+Versão Android: **1.0.14** · código **2026112102** · pacote **com.rdtech.carrodasdelicias**.
 
 Esta versão melhora a pesquisa, a atualização do catálogo e o uso do painel administrativo. O mapa recebe o token corretamente, e as listas acompanham mudanças de produtos e descontos em tempo real, inclusive após retornar ao app.
 
