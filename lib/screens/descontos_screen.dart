@@ -485,7 +485,8 @@ class _DescontosScreenState extends State<DescontosScreen>
       final response = await Supabase.instance.client
           .from('categorias')
           .select()
-          .order('ordem', ascending: true);
+          .order('ordem', ascending: true)
+          .order('id');
 
       final categorias = List<Map<String, dynamic>>.from(response);
 

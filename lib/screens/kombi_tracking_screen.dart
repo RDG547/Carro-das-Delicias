@@ -3,6 +3,7 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import '../services/delivery_geofence_service.dart';
+import '../utils/tracking_camera_state.dart';
 import '../services/location_tracking_service.dart';
 import '../widgets/app_menu.dart';
 import '../widgets/main_navigation_provider.dart';
@@ -30,7 +31,8 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
   bool _isOnline = false;
   DateTime? _lastUpdate;
   bool _isAdmin = false;
-  double _currentZoom = 16.0;
+  double _currentZoom = TrackingCameraState.defaultZoom;
+  final _cameraState = TrackingCameraState();
   String? _currentAddress;
   bool _isLoadingAddress = false;
   String? _lastGeocodeKey;
@@ -77,6 +79,9 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
       setState(() {
         _isOnline = false;
         _kombiLocation = null;
+        _mapboxMap = null;
+        _pointAnnotationManager = null;
+        _cameraState.reset();
         _selectedAdminId = null;
       });
       unawaited(_clearMarker());
@@ -126,12 +131,19 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
     if (kombis.isNotEmpty && mounted) {
       await _loadVendorNames(kombis);
       setState(() => _allKombis = kombis);
-      _selectKombi(kombis.first['admin_id'] as String);
+      final selected =
+          kombis.where((k) => k['admin_id'] == _selectedAdminId).firstOrNull ??
+          kombis.first;
+      final id = selected['admin_id'] as String;
+      _selectKombi(id, recenter: _selectedAdminId != id || _mapboxMap == null);
     } else if (mounted) {
       setState(() {
         _allKombis = [];
         _isOnline = false;
         _kombiLocation = null;
+        _mapboxMap = null;
+        _pointAnnotationManager = null;
+        _cameraState.reset();
         _selectedAdminId = null;
       });
       await _clearMarker();
@@ -178,6 +190,9 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
           setState(() {
             _isOnline = false;
             _kombiLocation = null;
+            _mapboxMap = null;
+            _pointAnnotationManager = null;
+            _cameraState.reset();
             _selectedAdminId = null;
           });
           _clearMarker();
@@ -239,7 +254,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
     }
   }
 
-  void _selectKombi(String adminId) {
+  void _selectKombi(String adminId, {bool recenter = true}) {
     final kombi = _allKombis.firstWhere(
       (k) => k['admin_id'] == adminId,
       orElse: () => <String, dynamic>{},
@@ -250,6 +265,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
     final longitude = kombi['longitude'] as double?;
     final isOnline = _isKombiOnline(kombi);
 
+    final selectionChanged = _selectedAdminId != adminId;
     setState(() {
       _selectedAdminId = adminId;
       _isOnline = isOnline;
@@ -258,13 +274,21 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
         _lastUpdate = DateTime.now();
       } else {
         _kombiLocation = null;
+        _mapboxMap = null;
+        _pointAnnotationManager = null;
+        _cameraState.reset();
       }
-      _currentAddress = null;
+      if (selectionChanged) {
+        _currentAddress = null;
+        _lastGeocodeKey = null;
+        _addressRequestId++;
+        _isLoadingAddress = false;
+      }
     });
 
     if (latitude != null && longitude != null) {
       _updateMarker();
-      _animateToLocation();
+      _animateToLocation(recenter: recenter);
       _reverseGeocode(latitude, longitude);
     }
   }
@@ -338,34 +362,31 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
     }
   }
 
-  Future<void> _animateToLocation() async {
-    if (_mapboxMap == null || _kombiLocation == null) return;
-
-    debugPrint(
-      '📹 Animando câmera para: ${_kombiLocation!.coordinates.lng}, ${_kombiLocation!.coordinates.lat}',
-    );
-
-    await _mapboxMap!.flyTo(
-      CameraOptions(center: _kombiLocation, zoom: 17.0, pitch: 0, bearing: 0),
-      MapAnimationOptions(duration: 1500, startDelay: 0),
-    );
-
-    debugPrint('✅ Câmera animada com sucesso');
-  }
-
-  Future<void> _zoomIn() async {
-    if (_mapboxMap == null) return;
-    _currentZoom = (_currentZoom + 1).clamp(1.0, 22.0);
-    await _mapboxMap!.easeTo(
-      CameraOptions(zoom: _currentZoom),
-      MapAnimationOptions(duration: 300),
+  Future<void> _animateToLocation({bool recenter = false}) async {
+    final map = _mapboxMap;
+    final location = _kombiLocation;
+    if (map == null || location == null) return;
+    final camera = recenter
+        ? _cameraState.recenter(location)
+        : _cameraState.locationChanged(location);
+    if (camera == null) return;
+    await map.flyTo(
+      camera,
+      MapAnimationOptions(duration: recenter ? 900 : 500),
     );
   }
 
-  Future<void> _zoomOut() async {
-    if (_mapboxMap == null) return;
-    _currentZoom = (_currentZoom - 1).clamp(1.0, 22.0);
-    await _mapboxMap!.easeTo(
+  Future<void> _zoomIn() => _changeZoom(1);
+  Future<void> _zoomOut() => _changeZoom(-1);
+
+  Future<void> _changeZoom(double delta) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+    _cameraState.userGesture();
+    final current = await map.getCameraState();
+    if (!mounted || !identical(_mapboxMap, map)) return;
+    _currentZoom = (current.zoom + delta).clamp(1.0, 22.0);
+    await map.easeTo(
       CameraOptions(zoom: _currentZoom),
       MapAnimationOptions(duration: 300),
     );
@@ -390,12 +411,10 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
     }
   }
 
-  void _onMapCreated(MapboxMap mapboxMap) async {
-    debugPrint('🗺️ Mapa criado, inicializando...');
-    _mapboxMap = mapboxMap;
-
-    // Habilita gestos de navegação
-    await _mapboxMap!.gestures.updateSettings(
+  void _onMapCreated(MapboxMap map) async {
+    if (!mounted || _kombiLocation == null) return;
+    _mapboxMap = map;
+    await map.gestures.updateSettings(
       GesturesSettings(
         rotateEnabled: true,
         pitchEnabled: true,
@@ -407,25 +426,15 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
         simultaneousRotateAndPinchToZoomEnabled: true,
       ),
     );
-
-    _pointAnnotationManager = await _mapboxMap!.annotations
-        .createPointAnnotationManager();
-
-    debugPrint('✅ PointAnnotationManager criado e gestos habilitados');
-
-    // Define estilo do mapa (Streets)
-    await _mapboxMap!.style.setStyleURI(MapboxStyles.MAPBOX_STREETS);
-
-    // Obtém zoom inicial
-    _currentZoom = (await _mapboxMap!.getCameraState()).zoom;
-
-    if (_kombiLocation != null) {
-      debugPrint('📍 Localização inicial disponível, criando marcador...');
-      await _updateMarker();
-      await _animateToLocation();
-    } else {
-      debugPrint('⚠️ Nenhuma localização disponível ainda');
-    }
+    if (!mounted || !identical(_mapboxMap, map)) return;
+    final manager = await map.annotations.createPointAnnotationManager();
+    if (!mounted || !identical(_mapboxMap, map)) return;
+    _pointAnnotationManager = manager;
+    _currentZoom = (await map.getCameraState()).zoom;
+    if (!mounted || !identical(_mapboxMap, map)) return;
+    await _updateMarker();
+    // O viewport inicial já posicionou a câmera. Não sobrescreve um gesto
+    // que possa ter ocorrido enquanto o mapa e o marcador carregavam.
   }
 
   @override
@@ -467,11 +476,14 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
           _kombiLocation != null
               ? MapWidget(
                   key: const ValueKey('mapbox-map'),
+                  styleUri: MapboxStyles.MAPBOX_STREETS,
                   onMapCreated: _onMapCreated,
-                  viewport: CameraViewportState(
-                    center: _kombiLocation,
-                    zoom: 16.0,
-                  ),
+                  viewport: _cameraState.initialViewport(_kombiLocation!),
+                  onCameraChangeListener: (event) {
+                    _currentZoom = event.cameraState.zoom;
+                  },
+                  onScrollListener: (_) => _cameraState.userGesture(),
+                  onZoomListener: (_) => _cameraState.userGesture(),
                 )
               : Container(
                   color: Colors.grey[100],
@@ -589,7 +601,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
               child: FloatingActionButton(
                 mini: true,
                 backgroundColor: Colors.white,
-                onPressed: _animateToLocation,
+                onPressed: () => _animateToLocation(recenter: true),
                 child: Icon(Icons.my_location, color: Colors.grey[800]),
               ),
             ),

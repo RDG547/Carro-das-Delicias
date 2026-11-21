@@ -451,42 +451,6 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
           if (_pixCode != null && _pixCode!.isNotEmpty)
             const SizedBox(height: 16),
 
-          // Botão Copiar Código - sempre mostrar se temos o código
-          if (_pixCode != null && _pixCode!.isNotEmpty)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _copyPixCode,
-                icon: const Icon(Icons.copy),
-                label: const Text('Copiar Código PIX'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            )
-          else
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: null,
-                icon: const Icon(Icons.copy),
-                label: const Text('Código não disponível'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-
-          const SizedBox(height: 16),
-
           // Status de verificação
           Container(
             padding: const EdgeInsets.all(16),
@@ -520,6 +484,42 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
               ],
             ),
           ),
+
+          const SizedBox(height: 16),
+
+          // Botão Copiar Código - sempre mostrar se temos o código
+          if (_pixCode != null && _pixCode!.isNotEmpty)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _copyPixCode,
+                icon: const Icon(Icons.copy),
+                label: const Text('Copiar Código PIX'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: null,
+                icon: const Icon(Icons.copy),
+                label: const Text('Código não disponível'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
 
           const SizedBox(height: 24),
 

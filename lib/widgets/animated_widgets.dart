@@ -856,6 +856,7 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
           .from('categorias')
           .select()
           .order('ordem', ascending: true)
+          .order('id')
           .timeout(const Duration(seconds: 10));
 
       final categorias = List<Map<String, dynamic>>.from(response);

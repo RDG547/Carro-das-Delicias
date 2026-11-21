@@ -7,15 +7,17 @@ class ProductFormDialogHeader extends StatelessWidget {
     super.key,
     required this.title,
     required this.icon,
+    this.color = Colors.green,
   });
   final String title;
   final IconData icon;
+  final MaterialColor color;
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
-      gradient: const LinearGradient(
-        colors: [Colors.teal, Color(0xFF00695C)],
+      gradient: LinearGradient(
+        colors: [color, color.shade800],
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
       ),
@@ -48,57 +50,93 @@ class ProductFormDialogActions extends StatelessWidget {
     required this.onSubmit,
     required this.submitLabel,
     required this.submitIcon,
+    this.color = Colors.green,
   });
   final VoidCallback onSubmit;
   final String submitLabel;
   final IconData submitIcon;
+  final MaterialColor color;
 
   @override
-  Widget build(BuildContext context) {
-    final cancel = TextButton.icon(
-      onPressed: () => Navigator.of(context).pop(),
-      icon: Image.asset(
-        'assets/icons/menu/cancel_button.png',
-        width: 18,
-        height: 18,
-      ),
-      label: const Text('Cancelar'),
-      style: TextButton.styleFrom(
-        foregroundColor: Colors.grey,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-    final submit = ElevatedButton.icon(
-      onPressed: onSubmit,
-      icon: Icon(submitIcon, size: 18),
-      label: Text(
-        submitLabel,
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.teal,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-    return LayoutBuilder(
-      builder: (context, constraints) => constraints.maxWidth < 340
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [submit, const SizedBox(height: 8), cancel],
-            )
-          : Row(
-              children: [
-                Expanded(child: cancel),
-                const SizedBox(width: 12),
-                Expanded(child: submit),
-              ],
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 340;
+      final fontSize = compact ? 14.0 : 16.0;
+      final padding = EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 12,
+        vertical: 14,
+      );
+      return Row(
+        children: [
+          Expanded(
+            flex: 4,
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.grey,
+                padding: padding,
+                minimumSize: const Size(0, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset(
+                    'assets/icons/menu/cancel_button.png',
+                    width: 18,
+                    height: 18,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'Cancelar',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: fontSize),
+                    ),
+                  ),
+                ],
+              ),
             ),
-    );
-  }
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 6,
+            child: ElevatedButton(
+              onPressed: onSubmit,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: Colors.white,
+                padding: padding,
+                minimumSize: const Size(0, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(submitIcon, size: 18),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      submitLabel,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: fontSize,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 class ProductFormDialogShell extends StatefulWidget {
@@ -186,31 +224,50 @@ class _ProductFormDialogShellState extends State<ProductFormDialogShell>
               maxWidth: widget.width,
               maxHeight: maxHeight,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
-                  child: widget.title,
-                ),
-                Flexible(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
-                    child: SingleChildScrollView(
-                      controller: _scrollController,
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: widget.body,
+            child: maxHeight < 320
+                ? SingleChildScrollView(
+                    controller: _scrollController,
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          widget.title,
+                          const SizedBox(height: 12),
+                          widget.body,
+                          const SizedBox(height: 12),
+                          widget.actions,
+                        ],
+                      ),
                     ),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 0),
+                        child: widget.title,
+                      ),
+                      Flexible(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
+                          child: SingleChildScrollView(
+                            controller: _scrollController,
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: widget.body,
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+                        child: widget.actions,
+                      ),
+                    ],
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-                  child: widget.actions,
-                ),
-              ],
-            ),
           ),
         ),
       ),

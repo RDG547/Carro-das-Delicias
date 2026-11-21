@@ -12,6 +12,7 @@ void main() {
     const Size(320, 640),
     const Size(440, 900),
     const Size(900, 1000),
+    const Size(844, 390),
   ]) {
     for (final editing in [false, true]) {
       testWidgets(
@@ -54,6 +55,35 @@ void main() {
           await tester.tap(find.text('Abrir'));
           await tester.pumpAndSettle();
           expect(find.byType(ProductFormDialogHeader), findsOneWidget);
+          expect(
+            tester
+                .widget<ProductFormDialogHeader>(
+                  find.byType(ProductFormDialogHeader),
+                )
+                .color,
+            editing ? Colors.blue : Colors.green,
+          );
+          final actions = find.byType(ProductFormDialogActions);
+          final cancel = find.descendant(
+            of: actions,
+            matching: find.byType(TextButton),
+          );
+          final submit = find.descendant(
+            of: actions,
+            matching: find.byType(ElevatedButton),
+          );
+          expect(
+            (tester.getCenter(cancel).dy - tester.getCenter(submit).dy).abs(),
+            lessThan(1),
+          );
+          expect(
+            tester.getRect(cancel).right,
+            lessThan(tester.getRect(submit).left),
+          );
+          expect(
+            tester.widget<ProductFormDialogActions>(actions).color,
+            editing ? Colors.blue : Colors.green,
+          );
           expect(tester.takeException(), isNull);
           tester.view.viewInsets = const FakeViewPadding(bottom: 260);
           addTearDown(tester.view.resetViewInsets);

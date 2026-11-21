@@ -614,6 +614,7 @@ class _HomeScreenState extends State<HomeScreen>
             .from('categorias')
             .select('*')
             .order('ordem', ascending: true)
+            .order('id')
             .then((data) => data as List<dynamic>)
             .catchError((e) {
               _debugLog('⚠️ Erro ao carregar categorias: $e');
@@ -674,7 +675,7 @@ class _HomeScreenState extends State<HomeScreen>
         // Usar a ordem do banco de dados (campo 'ordem')
         List<Map<String, dynamic>> sortedCategorias =
             List<Map<String, dynamic>>.from(categoriasResponse);
-        // As categorias já vêm ordenadas do banco pela query .order('ordem', ascending: true)
+        // As categorias já vêm ordenadas do banco pela query .order('ordem', ascending: true).order('id')
 
         // Aplicar overrides de ícones customizados (apenas se o banco não tem ícone definido)
         for (int i = 0; i < sortedCategorias.length; i++) {
@@ -1927,6 +1928,7 @@ class _HomeScreenState extends State<HomeScreen>
                   .from('categorias')
                   .select()
                   .order('ordem')
+                  .order('id')
                   .timeout(const Duration(seconds: 10)),
             );
       if (!mounted) return;

@@ -1232,7 +1232,8 @@ class _CheckoutScreenState extends State<CheckoutScreen>
       supabase
           .from('categorias')
           .select('id, nome, icone')
-          .order('ordem', ascending: true),
+          .order('ordem', ascending: true)
+          .order('id'),
       supabase
           .from('produtos')
           .select('''

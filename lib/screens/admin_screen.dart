@@ -12,6 +12,7 @@ import '../services/fuzzy_search_service.dart';
 import '../services/location_tracking_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
+import '../utils/category_order.dart';
 import '../utils/network_error_utils.dart';
 import '../utils/realtime_auth_utils.dart';
 import '../widgets/app_menu.dart';
@@ -44,9 +45,13 @@ class _AdminScreenState extends State<AdminScreen>
   bool _dataReloadQueued = false;
   Future<List<Map<String, dynamic>>>? _usersRequest;
   bool _isOpeningProductEditor = false;
+  bool _isSavingCategoryOrder = false;
+  bool _isDraggingCategories = false;
+  bool _catalogReloadDeferred = false;
+  int _categoryOrderRevision = 0;
+  int _catalogReadId = 0;
   final _searchProductController = TextEditingController();
   final _productSearchNotifier = ValueNotifier<String>('');
-  final _ordersFilterKey = GlobalKey();
   final ValueNotifier<String> _userFilterNotifier = ValueNotifier('todos');
   final ValueNotifier<String> _userSearchNotifier = ValueNotifier('');
 
@@ -232,6 +237,8 @@ class _AdminScreenState extends State<AdminScreen>
       return;
     }
     _isLoadingData = true;
+    final orderRevision = _categoryOrderRevision;
+    final readId = ++_catalogReadId;
     if (showLoading) setState(() => _isLoading = true);
     try {
       final client = Supabase.instance.client;
@@ -240,7 +247,7 @@ class _AdminScreenState extends State<AdminScreen>
             .from('produtos')
             .select('*, categorias!categoria_id(nome, icone)')
             .order('created_at', ascending: false),
-        client.from('categorias').select().order('ordem'),
+        client.from('categorias').select().order('ordem').order('id'),
         _fetchUsuarios(),
         _fetchPedidosWithProfiles(),
       ]);
@@ -255,15 +262,22 @@ class _AdminScreenState extends State<AdminScreen>
             'categoria_icone': categoria?['icone'],
           };
         }).toList();
-        _categorias = List<Map<String, dynamic>>.from(results[1]);
-        _filteredCategorias = _categorias
-            .where(
-              (category) => (category['nome'] ?? '')
-                  .toString()
-                  .toLowerCase()
-                  .contains(categoryQuery),
-            )
-            .toList();
+        if (orderRevision == _categoryOrderRevision &&
+            readId == _catalogReadId &&
+            !_isSavingCategoryOrder &&
+            !_isDraggingCategories) {
+          _categorias = List<Map<String, dynamic>>.from(results[1]);
+          _filteredCategorias = _categorias
+              .where(
+                (category) => (category['nome'] ?? '')
+                    .toString()
+                    .toLowerCase()
+                    .contains(categoryQuery),
+              )
+              .toList();
+        } else {
+          _catalogReloadDeferred = true;
+        }
         _usuarios = List<Map<String, dynamic>>.from(results[2]);
         _pedidos = List<Map<String, dynamic>>.from(results[3]);
       });
@@ -277,6 +291,7 @@ class _AdminScreenState extends State<AdminScreen>
       _isLoadingData = false;
       if (mounted) {
         if (showLoading) setState(() => _isLoading = false);
+        _flushDeferredCatalogReload();
         if (_dataReloadQueued) {
           _dataReloadQueued = false;
           unawaited(_loadData(showLoading: false));
@@ -335,6 +350,12 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   Future<void> _loadCatalogOnly() async {
+    if (_isSavingCategoryOrder || _isDraggingCategories) {
+      _catalogReloadDeferred = true;
+      return;
+    }
+    final orderRevision = _categoryOrderRevision;
+    final readId = ++_catalogReadId;
     try {
       final produtosResponse = await Supabase.instance.client
           .from('produtos')
@@ -343,9 +364,16 @@ class _AdminScreenState extends State<AdminScreen>
       final categoriasResponse = await Supabase.instance.client
           .from('categorias')
           .select()
-          .order('ordem', ascending: true);
-      if (!mounted) return;
-
+          .order('ordem', ascending: true)
+          .order('id');
+      if (!mounted || readId != _catalogReadId) return;
+      if (orderRevision != _categoryOrderRevision ||
+          _isSavingCategoryOrder ||
+          _isDraggingCategories) {
+        _catalogReloadDeferred = true;
+        _flushDeferredCatalogReload();
+        return;
+      }
       final categorias = List<Map<String, dynamic>>.from(categoriasResponse);
       final categoryQuery = _searchCategoryController.text.trim().toLowerCase();
       setState(() {
@@ -1752,49 +1780,22 @@ class _AdminScreenState extends State<AdminScreen>
                     itemCount: _filteredCategorias.length,
                     proxyDecorator: (child, index, animation) =>
                         RepaintBoundary(child: child),
+                    buildDefaultDragHandles: !_isSavingCategoryOrder,
+                    onReorderStart: (_) => _isDraggingCategories = true,
+                    onReorderEnd: (_) {
+                      _isDraggingCategories = false;
+                      _flushDeferredCatalogReload();
+                    },
                     onReorderItem: (oldIndex, newIndex) async {
-                      setState(() {
-                        final item = _filteredCategorias.removeAt(oldIndex);
-                        _filteredCategorias.insert(newIndex, item);
-
-                        // Atualizar a lista principal também se não há filtro ativo
-                        if (_searchCategoryController.text.isEmpty) {
-                          _categorias.clear();
-                          _categorias.addAll(_filteredCategorias);
-                        }
-                      });
-
-                      // Salvar a ordem no banco de dados
-                      try {
-                        for (int i = 0; i < _filteredCategorias.length; i++) {
-                          final categoria = _filteredCategorias[i];
-                          await Supabase.instance.client
-                              .from('categorias')
-                              .update({'ordem': i})
-                              .eq('id', categoria['id']);
-                        }
-
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Ordem salva com sucesso!'),
-                              backgroundColor: Colors.green,
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Erro ao salvar ordem: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          // Recarregar dados em caso de erro
-                          _loadData();
-                        }
-                      }
+                      if (_isSavingCategoryOrder) return;
+                      final visible = List<Map<String, dynamic>>.from(
+                        _filteredCategorias,
+                      );
+                      final item = visible.removeAt(oldIndex);
+                      visible.insert(newIndex, item);
+                      await _saveCategoryOrder(
+                        CategoryOrder.mergeVisible(_categorias, visible),
+                      );
                     },
                     itemBuilder: (context, index) {
                       final categoria = _filteredCategorias[index];
@@ -2889,7 +2890,88 @@ class _AdminScreenState extends State<AdminScreen>
     }
   }
 
+  void _flushDeferredCatalogReload() {
+    if (!mounted ||
+        !_catalogReloadDeferred ||
+        _isSavingCategoryOrder ||
+        _isDraggingCategories) {
+      return;
+    }
+    _catalogReloadDeferred = false;
+    _scheduleCatalogRefresh();
+  }
+
+  void _applyCategoryOrder(List<Map<String, dynamic>> ordered) {
+    final query = _searchCategoryController.text.trim().toLowerCase();
+    _categorias = ordered;
+    _filteredCategorias = ordered
+        .where(
+          (category) =>
+              (category['nome'] ?? '').toString().toLowerCase().contains(query),
+        )
+        .toList();
+  }
+
+  Future<bool> _saveCategoryOrder(List<Map<String, dynamic>> ordered) async {
+    if (_isSavingCategoryOrder || !mounted) return false;
+    final previous = List<Map<String, dynamic>>.from(_categorias);
+    final normalized = CategoryOrder.mergeVisible(ordered, ordered);
+    _categoryOrderRevision++;
+    _catalogReadId++;
+    setState(() {
+      _isSavingCategoryOrder = true;
+      _applyCategoryOrder(normalized);
+    });
+    try {
+      await Supabase.instance.client
+          .rpc(
+            'reorder_categories',
+            params: {
+              'category_orders': [
+                for (var i = 0; i < normalized.length; i++)
+                  {'id': normalized[i]['id'], 'order': i},
+              ],
+            },
+          )
+          .timeout(const Duration(seconds: 12));
+      CatalogSyncService.instance.notifyCatalogChanged();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ordem das categorias salva.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      return true;
+    } catch (_) {
+      _categoryOrderRevision++;
+      if (mounted) {
+        setState(() => _applyCategoryOrder(previous));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Não foi possível salvar a ordem. Atualize a lista e tente novamente.',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    } finally {
+      _catalogReloadDeferred = true;
+      if (mounted) {
+        setState(() => _isSavingCategoryOrder = false);
+      } else {
+        _isSavingCategoryOrder = false;
+      }
+      _flushDeferredCatalogReload();
+    }
+  }
+
   Future<void> _showReorderCategoriesDialog() async {
+    if (_isSavingCategoryOrder) return;
+    var saving = false;
     // Criar cópia dos dados atuais
     List<Map<String, dynamic>> tempCategorias = List.from(_categorias);
 
@@ -2908,6 +2990,7 @@ class _AdminScreenState extends State<AdminScreen>
               child: ReorderableListView.builder(
                 itemCount: tempCategorias.length,
                 onReorderItem: (oldIndex, newIndex) {
+                  if (saving) return;
                   setDialogState(() {
                     final item = tempCategorias.removeAt(oldIndex);
                     tempCategorias.insert(newIndex, item);
@@ -2964,7 +3047,9 @@ class _AdminScreenState extends State<AdminScreen>
                   children: [
                     Expanded(
                       child: TextButton.icon(
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: saving
+                            ? null
+                            : () => Navigator.of(context).pop(),
                         icon: const Icon(Icons.close, color: Colors.red),
                         label: const Text(
                           'Cancelar',
@@ -2975,52 +3060,20 @@ class _AdminScreenState extends State<AdminScreen>
                     const SizedBox(width: 8),
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: () async {
-                          final scaffoldMessenger = ScaffoldMessenger.of(
-                            context,
-                          );
-                          final navigator = Navigator.of(context);
-
-                          try {
-                            // Atualizar a ordem de cada categoria no banco de dados
-                            for (int i = 0; i < tempCategorias.length; i++) {
-                              final categoria = tempCategorias[i];
-                              await Supabase.instance.client
-                                  .from('categorias')
-                                  .update({'ordem': i})
-                                  .eq('id', categoria['id']);
-                            }
-
-                            // Atualizar o estado local imediatamente
-                            if (mounted) {
-                              setState(() {
-                                _categorias = List.from(tempCategorias);
-                                _filteredCategorias = List.from(tempCategorias);
-                              });
-
-                              scaffoldMessenger.showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Ordem das categorias atualizada com sucesso!',
-                                  ),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
-                              navigator.pop();
-                            }
-                          } catch (e) {
-                            if (mounted) {
-                              scaffoldMessenger.showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Erro ao reordenar categorias: $e',
-                                  ),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                            }
-                          }
-                        },
+                        onPressed: saving
+                            ? null
+                            : () async {
+                                setDialogState(() => saving = true);
+                                final saved = await _saveCategoryOrder(
+                                  tempCategorias,
+                                );
+                                if (!context.mounted) return;
+                                if (saved) {
+                                  Navigator.of(context).pop();
+                                } else {
+                                  setDialogState(() => saving = false);
+                                }
+                              },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green,
                           foregroundColor: Colors.white,
@@ -4256,72 +4309,130 @@ class _AdminScreenState extends State<AdminScreen>
     },
   ];
 
-  Future<void> _showPedidosFilterMenu() async {
-    final button =
-        _ordersFilterKey.currentContext?.findRenderObject() as RenderBox?;
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (button == null || overlay == null) return;
-    final offset = button.localToGlobal(Offset.zero, ancestor: overlay);
+  Future<void> _showPedidosFilterDialog() async {
     final selectedValue = _selectedStatusFilter ?? 'todos';
-    final value = await showMenu<String>(
+    final selectedOption = await showDialog<String>(
       context: context,
-      position: RelativeRect.fromLTRB(
-        offset.dx,
-        offset.dy + button.size.height + 6,
-        overlay.size.width - offset.dx - button.size.width,
-        0,
-      ),
-      constraints: BoxConstraints(
-        minWidth: button.size.width,
-        maxWidth: button.size.width,
-        maxHeight: MediaQuery.sizeOf(context).height * 0.65,
-      ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      color: Colors.white,
-      items: _statusFilterOptions.map((option) {
-        final isSelected = option['value'] == selectedValue;
-        return PopupMenuItem<String>(
-          value: option['value'] as String,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: isSelected ? Colors.grey.shade100 : Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: isSelected ? Colors.black : Colors.grey.shade200,
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  option['icon'] as IconData,
-                  size: 20,
-                  color: option['color'] as Color,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    option['label'] as String,
-                    style: TextStyle(
-                      fontWeight: isSelected
-                          ? FontWeight.w700
-                          : FontWeight.w500,
+      builder: (dialogContext) {
+        final maxHeight = MediaQuery.of(dialogContext).size.height * 0.72;
+
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: 320, maxHeight: maxHeight),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.filter_list, color: Colors.blueGrey),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Filtrar pedidos',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: Image.asset(
+                          'assets/icons/menu/cancel_button.png',
+                          width: 20,
+                          height: 20,
+                        ),
+                        tooltip: 'Fechar',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _statusFilterOptions.length,
+                      separatorBuilder: (_, index) => const SizedBox(height: 6),
+                      itemBuilder: (context, index) {
+                        final option = _statusFilterOptions[index];
+                        final value = option['value'] as String;
+                        final isSelected = value == selectedValue;
+
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => Navigator.of(dialogContext).pop(value),
+                            child: Ink(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? Colors.grey.shade100
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? Colors.black
+                                      : Colors.grey.shade200,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    option['icon'] as IconData,
+                                    size: 20,
+                                    color: option['color'] as Color,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      option['label'] as String,
+                                      style: TextStyle(
+                                        fontWeight: isSelected
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(
+                                      Icons.check_circle,
+                                      size: 18,
+                                      color: Colors.black,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                ),
-                if (isSelected)
-                  const Icon(Icons.check_circle, size: 18, color: Colors.black),
-              ],
+                ],
+              ),
             ),
           ),
         );
-      }).toList(),
+      },
     );
-    if (value != null && mounted) {
-      setState(() => _selectedStatusFilter = value == 'todos' ? null : value);
-    }
+
+    if (selectedOption == null || !mounted) return;
+
+    setState(() {
+      _selectedStatusFilter = selectedOption == 'todos' ? null : selectedOption;
+    });
   }
 
   Widget _buildPedidosTab() {
@@ -4375,8 +4486,7 @@ class _AdminScreenState extends State<AdminScreen>
                         color: Colors.transparent,
                         child: InkWell(
                           borderRadius: BorderRadius.circular(16),
-                          key: _ordersFilterKey,
-                          onTap: _showPedidosFilterMenu,
+                          onTap: _showPedidosFilterDialog,
                           child: InputDecorator(
                             decoration: InputDecoration(
                               labelText: 'Filtrar pedidos',

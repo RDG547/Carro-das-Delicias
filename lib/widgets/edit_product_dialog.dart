@@ -363,7 +363,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.teal[200]!),
+            border: Border.all(color: Colors.blue[200]!),
           ),
           child: Row(
             children: [
@@ -371,7 +371,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                 FlavorIconWidget(icon: selectedIcon, size: 28),
                 const SizedBox(width: 8),
               ] else ...[
-                Icon(Icons.image_search_outlined, color: Colors.teal[700]),
+                Icon(Icons.image_search_outlined, color: Colors.blue[700]),
                 const SizedBox(width: 8),
               ],
               Expanded(
@@ -381,7 +381,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                       : 'Selecionar icone',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: Colors.teal[800],
+                    color: Colors.blue[800],
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),
@@ -391,7 +391,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                 isOpen
                     ? Icons.keyboard_arrow_up_rounded
                     : Icons.keyboard_arrow_down_rounded,
-                color: Colors.teal[700],
+                color: Colors.blue[700],
               ),
             ],
           ),
@@ -399,7 +399,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
       },
       itemBuilder: (context, icon, isSelected) {
         return Container(
-          color: isSelected ? Colors.teal[50] : Colors.white,
+          color: isSelected ? Colors.blue[50] : Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
@@ -416,7 +416,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                 ),
               ),
               if (isSelected)
-                Icon(Icons.check_rounded, color: Colors.teal[700], size: 20),
+                Icon(Icons.check_rounded, color: Colors.blue[700], size: 20),
             ],
           ),
         );
@@ -922,6 +922,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
       title: const ProductFormDialogHeader(
         title: 'Editar Produto',
         icon: Icons.edit,
+        color: Colors.blue,
       ),
       body: Column(
         mainAxisSize: MainAxisSize.min,
@@ -933,13 +934,13 @@ class _EditProductDialogState extends State<EditProductDialog> {
             autocorrect: false,
             decoration: productDialogInputDecoration(
               labelText: 'Nome do Produto *',
-              borderColor: Colors.teal[200]!,
-              fillColor: Colors.teal[50]!,
+              borderColor: Colors.blue[200]!,
+              fillColor: Colors.blue[50]!,
               labelStyle: const TextStyle(
-                color: Colors.teal,
+                color: Colors.blue,
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.teal),
+              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.blue),
             ),
           ),
           const SizedBox(height: 16),
@@ -966,15 +967,15 @@ class _EditProductDialogState extends State<EditProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Preço *',
-                borderColor: Colors.teal[200]!,
-                fillColor: Colors.teal[50]!,
+                borderColor: Colors.blue[200]!,
+                fillColor: Colors.blue[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.teal,
+                  color: Colors.blue,
                   fontWeight: FontWeight.w600,
                 ),
                 prefixIcon: const Icon(
                   Icons.payments_outlined,
-                  color: Colors.teal,
+                  color: Colors.blue,
                 ),
                 hintText: 'R\$ 0,00',
                 hintStyle: TextStyle(
@@ -990,13 +991,13 @@ class _EditProductDialogState extends State<EditProductDialog> {
             isExpanded: true,
             decoration: productDialogInputDecoration(
               labelText: 'Categoria *',
-              borderColor: Colors.teal[200]!,
-              fillColor: Colors.teal[50]!,
+              borderColor: Colors.blue[200]!,
+              fillColor: Colors.blue[50]!,
               labelStyle: const TextStyle(
-                color: Colors.teal,
+                color: Colors.blue,
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(Icons.category, color: Colors.teal),
+              prefixIcon: const Icon(Icons.category, color: Colors.blue),
             ),
             items: widget.categorias.map((categoria) {
               return DropdownMenuItem<String>(
@@ -1087,7 +1088,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: index == 0 ? Colors.teal : Colors.grey[300]!,
+                            color: index == 0 ? Colors.blue : Colors.grey[300]!,
                             width: index == 0 ? 2 : 1,
                           ),
                         ),
@@ -1151,7 +1152,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                                         vertical: 4,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: Colors.teal,
+                                        color: Colors.blue,
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: const Text(
@@ -1359,7 +1360,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                               : 'Adicionar Mais',
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
+                          backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -1429,9 +1430,9 @@ class _EditProductDialogState extends State<EditProductDialog> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.teal[50],
+              color: Colors.blue[50],
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.teal[100]!),
+              border: Border.all(color: Colors.blue[100]!),
             ),
             child: Column(
               children: [
@@ -1439,7 +1440,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                   children: [
                     Icon(
                       _isDisponivel ? Icons.check_circle : Icons.cancel,
-                      color: _isDisponivel ? Colors.teal : Colors.red,
+                      color: _isDisponivel ? Colors.blue : Colors.red,
                     ),
                     const SizedBox(width: 12),
                     const Expanded(
@@ -1453,7 +1454,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                     ),
                     Switch(
                       value: _isDisponivel,
-                      activeThumbColor: Colors.teal,
+                      activeThumbColor: Colors.blue,
                       onChanged: (value) {
                         setState(() {
                           _isDisponivel = value;
@@ -1579,23 +1580,23 @@ class _EditProductDialogState extends State<EditProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Valor do Desconto (em R\$)',
-                borderColor: Colors.teal[200]!,
-                fillColor: Colors.teal[50]!,
+                borderColor: Colors.blue[200]!,
+                fillColor: Colors.blue[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.teal,
+                  color: Colors.blue,
                   fontWeight: FontWeight.w600,
                 ),
                 hintText: _hasMultipleSizes
                     ? 'Ex: R\$ 5,00'
                     : 'Valor a ser deduzido do preço',
                 hintStyle: const TextStyle(fontSize: 12),
-                prefixIcon: const Icon(Icons.local_offer, color: Colors.teal),
+                prefixIcon: const Icon(Icons.local_offer, color: Colors.blue),
                 helperText: _hasMultipleSizes
                     ? 'Este valor será deduzido automaticamente de todos os preços'
                     : null,
                 helperStyle: TextStyle(
                   fontSize: 12,
-                  color: Colors.teal[700],
+                  color: Colors.blue[700],
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -1774,15 +1775,15 @@ class _EditProductDialogState extends State<EditProductDialog> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.teal[50],
+              color: Colors.blue[50],
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.teal[100]!),
+              border: Border.all(color: Colors.blue[100]!),
             ),
             child: Row(
               children: [
                 Icon(
                   Icons.tune,
-                  color: _hasMultipleFlavors ? Colors.teal : Colors.grey,
+                  color: _hasMultipleFlavors ? Colors.blue : Colors.grey,
                 ),
                 const SizedBox(width: 12),
                 const Expanded(
@@ -1806,7 +1807,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                 ),
                 Switch(
                   value: _hasMultipleFlavors,
-                  activeThumbColor: Colors.teal,
+                  activeThumbColor: Colors.blue,
                   onChanged: (value) {
                     setState(() {
                       _hasMultipleFlavors = value;
@@ -1832,16 +1833,16 @@ class _EditProductDialogState extends State<EditProductDialog> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.teal[50],
+                color: Colors.blue[50],
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.teal[200]!),
+                border: Border.all(color: Colors.blue[200]!),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.tune, color: Colors.teal, size: 20),
+                      const Icon(Icons.tune, color: Colors.blue, size: 20),
                       const SizedBox(width: 8),
                       const Expanded(
                         child: Text(
@@ -1849,7 +1850,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: Colors.teal,
+                            color: Colors.blue,
                           ),
                         ),
                       ),
@@ -1865,7 +1866,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.teal[100]!),
+                        border: Border.all(color: Colors.blue[100]!),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1878,7 +1879,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                                 child: Text(
                                   'Sabor ${index + 1}',
                                   style: TextStyle(
-                                    color: Colors.teal[800],
+                                    color: Colors.blue[800],
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
@@ -1940,7 +1941,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                               icon: const Icon(Icons.upload, size: 16),
                               label: const Text('Enviar icone'),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.teal,
+                                foregroundColor: Colors.blue,
                                 visualDensity: VisualDensity.compact,
                                 textStyle: const TextStyle(
                                   fontSize: 12,
@@ -1950,7 +1951,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                                   horizontal: 10,
                                   vertical: 10,
                                 ),
-                                side: BorderSide(color: Colors.teal[200]!),
+                                side: BorderSide(color: Colors.blue[200]!),
                               ),
                             ),
                           ),
@@ -1994,7 +1995,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
                       ),
                       label: const Text('Adicionar'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal,
+                        backgroundColor: Colors.blue,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -2012,6 +2013,7 @@ class _EditProductDialogState extends State<EditProductDialog> {
       actions: ProductFormDialogActions(
         onSubmit: _updateProduct,
         submitLabel: 'Salvar alterações',
+        color: Colors.blue,
         submitIcon: Icons.save,
       ),
     );

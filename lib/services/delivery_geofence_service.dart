@@ -526,7 +526,6 @@ class DeliveryGeofenceService {
       'latitude': latitude.toString(),
       'country': 'br',
       'language': 'pt',
-      'limit': '5',
       'types': 'address,street,place,postcode,locality,neighborhood',
     });
 

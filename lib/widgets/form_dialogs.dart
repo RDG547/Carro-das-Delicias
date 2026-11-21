@@ -270,7 +270,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.teal[200]!),
+            border: Border.all(color: Colors.green[200]!),
           ),
           child: Row(
             children: [
@@ -278,7 +278,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                 FlavorIconWidget(icon: selectedIcon, size: 28),
                 const SizedBox(width: 8),
               ] else ...[
-                Icon(Icons.image_search_outlined, color: Colors.teal[700]),
+                Icon(Icons.image_search_outlined, color: Colors.green[700]),
                 const SizedBox(width: 8),
               ],
               Expanded(
@@ -288,7 +288,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       : 'Selecionar icone',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: Colors.teal[800],
+                    color: Colors.green[800],
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),
@@ -298,7 +298,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                 isOpen
                     ? Icons.keyboard_arrow_up_rounded
                     : Icons.keyboard_arrow_down_rounded,
-                color: Colors.teal[700],
+                color: Colors.green[700],
               ),
             ],
           ),
@@ -306,7 +306,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
       },
       itemBuilder: (context, icon, isSelected) {
         return Container(
-          color: isSelected ? Colors.teal[50] : Colors.white,
+          color: isSelected ? Colors.green[50] : Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
@@ -323,7 +323,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                 ),
               ),
               if (isSelected)
-                Icon(Icons.check_rounded, color: Colors.teal[700], size: 20),
+                Icon(Icons.check_rounded, color: Colors.green[700], size: 20),
             ],
           ),
         );
@@ -806,13 +806,13 @@ class _AddProductDialogState extends State<AddProductDialog> {
             controller: _nomeController,
             decoration: productDialogInputDecoration(
               labelText: 'Nome do Produto *',
-              borderColor: Colors.teal[200]!,
-              fillColor: Colors.teal[50]!,
+              borderColor: Colors.green[200]!,
+              fillColor: Colors.green[50]!,
               labelStyle: const TextStyle(
-                color: Colors.teal,
+                color: Colors.green,
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.teal),
+              prefixIcon: const Icon(Icons.shopping_bag, color: Colors.green),
               hintText: 'Digite o nome do produto',
               hintStyle: const TextStyle(color: Colors.grey),
             ),
@@ -842,15 +842,15 @@ class _AddProductDialogState extends State<AddProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Preço *',
-                borderColor: Colors.teal[200]!,
-                fillColor: Colors.teal[50]!,
+                borderColor: Colors.green[200]!,
+                fillColor: Colors.green[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.teal,
+                  color: Colors.green,
                   fontWeight: FontWeight.w600,
                 ),
                 prefixIcon: const Icon(
                   Icons.payments_outlined,
-                  color: Colors.teal,
+                  color: Colors.green,
                 ),
                 hintText: 'R\$ 0,00',
                 hintStyle: TextStyle(
@@ -887,13 +887,13 @@ class _AddProductDialogState extends State<AddProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Preço com Desconto *',
-                borderColor: Colors.teal[200]!,
-                fillColor: Colors.teal[50]!,
+                borderColor: Colors.green[200]!,
+                fillColor: Colors.green[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.teal,
+                  color: Colors.green,
                   fontWeight: FontWeight.w600,
                 ),
-                prefixIcon: const Icon(Icons.local_offer, color: Colors.teal),
+                prefixIcon: const Icon(Icons.local_offer, color: Colors.green),
                 hintText: 'R\$ 0,00',
                 hintStyle: TextStyle(
                   color: Colors.grey.withValues(alpha: 0.28),
@@ -909,13 +909,13 @@ class _AddProductDialogState extends State<AddProductDialog> {
             isExpanded: true,
             decoration: productDialogInputDecoration(
               labelText: 'Categoria *',
-              borderColor: Colors.teal[200]!,
-              fillColor: Colors.teal[50]!,
+              borderColor: Colors.green[200]!,
+              fillColor: Colors.green[50]!,
               labelStyle: const TextStyle(
-                color: Colors.teal,
+                color: Colors.green,
                 fontWeight: FontWeight.w600,
               ),
-              prefixIcon: const Icon(Icons.category, color: Colors.teal),
+              prefixIcon: const Icon(Icons.category, color: Colors.green),
             ),
             items: widget.categorias.map((categoria) {
               return DropdownMenuItem<String>(
@@ -983,7 +983,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: index == 0 ? Colors.teal : Colors.grey[300]!,
+                          color: index == 0 ? Colors.green : Colors.grey[300]!,
                           width: index == 0 ? 2 : 1,
                         ),
                       ),
@@ -1014,7 +1014,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                           vertical: 4,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Colors.teal,
+                                          color: Colors.green,
                                           borderRadius: BorderRadius.circular(
                                             4,
                                           ),
@@ -1128,7 +1128,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
+                          backgroundColor: Colors.green,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
@@ -1145,7 +1145,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
+                          backgroundColor: Colors.green,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
@@ -1183,9 +1183,9 @@ class _AddProductDialogState extends State<AddProductDialog> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.teal[50],
+              color: Colors.green[50],
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.teal[100]!),
+              border: Border.all(color: Colors.green[100]!),
             ),
             child: Column(
               children: [
@@ -1193,7 +1193,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                   children: [
                     Icon(
                       _isDisponivel ? Icons.check_circle : Icons.cancel,
-                      color: _isDisponivel ? Colors.teal : Colors.red,
+                      color: _isDisponivel ? Colors.green : Colors.red,
                     ),
                     const SizedBox(width: 12),
                     const Expanded(
@@ -1207,7 +1207,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                     ),
                     Switch(
                       value: _isDisponivel,
-                      activeThumbColor: Colors.teal,
+                      activeThumbColor: Colors.green,
                       onChanged: (value) {
                         setState(() {
                           _isDisponivel = value;
@@ -1333,23 +1333,23 @@ class _AddProductDialogState extends State<AddProductDialog> {
               inputFormatters: [CurrencyInputFormatter()],
               decoration: productDialogInputDecoration(
                 labelText: 'Valor do Desconto (em R\$)',
-                borderColor: Colors.teal[200]!,
-                fillColor: Colors.teal[50]!,
+                borderColor: Colors.green[200]!,
+                fillColor: Colors.green[50]!,
                 labelStyle: const TextStyle(
-                  color: Colors.teal,
+                  color: Colors.green,
                   fontWeight: FontWeight.w600,
                 ),
                 hintText: _hasMultipleSizes
                     ? 'Ex: R\$ 5,00'
                     : 'Valor a ser deduzido do preço',
                 hintStyle: const TextStyle(fontSize: 12),
-                prefixIcon: const Icon(Icons.local_offer, color: Colors.teal),
+                prefixIcon: const Icon(Icons.local_offer, color: Colors.green),
                 helperText: _hasMultipleSizes
                     ? 'Este valor será deduzido automaticamente de todos os preços'
                     : null,
                 helperStyle: TextStyle(
                   fontSize: 12,
-                  color: Colors.teal[700],
+                  color: Colors.green[700],
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -1583,9 +1583,9 @@ class _AddProductDialogState extends State<AddProductDialog> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.teal[50],
+              color: Colors.green[50],
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.teal[100]!),
+              border: Border.all(color: Colors.green[100]!),
             ),
             child: Row(
               children: [
@@ -1645,9 +1645,9 @@ class _AddProductDialogState extends State<AddProductDialog> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.teal[50],
+                color: Colors.green[50],
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.teal[200]!),
+                border: Border.all(color: Colors.green[200]!),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1676,7 +1676,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.teal[100]!),
+                        border: Border.all(color: Colors.green[100]!),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1689,7 +1689,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                 child: Text(
                                   'Sabor ${index + 1}',
                                   style: TextStyle(
-                                    color: Colors.teal[800],
+                                    color: Colors.green[800],
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
@@ -1760,7 +1760,7 @@ class _AddProductDialogState extends State<AddProductDialog> {
                                   horizontal: 10,
                                   vertical: 10,
                                 ),
-                                side: BorderSide(color: Colors.teal[200]!),
+                                side: BorderSide(color: Colors.green[200]!),
                               ),
                             ),
                           ),
