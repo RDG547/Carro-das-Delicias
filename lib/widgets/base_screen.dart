@@ -82,6 +82,7 @@ class BaseScreen extends StatelessWidget {
               child: Container(
                 decoration: const BoxDecoration(color: Colors.black),
                 child: SafeArea(
+                  bottom: false,
                   child: Container(
                     height: 48, // Altura reduzida
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -145,9 +146,7 @@ class BaseScreen extends StatelessWidget {
           : null,
       floatingActionButton: floatingActionButton,
       floatingActionButtonLocation: floatingActionButtonLocation,
-      body: useSafeArea
-          ? SafeArea(bottom: false, top: !hasAppBar, child: content)
-          : content,
+      body: useSafeArea ? SafeArea(top: !hasAppBar, child: content) : content,
     );
   }
 }

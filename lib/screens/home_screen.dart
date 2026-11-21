@@ -395,12 +395,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _onFavoritesChanged() {
-    // Invalidar cache e forçar rebuild quando favoritos mudarem
-    if (mounted) {
-      setState(() {
-        _cachedFilteredProducts = null;
-      });
+    if (!mounted) return;
+    if (_selectedCategory == 'Favoritos' &&
+        _favoritesService.totalFavorites == 0) {
+      _selectedCategoryNotifier.value = 'Todos';
     }
+    setState(() => _cachedFilteredProducts = null);
   }
 
   @override

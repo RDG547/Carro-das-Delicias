@@ -1,3 +1,4 @@
+import '../widgets/category_reorder_dialog.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -1780,7 +1781,7 @@ class _AdminScreenState extends State<AdminScreen>
                     itemCount: _filteredCategorias.length,
                     proxyDecorator: (child, index, animation) =>
                         RepaintBoundary(child: child),
-                    buildDefaultDragHandles: !_isSavingCategoryOrder,
+                    buildDefaultDragHandles: false,
                     onReorderStart: (_) => _isDraggingCategories = true,
                     onReorderEnd: (_) {
                       _isDraggingCategories = false;
@@ -1821,49 +1822,61 @@ class _AdminScreenState extends State<AdminScreen>
                             ),
                           ),
                           title: Text(categoria['nome'] ?? 'Categoria'),
-                          trailing: PopupMenuButton(
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(
-                                value: 'edit',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.edit, size: 20),
-                                    SizedBox(width: 8),
-                                    Text('Editar'),
-                                  ],
-                                ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CategoryDragHandle(
+                                index: index,
+                                enabled: !_isSavingCategoryOrder,
                               ),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Row(
-                                  children: [
-                                    Image.asset(
-                                      'assets/icons/menu/delete_button.png',
-                                      width: 20,
-                                      height: 20,
-                                      color: Colors.red,
+                              PopupMenuButton(
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.edit, size: 20),
+                                        SizedBox(width: 8),
+                                        Text('Editar'),
+                                      ],
                                     ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Excluir',
-                                      style: TextStyle(color: Colors.red),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Row(
+                                      children: [
+                                        Image.asset(
+                                          'assets/icons/menu/delete_button.png',
+                                          width: 20,
+                                          height: 20,
+                                          color: Colors.red,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Excluir',
+                                          style: TextStyle(color: Colors.red),
+                                        ),
+                                      ],
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
+                                onSelected: (value) {
+                                  if (value == 'edit') {
+                                    _showEditCategoryDialog(categoria);
+                                  } else if (value == 'delete') {
+                                    // Garantir que o ID seja passado como int para evitar conflito de tipos no RPC
+                                    final catId = categoria['id'];
+                                    final catIdInt = catId is int
+                                        ? catId
+                                        : int.parse(catId.toString());
+                                    _showDeleteConfirmation(
+                                      'categoria',
+                                      catIdInt,
+                                    );
+                                  }
+                                },
                               ),
                             ],
-                            onSelected: (value) {
-                              if (value == 'edit') {
-                                _showEditCategoryDialog(categoria);
-                              } else if (value == 'delete') {
-                                // Garantir que o ID seja passado como int para evitar conflito de tipos no RPC
-                                final catId = categoria['id'];
-                                final catIdInt = catId is int
-                                    ? catId
-                                    : int.parse(catId.toString());
-                                _showDeleteConfirmation('categoria', catIdInt);
-                              }
-                            },
                           ),
                         ),
                       );
@@ -2971,126 +2984,12 @@ class _AdminScreenState extends State<AdminScreen>
 
   Future<void> _showReorderCategoriesDialog() async {
     if (_isSavingCategoryOrder) return;
-    var saving = false;
-    // Criar cópia dos dados atuais
-    List<Map<String, dynamic>> tempCategorias = List.from(_categorias);
-
-    showDialog(
+    await showDialog<void>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: const Text(
-              'Reordenar Categorias',
-              textAlign: TextAlign.center,
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 400,
-              child: ReorderableListView.builder(
-                itemCount: tempCategorias.length,
-                onReorderItem: (oldIndex, newIndex) {
-                  if (saving) return;
-                  setDialogState(() {
-                    final item = tempCategorias.removeAt(oldIndex);
-                    tempCategorias.insert(newIndex, item);
-                  });
-                },
-                itemBuilder: (context, index) {
-                  final categoria = tempCategorias[index];
-                  return Card(
-                    key: ValueKey(categoria['id']),
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Colors.blue[100],
-                        child: Text(
-                          '${index + 1}',
-                          style: TextStyle(
-                            color: Colors.blue[700],
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      title: Row(
-                        children: [
-                          SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CategoryIconWidget(
-                              icone: categoria['icone'] ?? '📦',
-                              categoryName: categoria['nome'],
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              categoria['nome'],
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                      trailing: const Icon(Icons.drag_handle),
-                    ),
-                  );
-                },
-              ),
-            ),
-            actionsAlignment: MainAxisAlignment.center,
-            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            actions: [
-              SizedBox(
-                width: double.infinity,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextButton.icon(
-                        onPressed: saving
-                            ? null
-                            : () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        label: const Text(
-                          'Cancelar',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: saving
-                            ? null
-                            : () async {
-                                setDialogState(() => saving = true);
-                                final saved = await _saveCategoryOrder(
-                                  tempCategorias,
-                                );
-                                if (!context.mounted) return;
-                                if (saved) {
-                                  Navigator.of(context).pop();
-                                } else {
-                                  setDialogState(() => saving = false);
-                                }
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                        ),
-                        icon: const Icon(Icons.save, size: 18),
-                        label: const Text(
-                          'Salvar Ordem',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
+      barrierDismissible: false,
+      builder: (context) => CategoryReorderDialog(
+        categories: _categorias,
+        onSave: _saveCategoryOrder,
       ),
     );
   }

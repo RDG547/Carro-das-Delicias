@@ -1,0 +1,6 @@
+• Localização atual mais clara no rastreamento.
+• Retorno automático para Todos ao remover o último favorito.
+• Categorias sincronizadas em tempo real.
+• Melhor adaptação às telas e barras do Android.
+• Melhorias de desempenho e otimização do aplicativo.
+• Aviso de nova versão integrado à Play Store para manter o app atualizado.

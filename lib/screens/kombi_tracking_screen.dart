@@ -440,6 +440,10 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
   @override
   Widget build(BuildContext context) {
     final mapControlsBottom = _mapControlsBottomInset(context);
+    final sheetTop = MediaQuery.paddingOf(context).top + 48;
+    final sheetHeight =
+        (MediaQuery.sizeOf(context).height - sheetTop - mapControlsBottom - 12)
+            .clamp(_sheetCollapsedHeight, _sheetExpandedHeight);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -608,7 +612,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
 
           // Card de informações superior expansível
           Positioned(
-            top: kToolbarHeight, // Logo abaixo da AppBar (sem margem adicional)
+            top: sheetTop,
             left: 16, // Margem lateral esquerda
             right: 16, // Margem lateral direita
             child: GestureDetector(
@@ -628,9 +632,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
-                height: _isSheetExpanded
-                    ? _sheetExpandedHeight
-                    : _sheetCollapsedHeight,
+                height: _isSheetExpanded ? sheetHeight : _sheetCollapsedHeight,
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(
@@ -645,7 +647,7 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
                   ],
                 ),
                 child: SingleChildScrollView(
-                  physics: const NeverScrollableScrollPhysics(),
+                  physics: const ClampingScrollPhysics(),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

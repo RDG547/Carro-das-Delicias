@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.15 (2026112104) — 21/11/2026
+
+- Localização atual com rua, número, bairro e cidade legíveis no rastreamento.
+- Ao retirar o último favorito, o catálogo volta automaticamente para Todos.
+- Ordem das categorias sincronizada com o catálogo em tempo real.
+- Melhor adaptação das telas às barras do sistema e ao modo de ponta a ponta do Android.
+- Otimização do aplicativo Android para reduzir código e recursos e melhorar o desempenho.
+- Aviso de atualização obrigatória integrado à disponibilidade da Play Store para cada usuário.
+
 ## 1.0.14 (2026112101) — 21/11/2026
 
 ### Catálogo e pesquisa

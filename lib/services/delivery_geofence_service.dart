@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:turf/turf.dart';
 
 import '../config/supabase_config.dart';
+import '../utils/geocoding_text.dart';
 
 class DeliveryAreaResult {
   const DeliveryAreaResult({required this.atende, this.areaName});
@@ -548,12 +549,12 @@ class DeliveryGeofenceService {
           ? properties
           : <String, dynamic>{};
       final fullAddress =
-          props['full_address']?.toString().trim() ??
-          props['place_formatted']?.toString().trim() ??
-          props['name']?.toString().trim();
+          GeocodingText.label(props['full_address']) ??
+          GeocodingText.label(props['place_formatted']) ??
+          GeocodingText.label(props['name']);
       final name =
-          props['name']?.toString().trim() ??
-          feature['text']?.toString().trim();
+          GeocodingText.label(props['name']) ??
+          GeocodingText.label(feature['text']);
       final number = _extractNumberFromFeature(feature, name);
       final street = _streetFromAddressText(fullAddress, number) ?? name;
 
@@ -680,7 +681,7 @@ class DeliveryGeofenceService {
     final properties = feature['properties'];
     if (properties is Map<String, dynamic>) {
       for (final key in const ['unit', 'suite', 'building', 'name']) {
-        final value = properties[key]?.toString().trim();
+        final value = GeocodingText.label(properties[key]);
         if (value != null && value.isNotEmpty) return value;
       }
     }
@@ -769,29 +770,8 @@ class DeliveryGeofenceService {
     return parts.first;
   }
 
-  String? _nestedString(dynamic value, Set<String> keys, [int depth = 0]) {
-    if (depth > 4) return null;
-    if (value is Map) {
-      for (final entry in value.entries) {
-        final key = entry.key?.toString().toLowerCase();
-        if (key != null && keys.contains(key)) {
-          final text = entry.value?.toString().trim();
-          if (text != null && text.isNotEmpty && text != '{}') return text;
-        }
-      }
-      for (final entry in value.entries) {
-        final found = _nestedString(entry.value, keys, depth + 1);
-        if (found != null) return found;
-      }
-    }
-    if (value is List) {
-      for (final item in value) {
-        final found = _nestedString(item, keys, depth + 1);
-        if (found != null) return found;
-      }
-    }
-    return null;
-  }
+  String? _nestedString(dynamic value, Set<String> keys) =>
+      GeocodingText.find(value, keys);
 
   String? _extractNumberFromPlaceName(
     Map<String, dynamic> feature,

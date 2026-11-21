@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
@@ -11,11 +12,21 @@ import 'services/notification_service.dart';
 import 'services/remote_push_service.dart';
 import 'auth_wrapper.dart';
 import 'widgets/favorite_heart_animation.dart';
+import 'widgets/mandatory_update_gate.dart';
 import 'screens/checkout_screen.dart';
 
 Future<void> main() async {
   // Garante que os bindings do Flutter foram inicializados
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ),
+  );
   await MapboxConfigurationService.initialize();
 
   // Inicializa o Supabase com configuração segura
@@ -55,7 +66,8 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Carro das Delícias',
       debugShowCheckedModeBanner: false,
-      builder: (context, child) => child ?? const SizedBox.shrink(),
+      builder: (context, child) =>
+          MandatoryUpdateGate(child: child ?? const SizedBox.shrink()),
       locale: const Locale('pt', 'BR'),
       supportedLocales: const [Locale('pt', 'BR')],
       localizationsDelegates: const [
@@ -74,6 +86,12 @@ class MyApp extends StatelessWidget {
           onSurface: Colors.black,
         ),
         appBarTheme: const AppBarTheme(
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.light,
+            systemNavigationBarColor: Colors.transparent,
+            systemNavigationBarIconBrightness: Brightness.dark,
+          ),
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
           elevation: 0,

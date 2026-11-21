@@ -82,6 +82,16 @@ android {
         release {
             // Um artefato de produção sempre precisa da chave de upload configurada.
             signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFile("proguard-mapbox.pro")
+            optimization {
+                keepRules {
+                    // Pinned replacements preserve the JNI ABI and enable method optimization.
+                    ignoreFrom("com.mapbox.maps:android-ndk27:11.31.3",
+                               "com.mapbox.common:common-ndk27:24.31.3")
+                }
+            }
         }
     }
 }
@@ -91,6 +101,7 @@ flutter {
 }
 
 dependencies {
+    implementation("com.google.android.play:app-update:2.1.0")
     // Desugaring para suportar APIs Java 8+ em versões antigas do Android
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }
