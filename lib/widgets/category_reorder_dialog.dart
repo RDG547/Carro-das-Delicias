@@ -1,3 +1,5 @@
+import 'category_reorder_list.dart';
+import '../utils/category_order.dart';
 import 'package:flutter/material.dart';
 
 import 'category_icon_widget.dart';
@@ -17,11 +19,12 @@ class CategoryReorderDialog extends StatefulWidget {
 }
 
 class _CategoryReorderDialogState extends State<CategoryReorderDialog> {
-  late final _categories = List<Map<String, dynamic>>.from(widget.categories);
+  late final _categories = CategoryOrder.sorted(widget.categories);
   bool _saving = false;
+  bool _dragging = false;
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || _dragging) return;
     setState(() => _saving = true);
     final saved = await widget.onSave(_categories);
     if (!mounted) return;
@@ -34,7 +37,7 @@ class _CategoryReorderDialogState extends State<CategoryReorderDialog> {
 
   @override
   Widget build(BuildContext context) => PopScope(
-    canPop: !_saving,
+    canPop: !_saving && !_dragging,
     child: Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
@@ -51,20 +54,21 @@ class _CategoryReorderDialogState extends State<CategoryReorderDialog> {
               ),
               const SizedBox(height: 12),
               Flexible(
-                child: ReorderableListView.builder(
+                child: CategoryReorderList(
+                  categories: _categories,
                   shrinkWrap: true,
-                  buildDefaultDragHandles: false,
-                  itemCount: _categories.length,
-                  proxyDecorator: (child, index, animation) => child,
-                  onReorderItem: (oldIndex, newIndex) {
+                  enabled: !_saving,
+                  onDraggingChanged: (dragging) {
+                    if (mounted) setState(() => _dragging = dragging);
+                  },
+                  onReordered: (ordered) {
                     if (_saving) return;
                     setState(() {
-                      final category = _categories.removeAt(oldIndex);
-                      _categories.insert(newIndex, category);
+                      _categories.clear();
+                      _categories.addAll(ordered);
                     });
                   },
-                  itemBuilder: (context, index) {
-                    final category = _categories[index];
+                  itemBuilder: (category, index) {
                     return Card(
                       key: ValueKey(category['id']),
                       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -91,10 +95,6 @@ class _CategoryReorderDialogState extends State<CategoryReorderDialog> {
                             ),
                           ],
                         ),
-                        trailing: CategoryDragHandle(
-                          index: index,
-                          enabled: !_saving,
-                        ),
                       ),
                     );
                   },
@@ -106,15 +106,28 @@ class _CategoryReorderDialogState extends State<CategoryReorderDialog> {
                   Expanded(
                     flex: 4,
                     child: TextButton(
-                      onPressed: _saving
+                      onPressed: _saving || _dragging
                           ? null
                           : () => Navigator.of(context).pop(),
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.all(8),
                       ),
-                      child: const Text(
-                        'Cancelar',
-                        textAlign: TextAlign.center,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Image.asset(
+                            'assets/icons/menu/cancel_button.png',
+                            width: 18,
+                            height: 18,
+                          ),
+                          const SizedBox(width: 6),
+                          const Flexible(
+                            child: Text(
+                              'Cancelar',
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -122,7 +135,7 @@ class _CategoryReorderDialogState extends State<CategoryReorderDialog> {
                   Expanded(
                     flex: 6,
                     child: ElevatedButton(
-                      onPressed: _saving ? null : _save,
+                      onPressed: _saving || _dragging ? null : _save,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
@@ -152,30 +165,6 @@ class _CategoryReorderDialogState extends State<CategoryReorderDialog> {
             ],
           ),
         ),
-      ),
-    ),
-  );
-}
-
-/// Only this target starts a drag; pressing a card or scrolling never does.
-class CategoryDragHandle extends StatelessWidget {
-  const CategoryDragHandle({
-    super.key,
-    required this.index,
-    this.enabled = true,
-  });
-  final int index;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) => ReorderableDragStartListener(
-    index: index,
-    enabled: enabled,
-    child: Semantics(
-      label: 'Arraste para reordenar',
-      child: const ColoredBox(
-        color: Colors.transparent,
-        child: SizedBox(width: 48, height: 48, child: Icon(Icons.drag_handle)),
       ),
     ),
   );

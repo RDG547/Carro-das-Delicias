@@ -14,7 +14,7 @@ void main() {
     const Size(844, 390),
   ]) {
     testWidgets(
-      'reordenar: rolar e pressionar o nome não mudam a ordem em $size',
+      'reordenar: rolar sem pressão longa não muda a ordem em $size',
       (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
@@ -35,14 +35,6 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        final cardPress = await tester.startGesture(
-          tester.getCenter(find.text('Categoria 1')),
-        );
-        await tester.pump(const Duration(milliseconds: 700));
-        await cardPress.moveBy(const Offset(0, 140));
-        await tester.pump(const Duration(milliseconds: 300));
-        await cardPress.up();
-        await tester.pumpAndSettle();
         await tester.drag(
           find.byType(ReorderableListView),
           const Offset(0, -120),
@@ -60,38 +52,39 @@ void main() {
       },
     );
   }
-  testWidgets('somente o puxador reordena e salvar persiste a nova ordem', (
-    tester,
-  ) async {
-    List<int>? saved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: CategoryReorderDialog(
-            categories: categories.take(3).toList(),
-            onSave: (list) async {
-              saved = list.map((c) => c['id'] as int).toList();
-              return false;
-            },
+  testWidgets(
+    'pressionar o card e arrastar reordena e salvar persiste a nova ordem',
+    (tester) async {
+      List<int>? saved;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CategoryReorderDialog(
+              categories: categories.take(3).toList(),
+              onSave: (list) async {
+                saved = list.map((c) => c['id'] as int).toList();
+                return false;
+              },
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    final drag = await tester.startGesture(
-      tester.getCenter(find.byType(CategoryDragHandle).first),
-    );
-    await tester.pump();
-    await drag.moveBy(const Offset(0, 20));
-    await tester.pump();
-    await drag.moveBy(const Offset(0, 120));
-    await tester.pump(const Duration(milliseconds: 500));
-    await drag.moveBy(const Offset(0, 10));
-    await tester.pump();
-    await drag.up();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Salvar ordem'));
-    await tester.pumpAndSettle();
-    expect(saved, [2, 1, 3]);
-  });
+      );
+      await tester.pumpAndSettle();
+      final drag = await tester.startGesture(
+        tester.getCenter(find.text('Categoria 1')),
+      );
+      await tester.pump(const Duration(milliseconds: 700));
+      await drag.moveBy(const Offset(0, 20));
+      await tester.pump();
+      await drag.moveBy(const Offset(0, 120));
+      await tester.pump(const Duration(milliseconds: 500));
+      await drag.moveBy(const Offset(0, 10));
+      await tester.pump();
+      await drag.up();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Salvar ordem'));
+      await tester.pumpAndSettle();
+      expect(saved, [2, 1, 3]);
+    },
+  );
 }

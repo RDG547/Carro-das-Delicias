@@ -1,3 +1,4 @@
+import '../services/app_sound_service.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/cart_service.dart';
@@ -448,6 +449,7 @@ class _CartScreenState extends State<CartScreen> with WidgetsBindingObserver {
           ElevatedButton(
             onPressed: () {
               _cartService.clearCart();
+              AppSoundService.cartCleared();
               Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(

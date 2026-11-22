@@ -1,3 +1,4 @@
+import '../widgets/category_reorder_list.dart';
 import '../widgets/category_reorder_dialog.dart';
 import 'dart:async';
 
@@ -51,6 +52,7 @@ class _AdminScreenState extends State<AdminScreen>
   bool _catalogReloadDeferred = false;
   int _categoryOrderRevision = 0;
   int _catalogReadId = 0;
+  int _categoryListRevision = 0;
   final _searchProductController = TextEditingController();
   final _productSearchNotifier = ValueNotifier<String>('');
   final ValueNotifier<String> _userFilterNotifier = ValueNotifier('todos');
@@ -267,7 +269,10 @@ class _AdminScreenState extends State<AdminScreen>
             readId == _catalogReadId &&
             !_isSavingCategoryOrder &&
             !_isDraggingCategories) {
-          _categorias = List<Map<String, dynamic>>.from(results[1]);
+          _categorias = CategoryOrder.sorted(
+            List<Map<String, dynamic>>.from(results[1]),
+          );
+          _categoryListRevision++;
           _filteredCategorias = _categorias
               .where(
                 (category) => (category['nome'] ?? '')
@@ -375,7 +380,9 @@ class _AdminScreenState extends State<AdminScreen>
         _flushDeferredCatalogReload();
         return;
       }
-      final categorias = List<Map<String, dynamic>>.from(categoriasResponse);
+      final categorias = CategoryOrder.sorted(
+        List<Map<String, dynamic>>.from(categoriasResponse),
+      );
       final categoryQuery = _searchCategoryController.text.trim().toLowerCase();
       setState(() {
         _produtos = produtosResponse.map<Map<String, dynamic>>((produto) {
@@ -387,6 +394,7 @@ class _AdminScreenState extends State<AdminScreen>
           };
         }).toList();
         _categorias = categorias;
+        _categoryListRevision++;
         _filteredCategorias = categoryQuery.isEmpty
             ? List.from(categorias)
             : categorias
@@ -1775,31 +1783,21 @@ class _AdminScreenState extends State<AdminScreen>
                       ),
                     ],
                   )
-                : ReorderableListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
+                : CategoryReorderList(
+                    categories: _filteredCategorias,
+                    revision: _categoryListRevision,
+                    enabled: !_isSavingCategoryOrder,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _filteredCategorias.length,
-                    proxyDecorator: (child, index, animation) =>
-                        RepaintBoundary(child: child),
-                    buildDefaultDragHandles: false,
-                    onReorderStart: (_) => _isDraggingCategories = true,
-                    onReorderEnd: (_) {
-                      _isDraggingCategories = false;
-                      _flushDeferredCatalogReload();
+                    onDraggingChanged: (dragging) {
+                      _isDraggingCategories = dragging;
+                      if (!dragging) _flushDeferredCatalogReload();
                     },
-                    onReorderItem: (oldIndex, newIndex) async {
-                      if (_isSavingCategoryOrder) return;
-                      final visible = List<Map<String, dynamic>>.from(
-                        _filteredCategorias,
-                      );
-                      final item = visible.removeAt(oldIndex);
-                      visible.insert(newIndex, item);
+                    onReordered: (visible) async {
                       await _saveCategoryOrder(
                         CategoryOrder.mergeVisible(_categorias, visible),
                       );
                     },
-                    itemBuilder: (context, index) {
-                      final categoria = _filteredCategorias[index];
+                    itemBuilder: (categoria, index) {
                       return Card(
                         key: ValueKey(categoria['id']),
                         margin: const EdgeInsets.only(bottom: 12),
@@ -1825,10 +1823,6 @@ class _AdminScreenState extends State<AdminScreen>
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              CategoryDragHandle(
-                                index: index,
-                                enabled: !_isSavingCategoryOrder,
-                              ),
                               PopupMenuButton(
                                 itemBuilder: (context) => [
                                   const PopupMenuItem(
@@ -2983,7 +2977,7 @@ class _AdminScreenState extends State<AdminScreen>
   }
 
   Future<void> _showReorderCategoriesDialog() async {
-    if (_isSavingCategoryOrder) return;
+    if (_isSavingCategoryOrder || _isDraggingCategories) return;
     await showDialog<void>(
       context: context,
       barrierDismissible: false,

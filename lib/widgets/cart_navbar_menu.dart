@@ -1,3 +1,4 @@
+import '../services/app_sound_service.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -457,6 +458,7 @@ class CartNavbarMenuState extends State<CartNavbarMenu>
   Future<void> _clearCartAfterConfirmation() async {
     _setClearConfirmationVisible(false);
     await _cartService.clearCart();
+    AppSoundService.cartCleared();
   }
 
   Widget _buildClearCartConfirmation() {

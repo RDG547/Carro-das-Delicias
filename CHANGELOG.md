@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.16 (2026112201) — 22/11/2026
+
+- Contato de suporte corrigido, com espaços no assunto e no texto e preenchimento de nome e email da conta.
+- Fotos ampliáveis ao tocar na imagem dos produtos no início, nos descontos e no resumo do pedido, com zoom e navegação pela galeria quando disponível.
+- Novos sons ao limpar o carrinho e concluir uma compra; pagamentos pendentes não emitem o som de conclusão.
+- Escolha da data de entrega com ações centralizadas e ícones de cancelar e confirmar.
+- Painel do rastreamento com barra arredondada, arraste para expandir ou recolher e indicativo inferior, preservando o endereço legível e o zoom escolhido.
+- Melhorias na estabilidade da ordem das categorias e na atualização do catálogo.
+
 ## 1.0.15 (2026112104) — 21/11/2026
 
 - Localização atual com rua, número, bairro e cidade legíveis no rastreamento.

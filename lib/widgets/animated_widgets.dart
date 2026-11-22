@@ -1,3 +1,4 @@
+import 'product_image_viewer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1155,45 +1156,51 @@ class _AnimatedProductCardState extends State<AnimatedProductCard>
                         child: Row(
                           children: [
                             // Imagem ou Ícone da categoria
-                            Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                color: Colors.orange[100],
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.orange[200]!),
-                              ),
-                              child: cardImages.isNotEmpty
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Image.network(
-                                        cardImages.first,
-                                        fit: BoxFit.cover,
-                                        cacheWidth: 240,
-                                        cacheHeight: 240,
-                                        filterQuality: FilterQuality.medium,
-                                        errorBuilder:
-                                            (
-                                              context,
-                                              error,
-                                              stackTrace,
-                                            ) => Center(
-                                              child: CategoryIconWidget(
-                                                icone: widget
-                                                    .produto['categoria_icone'],
-                                                size: 40,
+                            ProductPhotoTap(
+                              images: cardImages,
+                              child: Container(
+                                width: 80,
+                                height: 80,
+                                decoration: BoxDecoration(
+                                  color: Colors.orange[100],
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.orange[200]!,
+                                  ),
+                                ),
+                                child: cardImages.isNotEmpty
+                                    ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.network(
+                                          cardImages.first,
+                                          fit: BoxFit.cover,
+                                          cacheWidth: 240,
+                                          cacheHeight: 240,
+                                          filterQuality: FilterQuality.medium,
+                                          errorBuilder:
+                                              (
+                                                context,
+                                                error,
+                                                stackTrace,
+                                              ) => Center(
+                                                child: CategoryIconWidget(
+                                                  icone: widget
+                                                      .produto['categoria_icone'],
+                                                  size: 40,
+                                                ),
                                               ),
-                                            ),
+                                        ),
+                                      )
+                                    : Center(
+                                        child: CategoryIconWidget(
+                                          icone:
+                                              widget
+                                                  .produto['categoria_icone'] ??
+                                              '🍰',
+                                          size: 40,
+                                        ),
                                       ),
-                                    )
-                                  : Center(
-                                      child: CategoryIconWidget(
-                                        icone:
-                                            widget.produto['categoria_icone'] ??
-                                            '🍰',
-                                        size: 40,
-                                      ),
-                                    ),
+                              ),
                             ),
                             const SizedBox(width: 16),
 

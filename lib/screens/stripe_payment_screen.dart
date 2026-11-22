@@ -1,3 +1,4 @@
+import '../services/app_sound_service.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -214,6 +215,7 @@ class _StripePaymentScreenState extends State<StripePaymentScreen> {
     if (_isPaid) return;
 
     await OrderPaymentService.markOrderAsPaid(widget.pedidoId);
+    AppSoundService.purchaseCompleted(widget.pedidoId);
     setState(() {
       _isPaid = true;
     });

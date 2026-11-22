@@ -1,3 +1,4 @@
+import '../widgets/product_image_viewer.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -2211,60 +2212,63 @@ class _HomeScreenState extends State<HomeScreen>
                     // Imagem com badge
                     Stack(
                       children: [
-                        ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(16),
+                        ProductPhotoTap(
+                          images: imagens,
+                          child: ClipRRect(
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(16),
+                            ),
+                            child: hasImage
+                                ? Image.network(
+                                    imagens.first,
+                                    height: imageHeight,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                    cacheWidth: 520,
+                                    cacheHeight: 360,
+                                    filterQuality: FilterQuality.medium,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        height: imageHeight,
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                            colors: [
+                                              Colors.orange[100]!,
+                                              Colors.pink[100]!,
+                                            ],
+                                          ),
+                                        ),
+                                        child: Center(
+                                          child: CategoryIconWidget(
+                                            icone: produto['categoria_icone'],
+                                            size: 50,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  )
+                                : Container(
+                                    height: imageHeight,
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                        colors: [
+                                          Colors.orange[100]!,
+                                          Colors.pink[100]!,
+                                        ],
+                                      ),
+                                    ),
+                                    child: Center(
+                                      child: CategoryIconWidget(
+                                        icone: produto['categoria_icone'],
+                                        size: 50,
+                                      ),
+                                    ),
+                                  ),
                           ),
-                          child: hasImage
-                              ? Image.network(
-                                  imagens.first,
-                                  height: imageHeight,
-                                  width: double.infinity,
-                                  fit: BoxFit.cover,
-                                  cacheWidth: 520,
-                                  cacheHeight: 360,
-                                  filterQuality: FilterQuality.medium,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Container(
-                                      height: imageHeight,
-                                      decoration: BoxDecoration(
-                                        gradient: LinearGradient(
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                          colors: [
-                                            Colors.orange[100]!,
-                                            Colors.pink[100]!,
-                                          ],
-                                        ),
-                                      ),
-                                      child: Center(
-                                        child: CategoryIconWidget(
-                                          icone: produto['categoria_icone'],
-                                          size: 50,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                )
-                              : Container(
-                                  height: imageHeight,
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [
-                                        Colors.orange[100]!,
-                                        Colors.pink[100]!,
-                                      ],
-                                    ),
-                                  ),
-                                  child: Center(
-                                    child: CategoryIconWidget(
-                                      icone: produto['categoria_icone'],
-                                      size: 50,
-                                    ),
-                                  ),
-                                ),
                         ),
                         // Botão favorito
                         Positioned(

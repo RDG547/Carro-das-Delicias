@@ -1,3 +1,6 @@
+import '../widgets/delivery_date_actions.dart';
+import '../services/app_sound_service.dart';
+import '../widgets/product_image_viewer.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -1350,26 +1353,29 @@ class _CheckoutScreenState extends State<CheckoutScreen>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: SizedBox(
-              width: 44,
-              height: 44,
-              child: imageUrl != null
-                  ? Image.network(
-                      imageUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return _buildCheckoutItemPlaceholder(
-                          categoryName: categoryName,
-                          categoryIcon: categoryIcon,
-                        );
-                      },
-                    )
-                  : _buildCheckoutItemPlaceholder(
-                      categoryName: categoryName,
-                      categoryIcon: categoryIcon,
-                    ),
+          ProductPhotoTap(
+            images: imageUrl == null ? const [] : [imageUrl],
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 44,
+                height: 44,
+                child: imageUrl != null
+                    ? Image.network(
+                        imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return _buildCheckoutItemPlaceholder(
+                            categoryName: categoryName,
+                            categoryIcon: categoryIcon,
+                          );
+                        },
+                      )
+                    : _buildCheckoutItemPlaceholder(
+                        categoryName: categoryName,
+                        categoryIcon: categoryIcon,
+                      ),
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -2564,20 +2570,13 @@ class _CheckoutScreenState extends State<CheckoutScreen>
                   ],
                 ),
               ),
+              actionsAlignment: MainAxisAlignment.center,
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Cancelar'),
-                ),
-                ElevatedButton(
-                  onPressed: selectedDate == null
+                DeliveryDateActions(
+                  onCancel: () => Navigator.of(dialogContext).pop(),
+                  onConfirm: selectedDate == null
                       ? null
                       : () => Navigator.of(dialogContext).pop(selectedDate),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange[700],
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Confirmar'),
                 ),
               ],
             );
@@ -3374,6 +3373,7 @@ class _CheckoutScreenState extends State<CheckoutScreen>
   }
 
   void _showSuccessDialog(Map<String, dynamic> pedido, double totalPedido) {
+    AppSoundService.purchaseCompleted(pedido['id']);
     final dataEntregaStr = pedido['data_entrega'] != null
         ? _formatDate(DateTime.parse(pedido['data_entrega']))
         : _formatDate(_calcularDataMinimaEntrega());

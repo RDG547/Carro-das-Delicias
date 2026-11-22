@@ -1,3 +1,4 @@
+import '../widgets/tracking_info_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -615,335 +616,250 @@ class _KombiTrackingScreenState extends State<KombiTrackingScreen>
             top: sheetTop,
             left: 16, // Margem lateral esquerda
             right: 16, // Margem lateral direita
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onVerticalDragEnd: (details) {
-                if (details.primaryVelocity! < -200) {
-                  // Arrastar para cima rápido = retrair
-                  setState(() => _isSheetExpanded = false);
-                } else if (details.primaryVelocity! > 200) {
-                  // Arrastar para baixo rápido = expandir
-                  setState(() => _isSheetExpanded = true);
-                }
-              },
-              onTap: () {
-                setState(() => _isSheetExpanded = !_isSheetExpanded);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-                height: _isSheetExpanded ? sheetHeight : _sheetCollapsedHeight,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(
-                    24,
-                  ), // Arredonda todos os cantos
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 20,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
-                ),
-                child: SingleChildScrollView(
-                  physics: const ClampingScrollPhysics(),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Barra de arrasto com área de toque maior
-                      Container(
-                        height: 60,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 40,
-                                height: 4,
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[300],
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _isSheetExpanded
-                                    ? 'Arraste para cima'
-                                    : 'Arraste para baixo',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[500],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      // Conteúdo expansível
-                      if (_isSheetExpanded) ...[
-                        // Seletor de Kombis (quando há mais de uma online)
-                        if (_allKombis.where(_isKombiOnline).length > 1) ...[
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Selecione uma Kombi:',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.grey[700],
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: Row(
-                                    children: _allKombis
-                                        .where(_isKombiOnline)
-                                        .map((kombi) {
-                                          final adminId =
-                                              kombi['admin_id'] as String;
-                                          final isSelected =
-                                              adminId == _selectedAdminId;
-                                          final vendorName =
-                                              _vendorNames[adminId] ??
-                                              'Vendedor';
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                              right: 8,
-                                            ),
-                                            child: ChoiceChip(
-                                              label: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Container(
-                                                    width: 8,
-                                                    height: 8,
-                                                    decoration:
-                                                        const BoxDecoration(
-                                                          color: Colors.green,
-                                                          shape:
-                                                              BoxShape.circle,
-                                                        ),
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Text(vendorName),
-                                                ],
-                                              ),
-                                              selected: isSelected,
-                                              selectedColor: Colors.orange[100],
-                                              backgroundColor: Colors.grey[100],
-                                              labelStyle: TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: isSelected
-                                                    ? FontWeight.bold
-                                                    : FontWeight.normal,
-                                                color: isSelected
-                                                    ? Colors.orange[900]
-                                                    : Colors.grey[800],
-                                              ),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(20),
-                                                side: BorderSide(
-                                                  color: isSelected
-                                                      ? Colors.orange
-                                                      : Colors.grey[300]!,
-                                                ),
-                                              ),
-                                              onSelected: (_) =>
-                                                  _selectKombi(adminId),
-                                            ),
-                                          );
-                                        })
-                                        .toList(),
-                                  ),
-                                ),
-                              ],
+            child: TrackingInfoSheet(
+              expanded: _isSheetExpanded,
+              expandedHeight: sheetHeight,
+              onChanged: (expanded) =>
+                  setState(() => _isSheetExpanded = expanded),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Seletor de Kombis (quando há mais de uma online)
+                  if (_allKombis.where(_isKombiOnline).length > 1) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Selecione uma Kombi:',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
                             ),
                           ),
                           const SizedBox(height: 8),
-                        ],
-
-                        // Status badge centralizado
-                        Center(
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 8,
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _isOnline
-                                  ? Colors.green[50]
-                                  : Colors.grey[100],
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: _isOnline
-                                    ? Colors.green[300]!
-                                    : Colors.grey[300]!,
-                                width: 1.5,
-                              ),
-                            ),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
                             child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: _isOnline
-                                        ? Colors.green
-                                        : Colors.grey,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _isOnline
-                                      ? '${_vendorNames[_selectedAdminId] ?? 'KOMBI'} - ONLINE'
-                                      : 'KOMBI OFFLINE',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: _isOnline
-                                        ? Colors.green[800]
-                                        : Colors.grey[800],
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        // Informações principais (se online)
-                        if (_isOnline && _kombiLocation != null)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 12,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Endereço completo
-                                if (_currentAddress != null ||
-                                    _isLoadingAddress) ...[
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.blue[50],
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: Colors.blue[200]!,
-                                      ),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                              children: _allKombis.where(_isKombiOnline).map((
+                                kombi,
+                              ) {
+                                final adminId = kombi['admin_id'] as String;
+                                final isSelected = adminId == _selectedAdminId;
+                                final vendorName =
+                                    _vendorNames[adminId] ?? 'Vendedor';
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: ChoiceChip(
+                                    label: Row(
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              Icons.location_on,
-                                              size: 20,
-                                              color: Colors.blue[700],
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              'Localização Atual',
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.blue[900],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        if (_isLoadingAddress)
-                                          Row(
-                                            children: [
-                                              SizedBox(
-                                                width: 16,
-                                                height: 16,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                      color: Colors.blue[700],
-                                                    ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                'Obtendo endereço...',
-                                                style: TextStyle(
-                                                  fontSize: 13,
-                                                  color: Colors.grey[600],
-                                                  fontStyle: FontStyle.italic,
-                                                ),
-                                              ),
-                                            ],
-                                          )
-                                        else if (_currentAddress != null)
-                                          Text(
-                                            _currentAddress!,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: Colors.grey[800],
-                                              height: 1.4,
-                                            ),
+                                        Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: const BoxDecoration(
+                                            color: Colors.green,
+                                            shape: BoxShape.circle,
                                           ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(vendorName),
                                       ],
                                     ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
-                                // Última atualização
-                                if (_lastUpdate != null)
-                                  Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[50],
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: Colors.grey[200]!,
+                                    selected: isSelected,
+                                    selectedColor: Colors.orange[100],
+                                    backgroundColor: Colors.grey[100],
+                                    labelStyle: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: isSelected
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: isSelected
+                                          ? Colors.orange[900]
+                                          : Colors.grey[800],
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                      side: BorderSide(
+                                        color: isSelected
+                                            ? Colors.orange
+                                            : Colors.grey[300]!,
                                       ),
                                     ),
-                                    child: Row(
+                                    onSelected: (_) => _selectKombi(adminId),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+
+                  // Status badge centralizado
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 8,
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _isOnline ? Colors.green[50] : Colors.grey[100],
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _isOnline
+                              ? Colors.green[300]!
+                              : Colors.grey[300]!,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: _isOnline ? Colors.green : Colors.grey,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isOnline
+                                ? '${_vendorNames[_selectedAdminId] ?? 'KOMBI'} - ONLINE'
+                                : 'KOMBI OFFLINE',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: _isOnline
+                                  ? Colors.green[800]
+                                  : Colors.grey[800],
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Informações principais (se online)
+                  if (_isOnline && _kombiLocation != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Endereço completo
+                          if (_currentAddress != null || _isLoadingAddress) ...[
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.blue[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.blue[200]!),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.location_on,
+                                        size: 20,
+                                        color: Colors.blue[700],
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Localização Atual',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue[900],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  if (_isLoadingAddress)
+                                    Row(
                                       children: [
-                                        Icon(
-                                          Icons.access_time,
-                                          size: 20,
-                                          color: Colors.grey[600],
+                                        SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.blue[700],
+                                          ),
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
-                                          'Última atualização: ${_formatLastUpdate()}',
+                                          'Obtendo endereço...',
                                           style: TextStyle(
-                                            fontSize: 14,
-                                            color: Colors.grey[700],
-                                            fontWeight: FontWeight.w500,
+                                            fontSize: 13,
+                                            color: Colors.grey[600],
+                                            fontStyle: FontStyle.italic,
                                           ),
                                         ),
                                       ],
+                                    )
+                                  else if (_currentAddress != null)
+                                    Text(
+                                      _currentAddress!,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.grey[800],
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          // Última atualização
+                          if (_lastUpdate != null)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey[200]!),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.access_time,
+                                    size: 20,
+                                    color: Colors.grey[600],
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Última atualização: ${_formatLastUpdate()}',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey[700],
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
             ),
           ),

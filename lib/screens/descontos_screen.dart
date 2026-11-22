@@ -1,3 +1,4 @@
+import '../widgets/product_image_viewer.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -956,35 +957,38 @@ class _DescontosScreenState extends State<DescontosScreen>
 
     if (images.isEmpty) return categoryPlaceholder;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        width: size,
-        height: size,
-        color: Colors.grey[50],
-        child: Image.network(
-          images.first,
-          fit: BoxFit.contain,
-          cacheWidth: (size * 2).round(),
-          cacheHeight: (size * 2).round(),
-          filterQuality: FilterQuality.medium,
-          errorBuilder: (context, error, stackTrace) => categoryPlaceholder,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Center(
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded /
-                            loadingProgress.expectedTotalBytes!
-                      : null,
+    return ProductPhotoTap(
+      images: images,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          width: size,
+          height: size,
+          color: Colors.grey[50],
+          child: Image.network(
+            images.first,
+            fit: BoxFit.contain,
+            cacheWidth: (size * 2).round(),
+            cacheHeight: (size * 2).round(),
+            filterQuality: FilterQuality.medium,
+            errorBuilder: (context, error, stackTrace) => categoryPlaceholder,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    value: loadingProgress.expectedTotalBytes != null
+                        ? loadingProgress.cumulativeBytesLoaded /
+                              loadingProgress.expectedTotalBytes!
+                        : null,
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

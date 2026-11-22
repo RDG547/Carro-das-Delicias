@@ -1,0 +1,6 @@
+• Suporte com email corrigido e dados básicos da conta preenchidos.
+• Toque na foto para ampliar produtos no início, descontos e resumo do pedido.
+• Novos sons ao limpar o carrinho e concluir uma compra.
+• Escolha da entrega com botões e ícones mais claros.
+• Barra de rastreamento restaurada, mantendo o endereço correto.
+• Melhorias de estabilidade nas categorias e no catálogo.

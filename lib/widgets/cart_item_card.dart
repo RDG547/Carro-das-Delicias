@@ -1,3 +1,4 @@
+import 'product_image_viewer.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -40,7 +41,12 @@ class CartItemCard extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                _buildProductImage(),
+                ProductPhotoTap(
+                  images: item.imagemUrl?.trim().isNotEmpty == true
+                      ? [item.imagemUrl!]
+                      : const [],
+                  child: _buildProductImage(),
+                ),
                 const SizedBox(width: 16),
                 Expanded(child: _buildProductInfo()),
                 _buildQuantitySummary(),

@@ -1,3 +1,4 @@
+import '../services/app_sound_service.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -140,6 +141,7 @@ class _AbacatePayPaymentScreenState extends State<AbacatePayPaymentScreen> {
         if (status['status'] == 'PAID' || status['status'] == 'CONFIRMED') {
           timer.cancel();
           await OrderPaymentService.markOrderAsPaid(widget.pedidoId);
+          AppSoundService.purchaseCompleted(widget.pedidoId);
           setState(() {
             _isPaid = true;
           });

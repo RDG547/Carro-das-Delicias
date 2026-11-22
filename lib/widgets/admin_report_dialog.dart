@@ -1,3 +1,4 @@
+import 'report_export_actions.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -273,33 +274,9 @@ class _AdminReportDialogState extends State<AdminReportDialog> {
               if (_exporting) const LinearProgressIndicator(),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _exporting
-                          ? null
-                          : () => _export(AdminReportFormat.text),
-                      icon: const Icon(Icons.copy),
-                      label: const Text('Copiar texto'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: _exporting
-                          ? null
-                          : () => _export(AdminReportFormat.pdf),
-                      icon: const Icon(Icons.picture_as_pdf),
-                      label: const Text('PDF'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: _exporting
-                          ? null
-                          : () => _export(AdminReportFormat.docx),
-                      icon: const Icon(Icons.description_outlined),
-                      label: const Text('DOCX'),
-                    ),
-                  ],
+                child: ReportExportActions(
+                  enabled: !_exporting,
+                  onExport: _export,
                 ),
               ),
             ],

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../utils/support_email.dart';
 
 import '../widgets/base_screen.dart';
 import '../widgets/main_navigation_provider.dart';
@@ -14,19 +16,29 @@ class SupportLegalScreen extends StatefulWidget {
 }
 
 class _SupportLegalScreenState extends State<SupportLegalScreen> {
-  static const _supportEmail = 'contato@carrodasdelicias.com.br';
   _SupportLegalTab _selectedTab = _SupportLegalTab.support;
 
   Future<void> _openSupportEmail(BuildContext context) async {
-    final uri = Uri(
-      scheme: 'mailto',
-      path: _supportEmail,
-      queryParameters: {
-        'subject': 'Suporte - Carro das Delícias',
-        'body':
-            'Olá, preciso de ajuda com o app Carro das Delícias.\n\nNome:\nE-mail da conta:\nNúmero do pedido, se houver:\nMensagem:',
-      },
-    );
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    var name = (user?.userMetadata?['name'] ?? user?.userMetadata?['full_name'])
+        ?.toString();
+    if (user != null) {
+      try {
+        final profile = await client
+            .from('profiles')
+            .select('name')
+            .eq('id', user.id)
+            .maybeSingle()
+            .timeout(const Duration(seconds: 3));
+        if (profile?['name']?.toString().trim().isNotEmpty == true)
+          name = profile!['name'].toString();
+      } catch (_) {
+        // Account metadata remains available when the profile cannot be fetched.
+      }
+    }
+    if (!context.mounted) return;
+    final uri = SupportEmail.compose(name: name, email: user?.email);
 
     final opened = await launchUrl(uri);
     if (!opened && context.mounted) {
