@@ -55,4 +55,35 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+  testWidgets('cancelar um arraste libera a atualização sem salvar ordem', (
+    tester,
+  ) async {
+    var dragging = false;
+    var saves = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CategoryReorderList(
+            categories: [
+              for (var i = 1; i <= 3; i++) {'id': i, 'nome': 'Categoria $i'},
+            ],
+            onDraggingChanged: (value) => dragging = value,
+            onReordered: (_) => saves++,
+            itemBuilder: (c, i) =>
+                Card(child: ListTile(title: Text(c['nome'] as String))),
+          ),
+        ),
+      ),
+    );
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.text('Categoria 1')),
+    );
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(dragging, isTrue);
+    await gesture.cancel();
+    await tester.pumpAndSettle();
+    expect(dragging, isFalse);
+    expect(saves, 0);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

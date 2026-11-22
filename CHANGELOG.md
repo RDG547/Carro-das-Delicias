@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.16 (2026112201) — 22/11/2026
+## 1.0.16 (2026112202) — 22/11/2026
 
 - Contato de suporte corrigido, com espaços no assunto e no texto e preenchimento de nome e email da conta.
 - Fotos ampliáveis ao tocar na imagem dos produtos no início, nos descontos e no resumo do pedido, com zoom e navegação pela galeria quando disponível.

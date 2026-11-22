@@ -51,60 +51,66 @@ class _CategoryReorderListState extends State<CategoryReorderList> {
   }
 
   @override
-  Widget build(BuildContext context) => ReorderableListView.builder(
-    key: ValueKey(
-      Object.hashAll([
-        widget.revision,
-        ...widget.categories.map((c) => c['id']),
-      ]),
+  Widget build(BuildContext context) => Listener(
+    onPointerCancel: (_) {
+      if (_draggedId != null && !_savingDrop) _finished();
+    },
+    child: ReorderableListView.builder(
+      key: ValueKey(
+        Object.hashAll([
+          widget.revision,
+          ...widget.categories.map((c) => c['id']),
+        ]),
+      ),
+      scrollController: _scroll,
+      shrinkWrap: widget.shrinkWrap,
+      padding: widget.padding,
+      physics: const AlwaysScrollableScrollPhysics(),
+      buildDefaultDragHandles: false,
+      proxyDecorator: (child, index, animation) =>
+          RepaintBoundary(child: child),
+      itemCount: widget.categories.length,
+      onReorderStart: (index) {
+        _end?.cancel();
+        _draggedId = widget.categories[index]['id'];
+        widget.onDraggingChanged?.call(true);
+      },
+      onReorderEnd: (_) {
+        // onReorderEnd precedes the drop animation and onReorderItem. Don't let
+        // an incoming read replace the list between those two callbacks.
+        _end?.cancel();
+        _end = Timer(const Duration(milliseconds: 600), () {
+          if (mounted && !_savingDrop) _finished();
+        });
+      },
+      onReorderItem: (oldIndex, newIndex) async {
+        final id = _draggedId;
+        if (!widget.enabled || id == null || _savingDrop) return;
+        final ordered = List<Map<String, dynamic>>.from(widget.categories);
+        final source = ordered.indexWhere((c) => c['id'] == id);
+        if (source < 0 || newIndex < 0 || newIndex >= ordered.length) {
+          _finished();
+          return;
+        }
+        _savingDrop = true;
+        final moved = ordered.removeAt(source);
+        ordered.insert(newIndex, moved);
+        try {
+          await widget.onReordered(ordered);
+        } finally {
+          _savingDrop = false;
+          if (mounted) _finished();
+        }
+      },
+      itemBuilder: (context, index) {
+        final category = widget.categories[index];
+        return ReorderableDelayedDragStartListener(
+          key: ValueKey(category['id']),
+          index: index,
+          enabled: widget.enabled,
+          child: widget.itemBuilder(category, index),
+        );
+      },
     ),
-    scrollController: _scroll,
-    shrinkWrap: widget.shrinkWrap,
-    padding: widget.padding,
-    physics: const AlwaysScrollableScrollPhysics(),
-    buildDefaultDragHandles: false,
-    proxyDecorator: (child, index, animation) => RepaintBoundary(child: child),
-    itemCount: widget.categories.length,
-    onReorderStart: (index) {
-      _end?.cancel();
-      _draggedId = widget.categories[index]['id'];
-      widget.onDraggingChanged?.call(true);
-    },
-    onReorderEnd: (_) {
-      // onReorderEnd precedes the drop animation and onReorderItem. Don't let
-      // an incoming read replace the list between those two callbacks.
-      _end?.cancel();
-      _end = Timer(const Duration(milliseconds: 600), () {
-        if (mounted && !_savingDrop) _finished();
-      });
-    },
-    onReorderItem: (oldIndex, newIndex) async {
-      final id = _draggedId;
-      if (!widget.enabled || id == null || _savingDrop) return;
-      final ordered = List<Map<String, dynamic>>.from(widget.categories);
-      final source = ordered.indexWhere((c) => c['id'] == id);
-      if (source < 0 || newIndex < 0 || newIndex >= ordered.length) {
-        _finished();
-        return;
-      }
-      _savingDrop = true;
-      final moved = ordered.removeAt(source);
-      ordered.insert(newIndex, moved);
-      try {
-        await widget.onReordered(ordered);
-      } finally {
-        _savingDrop = false;
-        if (mounted) _finished();
-      }
-    },
-    itemBuilder: (context, index) {
-      final category = widget.categories[index];
-      return ReorderableDelayedDragStartListener(
-        key: ValueKey(category['id']),
-        index: index,
-        enabled: widget.enabled,
-        child: widget.itemBuilder(category, index),
-      );
-    },
   );
 }

@@ -1,10 +1,10 @@
 # Validação da versão 1.0.16
 
-Verificações em 22/11/2026. Pacote `com.rdtech.carrodasdelicias`, versão `1.0.16`, código `2026112201`. Flutter 3.50.1, Dart 3.14, AGP 9.3.1 e Gradle 9.5.0.
+Verificações em 22/11/2026. Pacote `com.rdtech.carrodasdelicias`, versão `1.0.16`, código `2026112202`. Flutter 3.50.1, Dart 3.14, AGP 9.3.1 e Gradle 9.5.0.
 
 ## Funcionalidade
 
-- 70 testes Flutter aprovados, incluindo os fluxos existentes e os casos desta entrega.
+- 71 testes Flutter aprovados, incluindo os fluxos existentes e os casos desta entrega.
 - 3 testes Node da página de compartilhamento e 3 testes Python do filtro de configuração de produção aprovados.
 - Quatro arquivos WAV conferidos quanto a formato, duração inferior a um segundo e amplitude sem saturação.
 - Análise Dart sem erros ou avisos; mensagens informativas de depreciação e estilo permanecem no projeto.
@@ -19,11 +19,13 @@ Os botões de limpar carrinho acionam o som somente após a confirmação do usu
 
 O visualizador de fotos é o mesmo componente usado nos detalhes dos produtos. Foram preservados a animação dos cards, os controles de compra e os favoritos. O painel de rastreamento preserva o estado da câmera e a interpretação corrigida dos dados de endereço.
 
+O cancelamento do arraste também é tratado explicitamente, liberando a atualização sem salvar uma nova ordem.
+
 Não houve alteração do esquema do banco. Os testes de interação e responsividade foram automatizados; não havia aparelho conectado para uma verificação física nesta entrega.
 
 ## Artefatos Android
 
-O pacote de entrega contém o AAB e o APK assinados, certificado público, mapeamento R8, símbolos nativos, notas, documentação e manifesto de integridade. Os registros da validação de assinatura, manifesto, biblioteca ELF, alinhamento e varredura de configuração ficam em `build/releases/1.0.16/`, fora do Git.
+O pacote de entrega contém o AAB e o APK assinados, certificado público, mapeamento R8, símbolos nativos, notas, documentação e manifesto de integridade. Os registros da validação de assinatura, manifesto, biblioteca ELF, alinhamento e varredura de configuração ficam em `build/releases/1.0.16-2026112202/`, fora do Git.
 
 - `bundletool validate` aprovado; manifesto com minSdk 24, targetSdk 36 e depuração desabilitada.
 - Assinaturas do AAB e APK conferidas com a chave de upload configurada.

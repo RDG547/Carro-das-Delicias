@@ -8,4 +8,4 @@ A versão adiciona sons curtos para limpar o carrinho e concluir uma compra. O s
 
 A escolha da data de entrega tem ações centralizadas com ícones. O rastreamento recupera a barra arredondada e o indicativo de recolher na parte inferior, preservando o endereço legível e os controles do mapa. A atualização das categorias recebe ajustes de estabilidade.
 
-Versão **1.0.16** · código **2026112201** · pacote **com.rdtech.carrodasdelicias**.
+Versão **1.0.16** · código **2026112202** · pacote **com.rdtech.carrodasdelicias**.
