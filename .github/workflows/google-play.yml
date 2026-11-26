@@ -1,0 +1,140 @@
+name: Carro das Delícias na Google Play
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'release_notes/**'
+      - 'releases/**'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Validar o AAB assinado ou enviar para revisão em produção'
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - publish
+
+permissions:
+  contents: read
+
+concurrency:
+  group: google-play-production
+  cancel-in-progress: false
+
+jobs:
+  android:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    environment: google-play
+    env:
+      RELEASE_MODE: ${{ inputs.mode || (vars.PLAY_AUTO_PUBLISH == 'true' && 'publish' || 'tests') }}
+      FLUTTER_VERSION: '3.50.1'
+      FLUTTER_COMMIT: ae9b586f34a8443573f82ef57c3bf914a908cbf7
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+
+    steps:
+      - name: Baixar o código e o histórico
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Preparar Java 21 e Flutter
+        shell: bash
+        run: |
+          printf 'JAVA_HOME=%s\n' "$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          printf '%s/bin\n' "$JAVA_HOME_21_X64" >> "$GITHUB_PATH"
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          test "$(git -C "$RUNNER_TEMP/flutter" rev-parse HEAD)" = "$FLUTTER_COMMIT"
+          printf '%s/flutter/bin\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Resolver dependências e rodar os testes
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze --no-pub --no-fatal-infos
+          flutter test --no-pub
+          node --test test/product_link_page_test.cjs
+          python3 -m unittest discover -s tool
+
+      - name: Calcular a próxima versão usando a Google Play
+        id: version
+        if: env.RELEASE_MODE != 'tests'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/play-python"
+          "$RUNNER_TEMP/play-python/bin/pip" install --disable-pip-version-check google-auth==2.40.3 requests==2.32.5
+          "$RUNNER_TEMP/play-python/bin/python" tool/play_store_release.py prepare --plan "$RUNNER_TEMP/play-release.json"
+          jq -r 'if .submitted then "submitted=true" else "name=\(.name)", "code=\(.code)" end' \
+            "$RUNNER_TEMP/play-release.json" >> "$GITHUB_OUTPUT"
+
+      - name: Instalar os componentes do Android SDK
+        if: env.RELEASE_MODE != 'tests' && steps.version.outputs.submitted != 'true'
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
+
+      - name: Gerar e verificar o AAB assinado
+        if: env.RELEASE_MODE != 'tests' && steps.version.outputs.submitted != 'true'
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          CM_KEYSTORE_PASSWORD: ${{ secrets.CM_KEYSTORE_PASSWORD }}
+          CM_KEY_ALIAS: ${{ secrets.CM_KEY_ALIAS }}
+          CM_KEY_PASSWORD: ${{ secrets.CM_KEY_PASSWORD }}
+          ANDROID_PUBLIC_CONFIG_JSON: ${{ secrets.ANDROID_PUBLIC_CONFIG_JSON }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        shell: bash
+        run: |
+          for name in ANDROID_UPLOAD_KEYSTORE_BASE64 CM_KEYSTORE_PASSWORD CM_KEY_ALIAS CM_KEY_PASSWORD ANDROID_PUBLIC_CONFIG_JSON; do
+            if [[ -z "${!name}" ]]; then
+              printf '::error::Configure %s no ambiente google-play do GitHub.\n' "$name"
+              exit 1
+            fi
+          done
+          umask 077
+          export CM_KEYSTORE_PATH="$RUNNER_TEMP/play-upload.jks"
+          config="$RUNNER_TEMP/android-public-config.json"
+          trap 'rm -f "$CM_KEYSTORE_PATH" "$config"' EXIT
+          printf '%s' "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$CM_KEYSTORE_PATH"
+          printf '%s' "$ANDROID_PUBLIC_CONFIG_JSON" > "$config"
+          unset ANDROID_UPLOAD_KEYSTORE_BASE64 ANDROID_PUBLIC_CONFIG_JSON
+          jq -e '.GOOGLE_WEB_CLIENT_ID | endswith(".apps.googleusercontent.com")' "$config" > /dev/null
+          python3 tool/build_android_release.py --no-pub --config "$config" \
+            --build-name "$VERSION_NAME" --build-number "$VERSION_CODE"
+          aab=build/app/outputs/bundle/release/app-release.aab
+          LC_ALL=C jarsigner -verify "$aab" > "$RUNNER_TEMP/aab-signature.txt"
+          grep -q '^jar verified\.$' "$RUNNER_TEMP/aab-signature.txt"
+
+      - name: Enviar para revisão na faixa de produção
+        if: env.RELEASE_MODE == 'publish' && steps.version.outputs.submitted != 'true'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          "$RUNNER_TEMP/play-python/bin/python" tool/play_store_release.py publish \
+            --plan "$RUNNER_TEMP/play-release.json" \
+            --bundle build/app/outputs/bundle/release/app-release.aab
+
+      - name: Registrar o resultado no GitHub Actions
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+          ALREADY_SUBMITTED: ${{ steps.version.outputs.submitted }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          if [[ "$RESULT" != success ]]; then
+            printf '❌ Falha ou cancelamento. Consulte a etapa correspondente nos logs.\n'
+          elif [[ "$ALREADY_SUBMITTED" == true ]]; then
+            printf '✅ Este commit já consta na faixa de produção.\n'
+          elif [[ "$RELEASE_MODE" == publish ]]; then
+            printf '✅ Versão %s (%s) enviada para revisão na Google Play.\n' "$VERSION_NAME" "$VERSION_CODE"
+          elif [[ "$RELEASE_MODE" == validate ]]; then
+            printf '✅ AAB assinado validado para a versão %s (%s).\n' "$VERSION_NAME" "$VERSION_CODE"
+          else
+            printf '✅ Testes concluídos. O envio automático está desativado.\n'
+          fi >> "$GITHUB_STEP_SUMMARY"

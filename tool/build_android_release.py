@@ -39,6 +39,9 @@ def main():
     parser.add_argument('--flutter', default=shutil.which('flutter'))
     parser.add_argument('--config', type=Path, default=ROOT / '.env.json')
     parser.add_argument('--with-apk', action='store_true', help='Também gera um APK arm64 para teste.')
+    parser.add_argument('--build-name', help='Define o versionName do Android.')
+    parser.add_argument('--build-number', type=int, help='Define o versionCode do Android.')
+    parser.add_argument('--no-pub', action='store_true', help='Reutiliza as dependências já resolvidas.')
     args = parser.parse_args()
     if not args.flutter:
         parser.error('Informe o executável Flutter com --flutter.')
@@ -50,10 +53,17 @@ def main():
         config = Path(directory) / 'public.json'
         config.write_text(json.dumps(values))
         common = ['--release', f'--dart-define-from-file={config}', '--no-pub']
-        subprocess.run([args.flutter, 'pub', 'get'], cwd=ROOT, check=True)
-        subprocess.run([args.flutter, 'build', 'appbundle', *common], cwd=ROOT, check=True)
+        if args.build_name is not None:
+            common.append(f'--build-name={args.build_name}')
+        if args.build_number is not None:
+            common.append(f'--build-number={args.build_number}')
+        if not args.no_pub:
+            subprocess.run([args.flutter, 'pub', 'get'], cwd=ROOT, check=True)
+        # Os recursos do Android usam os mesmos valores públicos compilados no Dart.
+        build_environment = {**os.environ, **values}
+        subprocess.run([args.flutter, 'build', 'appbundle', *common], cwd=ROOT, check=True, env=build_environment)
         if args.with_apk:
-            subprocess.run([args.flutter, 'build', 'apk', '--target-platform', 'android-arm64', *common], cwd=ROOT, check=True)
+            subprocess.run([args.flutter, 'build', 'apk', '--target-platform', 'android-arm64', *common], cwd=ROOT, check=True, env=build_environment)
 
 
 if __name__ == '__main__':
