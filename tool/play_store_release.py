@@ -169,13 +169,27 @@ def prepare(api, target):
     print(f'AAB planejado: {name} ({code}).')
 
 
+def requires_new_build(paths):
+    return any(not path.endswith('.md')
+               and not path.startswith(('docs/', 'release_notes/', 'releases/'))
+               for path in paths)
+
+
+def ensure_current_app(commit):
+    git('fetch', '--quiet', '--no-tags', 'origin', 'refs/heads/main')
+    if subprocess.run(['git', 'merge-base', '--is-ancestor', commit, 'FETCH_HEAD']).returncode:
+        raise ValueError('O commit do AAB saiu do histórico da main.')
+    changed = git('diff', '--name-only', '-z', commit, 'FETCH_HEAD').split('\0')
+    if requires_new_build(filter(None, changed)):
+        raise ValueError('A main já tem mudanças de aplicativo mais recentes. Use a execução mais nova.')
+
+
 def publish(api, plan_file, bundle):
     plan = json.loads(plan_file.read_text())
     commit = git('rev-parse', 'HEAD')
     if commit != plan['commit']:
         raise ValueError('O commit do AAB diverge do plano de publicação.')
-    if git('ls-remote', 'origin', 'refs/heads/main').split()[0] != commit:
-        raise ValueError('A main já avançou. A publicação deve usar o commit atual da branch.')
+    ensure_current_app(commit)
 
     edit = api.open_edit()
     committed = False

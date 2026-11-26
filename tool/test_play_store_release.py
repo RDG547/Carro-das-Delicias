@@ -1,6 +1,6 @@
 import unittest
 
-from play_store_release import next_code, release_content, submitted
+from play_store_release import next_code, release_content, requires_new_build, submitted
 
 
 class PlayStoreReleaseTest(unittest.TestCase):
@@ -35,6 +35,11 @@ class PlayStoreReleaseTest(unittest.TestCase):
             release_content((1, 0, 16), (1, 1, 2), ['fix: corrige o checkout'])[0],
             '1.1.3',
         )
+
+    def test_newer_documentation_does_not_supersede_a_build(self):
+        docs = ['README.md', 'docs/screenshot.png', 'releases/1.0.16/notes.txt']
+        self.assertFalse(requires_new_build(docs))
+        self.assertTrue(requires_new_build([*docs, 'lib/main.dart']))
 
     def test_same_commit_is_identified_after_submission(self):
         sha = 'c0523eea71ceac8d2fb83bac8c5aef5ea198e930'
